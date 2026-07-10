@@ -1,0 +1,715 @@
+package agent
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/security"
+	"github.com/252201/wukong-panel/internal/store"
+)
+
+type Manager struct {
+	cfg   config.Config
+	store *store.Store
+	vault *security.Vault
+}
+
+func (m *Manager) RunReconciler(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = m.ReconcileBindings(ctx)
+		}
+	}
+}
+
+func (m *Manager) ReconcileBindings(ctx context.Context) error {
+	if m.cfg.Demo {
+		return nil
+	}
+	v4s, v6s := globalAddresses()
+	nodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	updatedConfigs := map[string]bool{}
+	for _, node := range nodes {
+		if !node.AutoBind || node.Ownership == "unmanaged" {
+			continue
+		}
+		newV4, newV6 := node.IPv4Bind, node.IPv6Bind
+		if node.IPv4Bind != "" && !contains(v4s, node.IPv4Bind) && len(v4s) == 1 {
+			newV4 = v4s[0]
+		}
+		if node.IPv6Bind != "" && !contains(v6s, node.IPv6Bind) && len(v6s) == 1 {
+			newV6 = v6s[0]
+		}
+		if newV4 == node.IPv4Bind && newV6 == node.IPv6Bind {
+			continue
+		}
+		if !updatedConfigs[node.ConfigPath] {
+			if err := m.rewriteBindings(ctx, node, newV4, newV6); err != nil {
+				_ = m.store.Audit("agent", "reconcile_failed", node.ID, err.Error())
+				continue
+			}
+			updatedConfigs[node.ConfigPath] = true
+		}
+		_ = m.store.UpdateNodeBinds(node.ID, newV4, newV6)
+		_ = m.store.Audit("agent", "reconcile_bindings", node.ID, fmt.Sprintf("ipv4=%s ipv6=%s", newV4, newV6))
+	}
+	return nil
+}
+
+func (m *Manager) rewriteBindings(ctx context.Context, node model.Node, newV4, newV6 string) error {
+	if err := m.validateManagedNode(node); err != nil {
+		return err
+	}
+	if err := m.backup(node); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(node.ConfigPath)
+	if err != nil {
+		return err
+	}
+	text := string(data)
+	if node.IPv4Bind != "" && newV4 != "" {
+		text = strings.ReplaceAll(text, `"`+node.IPv4Bind+`"`, `"`+newV4+`"`)
+	}
+	if node.IPv6Bind != "" && newV6 != "" {
+		text = strings.ReplaceAll(text, `"`+node.IPv6Bind+`"`, `"`+newV6+`"`)
+	}
+	tmp := node.ConfigPath + ".reconcile.tmp"
+	if err = os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+		return err
+	}
+	if err = os.Rename(tmp, node.ConfigPath); err != nil {
+		return err
+	}
+	return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
+}
+
+func NewManager(cfg config.Config, s *store.Store, vault *security.Vault) *Manager {
+	return &Manager{cfg: cfg, store: s, vault: vault}
+}
+
+func (m *Manager) Version(ctx context.Context) string {
+	if m.cfg.Demo {
+		return "1.14.0-demo"
+	}
+	out, err := exec.CommandContext(ctx, m.cfg.SingBoxBin, "version").Output()
+	if err != nil {
+		return "not-installed"
+	}
+	re := regexp.MustCompile(`(?m)sing-box version ([^\s]+)`)
+	match := re.FindStringSubmatch(string(out))
+	if len(match) > 1 {
+		return match[1]
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
+	files, err := filepath.Glob(filepath.Join(m.cfg.ConfigDir, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	version := m.Version(ctx)
+	result := []model.NodeCandidate{}
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var root map[string]any
+		if json.Unmarshal(data, &root) != nil {
+			continue
+		}
+		inbounds, _ := root["inbounds"].([]any)
+		mode, v4, v6 := detectMode(root)
+		service, manager := m.findService(path)
+		for index, item := range inbounds {
+			inbound, _ := item.(map[string]any)
+			if stringValue(inbound["type"]) != "hysteria2" {
+				continue
+			}
+			port := int(numberValue(inbound["listen_port"]))
+			if port < 1 {
+				continue
+			}
+			name := stringValue(inbound["tag"])
+			if name == "" {
+				name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+			}
+			secret := ""
+			if users, ok := inbound["users"].([]any); ok && len(users) > 0 {
+				if user, ok := users[0].(map[string]any); ok {
+					secret = stringValue(user["password"])
+				}
+			}
+			domain := ""
+			if tls, ok := inbound["tls"].(map[string]any); ok {
+				cert := stringValue(tls["certificate_path"])
+				base := filepath.Base(cert)
+				domain = strings.TrimSuffix(strings.TrimSuffix(base, "-fullchain.cer"), ".cer")
+			}
+			fingerprint := fingerprint(path, port, name)
+			shared := ""
+			if len(inbounds) > 1 {
+				shared = path
+			}
+			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: displayName(name, index), Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ListenPort < result[j].ListenPort })
+	return result, nil
+}
+
+func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error) {
+	candidates, err := m.Scan(ctx)
+	if err != nil {
+		return 0, err
+	}
+	wanted := map[string]bool{}
+	for _, id := range fingerprints {
+		wanted[id] = true
+	}
+	count := 0
+	for _, candidate := range candidates {
+		if !wanted[candidate.Fingerprint] {
+			continue
+		}
+		cipher, err := m.vault.Encrypt(candidate.Secret)
+		if err != nil {
+			return count, err
+		}
+		status := m.serviceStatus(ctx, candidate.ServiceManager, candidate.ServiceName)
+		node := model.Node{ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol, Mode: candidate.Mode, ListenPort: candidate.ListenPort, Server: candidate.Domain, Domain: candidate.Domain, IPv4Bind: candidate.IPv4Bind, IPv6Bind: candidate.IPv6Bind, AutoBind: true, ServiceName: candidate.ServiceName, ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath, ConfigVersion: candidate.ConfigVersion, Ownership: "imported", SharedGroup: candidate.SharedGroup, Status: status}
+		if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
+			return count, err
+		}
+		count++
+	}
+	_ = m.store.Audit("admin", "import_nodes", "sing-box", fmt.Sprintf("imported=%d", count))
+	return count, nil
+}
+
+func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	if err := validateCreate(request); err != nil {
+		return model.Node{}, err
+	}
+	port := request.ListenPort
+	if port == 0 {
+		var err error
+		port, err = freeUDPPort()
+		if err != nil {
+			return model.Node{}, err
+		}
+	}
+	id, err := security.RandomToken(8)
+	if err != nil {
+		return model.Node{}, err
+	}
+	id = strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(id))
+	secret := request.Password
+	if secret == "" {
+		secret, err = security.RandomToken(24)
+		if err != nil {
+			return model.Node{}, err
+		}
+	}
+	service := "sing-box-wukong-" + id
+	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".json")
+	manager := detectServiceManager()
+	certPath, keyPath := request.CertificatePath, request.KeyPath
+	if certPath == "" || keyPath == "" {
+		certPath = filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".cer")
+		keyPath = filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".key")
+	}
+	if !m.cfg.Demo {
+		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
+			return model.Node{}, err
+		}
+		if _, err := os.Stat(certPath); errors.Is(err, os.ErrNotExist) {
+			sni := request.Domain
+			if sni == "" {
+				sni = "www.bing.com"
+			}
+			if err := generateSelfSigned(ctx, keyPath, certPath, sni); err != nil {
+				return model.Node{}, err
+			}
+		}
+		version := m.Version(ctx)
+		payload, err := buildConfig(request, port, secret, certPath, keyPath, version)
+		if err != nil {
+			return model.Node{}, err
+		}
+		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
+			return model.Node{}, err
+		}
+	}
+	cipher, err := m.vault.Encrypt(secret)
+	if err != nil {
+		return model.Node{}, err
+	}
+	version := m.Version(ctx)
+	if m.cfg.Demo {
+		version = "1.14-demo"
+	}
+	node := model.Node{ID: id, Name: request.Name, Protocol: "hysteria2", Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
+	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
+		return model.Node{}, err
+	}
+	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
+	return node, nil
+}
+
+func (m *Manager) Action(ctx context.Context, id, action, confirmName string) error {
+	node, err := m.store.Node(ctx, id, true)
+	if err != nil {
+		return err
+	}
+	if !m.cfg.Demo {
+		if err = m.validateManagedNode(node); err != nil {
+			return err
+		}
+	}
+	allowed := map[string]bool{"start": true, "stop": true, "restart": true, "check": true, "delete": true}
+	if !allowed[action] {
+		return errors.New("unsupported node action")
+	}
+	if action == "delete" && confirmName != node.Name {
+		return errors.New("confirmation name does not match")
+	}
+	if m.cfg.Demo {
+		if action == "delete" {
+			return m.store.DeleteNode(id)
+		}
+		status := "active"
+		if action == "stop" {
+			status = "inactive"
+		}
+		return m.store.SetNodeStatus(id, status)
+	}
+	if action == "check" {
+		return command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath)
+	}
+	if action == "delete" {
+		if err = m.backup(node); err != nil {
+			return err
+		}
+		if err = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName); err != nil {
+			return err
+		}
+		_ = m.disableService(ctx, node)
+		if node.SharedGroup == "" {
+			_ = os.Remove(node.ConfigPath)
+			_ = m.removeService(node)
+		}
+		err = m.store.DeleteNode(id)
+	} else {
+		err = m.serviceCommand(ctx, node.ServiceManager, action, node.ServiceName)
+		if err == nil {
+			status := "active"
+			if action == "stop" {
+				status = "inactive"
+			}
+			_ = m.store.SetNodeStatus(id, status)
+		}
+	}
+	if err == nil {
+		_ = m.store.Audit("admin", "node_"+action, node.ID, node.Name)
+	}
+	return err
+}
+
+func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
+	node, err := m.store.Node(ctx, id, true)
+	if err != nil {
+		return model.Share{}, err
+	}
+	secret, err := m.vault.Decrypt(node.Secret)
+	if err != nil {
+		return model.Share{}, err
+	}
+	server := node.Server
+	if server == "" {
+		server = node.Domain
+	}
+	if server == "" {
+		server = "127.0.0.1"
+	}
+	sni := node.Domain
+	if sni == "" {
+		sni = "www.bing.com"
+	}
+	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?sni=%s#%s", urlEncode(secret), hostForURI(server), node.ListenPort, urlEncode(sni), urlEncode(node.Name))
+	return model.Share{URI: uri, ExpiresAt: time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339)}, nil
+}
+
+func (m *Manager) RefreshStatuses(ctx context.Context) {
+	nodes, _ := m.store.Nodes(ctx)
+	for _, node := range nodes {
+		_ = m.store.SetNodeStatus(node.ID, m.serviceStatus(ctx, node.ServiceManager, node.ServiceName))
+	}
+}
+
+func (m *Manager) installConfig(ctx context.Context, path, service, manager string, payload []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err := command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+		return fmt.Errorf("sing-box check failed: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if manager == "systemd" {
+		unit := fmt.Sprintf("[Unit]\nDescription=Wukong managed sing-box node %s\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=root\nExecStart=%s run -c %s\nRestart=on-failure\nRestartSec=5s\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n", service, m.cfg.SingBoxBin, path)
+		unitPath := filepath.Join("/etc/systemd/system", service+".service")
+		if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+			return err
+		}
+		if err := command(ctx, "systemctl", "daemon-reload"); err != nil {
+			return err
+		}
+		return command(ctx, "systemctl", "enable", "--now", service+".service")
+	}
+	script := fmt.Sprintf("#!/sbin/openrc-run\nname=\"%s\"\ncommand=\"%s\"\ncommand_args=\"run -c %s\"\ncommand_background=true\npidfile=\"/run/%s.pid\"\noutput_log=\"/var/log/%s.log\"\nerror_log=\"/var/log/%s.log\"\ndepend(){ need net; after firewall; }\n", service, m.cfg.SingBoxBin, path, service, service, service)
+	initPath := filepath.Join("/etc/init.d", service)
+	if err := os.WriteFile(initPath, []byte(script), 0o755); err != nil {
+		return err
+	}
+	if err := command(ctx, "rc-update", "add", service, "default"); err != nil {
+		return err
+	}
+	return command(ctx, "rc-service", service, "start")
+}
+
+func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, keyPath, version string) ([]byte, error) {
+	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
+	modern := majorMinor(version) >= 114
+	outbounds := []any{}
+	rules := []any{}
+	direct := func(tag, strategy string) map[string]any {
+		o := map[string]any{"type": "direct", "tag": tag}
+		if request.IPv4Bind != "" {
+			o["inet4_bind_address"] = request.IPv4Bind
+		}
+		if request.IPv6Bind != "" {
+			o["inet6_bind_address"] = request.IPv6Bind
+		}
+		if modern {
+			o["domain_resolver"] = map[string]any{"server": "local", "strategy": strategy}
+		} else {
+			o["domain_strategy"] = strategy
+		}
+		return o
+	}
+	final := "out-direct"
+	strategy := "prefer_ipv6"
+	if request.Mode == "v4only" {
+		strategy = "ipv4_only"
+	}
+	if request.Mode == "v6only" {
+		strategy = "ipv6_only"
+	}
+	outbounds = append(outbounds, direct(final, strategy))
+	if request.Mode == "prefer_v6" && len(request.V6OnlyDomains) > 0 {
+		outbounds = append(outbounds, direct("out-v6only", "ipv6_only"))
+		rule := map[string]any{"domain_suffix": request.V6OnlyDomains, "outbound": "out-v6only"}
+		if modern {
+			rule["action"] = "route"
+		}
+		rules = append(rules, rule)
+	}
+	root := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": []any{inbound}, "outbounds": outbounds, "route": map[string]any{"rules": rules, "final": final}}
+	if modern {
+		root["dns"] = map[string]any{"servers": []any{map[string]any{"type": "local", "tag": "local"}}}
+		root["route"].(map[string]any)["rules"] = append([]any{map[string]any{"action": "sniff"}}, rules...)
+	}
+	return json.MarshalIndent(root, "", "  ")
+}
+
+func detectMode(root map[string]any) (mode, v4, v6 string) {
+	mode = "v4only"
+	outbounds, _ := root["outbounds"].([]any)
+	for _, item := range outbounds {
+		o, _ := item.(map[string]any)
+		if v := stringValue(o["inet4_bind_address"]); v != "" {
+			v4 = v
+		}
+		if v := stringValue(o["inet6_bind_address"]); v != "" {
+			v6 = v
+		}
+		strategy := stringValue(o["domain_strategy"])
+		if resolver, ok := o["domain_resolver"].(map[string]any); ok {
+			strategy = stringValue(resolver["strategy"])
+		}
+		if strategy == "prefer_ipv6" {
+			mode = "prefer_v6"
+		} else if strategy == "ipv6_only" && v4 == "" {
+			mode = "v6only"
+		}
+	}
+	if v4 != "" && v6 != "" {
+		mode = "prefer_v6"
+	} else if v6 != "" && v4 == "" {
+		mode = "v6only"
+	}
+	return
+}
+func (m *Manager) findService(configPath string) (string, string) {
+	if units, _ := filepath.Glob("/etc/systemd/system/sing-box*.service"); len(units) > 0 {
+		for _, unit := range units {
+			if data, err := os.ReadFile(unit); err == nil && strings.Contains(string(data), configPath) {
+				return strings.TrimSuffix(filepath.Base(unit), ".service"), "systemd"
+			}
+		}
+	}
+	if scripts, _ := filepath.Glob("/etc/init.d/sing-box*"); len(scripts) > 0 {
+		for _, script := range scripts {
+			if data, err := os.ReadFile(script); err == nil && strings.Contains(string(data), configPath) {
+				return filepath.Base(script), "openrc"
+			}
+		}
+	}
+	return "unknown", "unknown"
+}
+func detectServiceManager() string {
+	if _, err := os.Stat("/run/systemd/system"); err == nil {
+		return "systemd"
+	}
+	if _, err := os.Stat("/sbin/openrc-run"); err == nil {
+		return "openrc"
+	}
+	return "systemd"
+}
+func (m *Manager) serviceStatus(ctx context.Context, manager, name string) string {
+	if m.cfg.Demo {
+		return "active"
+	}
+	if name == "" || name == "unknown" {
+		return "unknown"
+	}
+	if manager == "openrc" {
+		if command(ctx, "rc-service", name, "status") == nil {
+			return "active"
+		}
+		return "inactive"
+	}
+	if command(ctx, "systemctl", "is-active", "--quiet", name+".service") == nil {
+		return "active"
+	}
+	return "inactive"
+}
+func (m *Manager) serviceCommand(ctx context.Context, manager, action, name string) error {
+	if manager == "openrc" {
+		return command(ctx, "rc-service", name, action)
+	}
+	return command(ctx, "systemctl", action, name+".service")
+}
+func (m *Manager) disableService(ctx context.Context, node model.Node) error {
+	if node.ServiceManager == "openrc" {
+		return command(ctx, "rc-update", "del", node.ServiceName, "default")
+	}
+	return command(ctx, "systemctl", "disable", node.ServiceName+".service")
+}
+func (m *Manager) removeService(node model.Node) error {
+	if node.ServiceManager == "openrc" {
+		return os.Remove(filepath.Join("/etc/init.d", node.ServiceName))
+	}
+	err := os.Remove(filepath.Join("/etc/systemd/system", node.ServiceName+".service"))
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	return err
+}
+func (m *Manager) backup(node model.Node) error {
+	dir := filepath.Join(m.cfg.DataDir, "backups", time.Now().Format("20060102-150405")+"-"+node.ID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(node.ConfigPath)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	if err = os.WriteFile(filepath.Join(dir, filepath.Base(node.ConfigPath)), data, 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "SHA256SUMS"), []byte(hex.EncodeToString(sum[:])+"  "+filepath.Base(node.ConfigPath)+"\n"), 0o600)
+}
+
+func validateCreate(r model.NodeCreateRequest) error {
+	if strings.TrimSpace(r.Name) == "" || len(r.Name) > 80 {
+		return errors.New("node name is required and must be at most 80 characters")
+	}
+	if r.Mode != "prefer_v6" && r.Mode != "v4only" && r.Mode != "v6only" {
+		return errors.New("invalid outbound mode")
+	}
+	if r.ListenPort < 0 || r.ListenPort > 65535 {
+		return errors.New("invalid UDP port")
+	}
+	if r.IPv4Bind != "" && net.ParseIP(r.IPv4Bind) == nil {
+		return errors.New("invalid IPv4 bind address")
+	}
+	if r.IPv6Bind != "" && net.ParseIP(r.IPv6Bind) == nil {
+		return errors.New("invalid IPv6 bind address")
+	}
+	if r.Mode == "v6only" && r.IPv6Bind == "" {
+		return errors.New("IPv6-only mode requires an IPv6 bind address")
+	}
+	return nil
+}
+func generateSelfSigned(ctx context.Context, key, cert, domain string) error {
+	if err := command(ctx, "openssl", "ecparam", "-genkey", "-name", "prime256v1", "-out", key); err != nil {
+		return err
+	}
+	return command(ctx, "openssl", "req", "-new", "-x509", "-days", "3650", "-key", key, "-out", cert, "-subj", "/CN="+domain)
+}
+func command(ctx context.Context, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+func freeUDPPort() (int, error) {
+	listener, err := net.ListenPacket("udp", ":0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	return listener.LocalAddr().(*net.UDPAddr).Port, nil
+}
+func fingerprint(path string, port int, name string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%s", path, port, name)))
+	return hex.EncodeToString(sum[:8])
+}
+func displayName(tag string, index int) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return fmt.Sprintf("HY2 节点 %d", index+1)
+	}
+	tag = strings.TrimPrefix(tag, "hy2-")
+	tag = strings.TrimSuffix(tag, "-in")
+	return tag
+}
+func stringValue(v any) string {
+	if value, ok := v.(string); ok {
+		return value
+	}
+	return ""
+}
+func numberValue(v any) float64 {
+	switch value := v.(type) {
+	case float64:
+		return value
+	case json.Number:
+		n, _ := value.Float64()
+		return n
+	case string:
+		n, _ := strconv.ParseFloat(value, 64)
+		return n
+	}
+	return 0
+}
+func majorMinor(version string) int {
+	re := regexp.MustCompile(`(\d+)\.(\d+)`)
+	m := re.FindStringSubmatch(version)
+	if len(m) < 3 {
+		return 110
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	return major*100 + minor
+}
+func hostForURI(host string) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return "[" + host + "]"
+	}
+	return host
+}
+func urlEncode(value string) string {
+	return strings.NewReplacer("%", "%25", " ", "%20", "#", "%23", "@", "%40", ":", "%3A", "/", "%2F").Replace(value)
+}
+
+func globalAddresses() (v4s, v6s []string) {
+	interfaces, _ := net.Interfaces()
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, address := range addresses {
+			ipText := strings.Split(address.String(), "/")[0]
+			ip := net.ParseIP(ipText)
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if ip.To4() != nil {
+				v4s = append(v4s, ip.String())
+			} else if ip.IsGlobalUnicast() {
+				v6s = append(v6s, ip.String())
+			}
+		}
+	}
+	sort.Strings(v4s)
+	sort.Strings(v6s)
+	return unique(v4s), unique(v6s)
+}
+
+func unique(values []string) []string {
+	result := values[:0]
+	for _, value := range values {
+		if len(result) == 0 || result[len(result)-1] != value {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+func contains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) validateManagedNode(node model.Node) error {
+	clean := filepath.Clean(node.ConfigPath)
+	root := filepath.Clean(m.cfg.ConfigDir) + string(os.PathSeparator)
+	if !strings.HasPrefix(clean, root) {
+		return errors.New("node config path is outside the managed directory")
+	}
+	matched, _ := regexp.MatchString(`^[A-Za-z0-9_.@-]+$`, node.ServiceName)
+	if !matched {
+		return errors.New("invalid managed service name")
+	}
+	return nil
+}
