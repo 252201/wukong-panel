@@ -3,7 +3,9 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 )
 
@@ -59,5 +61,31 @@ func TestDemoSeedIsIdempotent(t *testing.T) {
 	}
 	if len(nodes) != 3 {
 		t.Fatalf("expected 3 demo nodes, got %d", len(nodes))
+	}
+}
+
+func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "mac-mini", Name: "Mac mini", Protocol: "hysteria2", Mode: "prefer_v6", ListenPort: 45116, ServiceName: "sing-box-devices", ServiceManager: "systemd", ConfigPath: "/etc/s-box/devices.json", ConfigVersion: "1.10", Ownership: "imported", Status: "active"}
+	if err := s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if err := s.AddEndpointSample(now, node.ID, node.Name, "192.0.2.1:443", 3_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddEndpointSample(now, node.ID, node.Name, "192.0.2.2:443", 6_000); err != nil {
+		t.Fatal(err)
+	}
+	devices, err := s.ActiveDevices(30*time.Second, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 1 || devices[0].NodeName != node.Name || devices[0].Bytes != 9_000 || devices[0].RateBPS != 300 {
+		t.Fatalf("unexpected device aggregation: %#v", devices)
 	}
 }

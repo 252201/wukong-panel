@@ -93,3 +93,46 @@ func TestAuthCookieAndCSRF(t *testing.T) {
 		t.Fatalf("valid CSRF status = %d", allowed.Code)
 	}
 }
+
+func TestBuildTrafficTimeline(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 10, 12, 30, 0, 0, location)
+	start := time.Date(2026, 7, 10, 0, 0, 0, 0, location)
+	metrics := []model.Metric{
+		{Timestamp: start.Add(-10 * time.Second).Unix(), Interface: "eth0", RXBytes: 1_000, TXBytes: 2_000},
+		{Timestamp: start.Add(10 * time.Second).Unix(), Interface: "eth0", RXBytes: 4_000, TXBytes: 6_000},
+		{Timestamp: start.Add(12*time.Hour + 10*time.Second).Unix(), Interface: "eth0", RXBytes: 9_000, TXBytes: 12_000},
+	}
+	for _, metric := range metrics {
+		if err := database.AddMetric(metric); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.AddDailyTraffic("2026-07-05", 100, 200, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AddDailyTraffic("2026-07-10", 300, 400, "test"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := buildTrafficTimeline(database, now, model.Settings{Timezone: "Asia/Shanghai", BillingResetDay: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Today) != 24 || result.Today[0].RXBytes != 3_000 || result.Today[0].TXBytes != 4_000 {
+		t.Fatalf("unexpected today buckets: %#v", result.Today[:1])
+	}
+	if result.Today[12].RXBytes != 5_000 || result.Today[12].TXBytes != 6_000 || result.TodayRX != 8_000 || result.TodayTX != 10_000 {
+		t.Fatalf("unexpected today totals: rx=%d tx=%d bucket=%#v", result.TodayRX, result.TodayTX, result.Today[12])
+	}
+	if len(result.Billing) != 31 || result.BillingStart != "2026-07-05" || result.BillingEnd != "2026-08-04" || result.BillingRX != 400 || result.BillingTX != 600 {
+		t.Fatalf("unexpected billing timeline: %#v", result)
+	}
+}
