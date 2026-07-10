@@ -298,6 +298,23 @@ func (s *Store) Metrics(limit int) ([]model.Metric, error) {
 	return items, rows.Err()
 }
 
+func (s *Store) MetricsBetween(start, end int64) ([]model.Metric, error) {
+	rows, err := s.DB.Query(`SELECT ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,disk,load1,uptime FROM metrics WHERE ts>=? AND ts<=? ORDER BY ts`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []model.Metric{}
+	for rows.Next() {
+		var m model.Metric
+		if err := rows.Scan(&m.Timestamp, &m.Interface, &m.RXBytes, &m.TXBytes, &m.RXBPS, &m.TXBPS, &m.CPU, &m.Memory, &m.Disk, &m.Load1, &m.Uptime); err != nil {
+			return nil, err
+		}
+		items = append(items, m)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) TrafficState() (iface string, lastRX, lastTX, accRX, accTX int64, err error) {
 	err = s.DB.QueryRow("SELECT iface,last_rx,last_tx,accumulated_rx,accumulated_tx FROM traffic_state WHERE id=1").Scan(&iface, &lastRX, &lastTX, &accRX, &accTX)
 	return
@@ -318,6 +335,23 @@ func (s *Store) TrafficBetween(start, end string) (int64, int64, error) {
 	var rx, tx int64
 	err := s.DB.QueryRow("SELECT COALESCE(SUM(rx_bytes),0),COALESCE(SUM(tx_bytes),0) FROM traffic_daily WHERE day>=? AND day<=?", start, end).Scan(&rx, &tx)
 	return rx, tx, err
+}
+
+func (s *Store) TrafficBuckets(start, end string) ([]model.TrafficBucket, error) {
+	rows, err := s.DB.Query(`SELECT day,rx_bytes,tx_bytes FROM traffic_daily WHERE day>=? AND day<=? ORDER BY day`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []model.TrafficBucket{}
+	for rows.Next() {
+		var item model.TrafficBucket
+		if err := rows.Scan(&item.Label, &item.RXBytes, &item.TXBytes); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (s *Store) AddEndpointSample(ts int64, nodeID, nodeName, endpoint string, bytes int64) error {
@@ -358,6 +392,31 @@ func (s *Store) TopEndpoints(limit int) ([]model.EndpointStat, error) {
 		if err := rows.Scan(&item.NodeID, &item.NodeName, &item.Endpoint, &item.Bytes); err != nil {
 			return nil, err
 		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ActiveDevices(window time.Duration, limit int) ([]model.DeviceTraffic, error) {
+	if window < 10*time.Second {
+		window = 30 * time.Second
+	}
+	if limit < 1 || limit > 50 {
+		limit = 12
+	}
+	cutoff := time.Now().Add(-window).Unix()
+	rows, err := s.DB.Query(`SELECT e.node_id,COALESCE(n.name,e.node_id),SUM(e.bytes) FROM endpoint_samples e LEFT JOIN nodes n ON n.id=e.node_id WHERE e.ts>=? GROUP BY e.node_id ORDER BY SUM(e.bytes) DESC LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []model.DeviceTraffic{}
+	for rows.Next() {
+		var item model.DeviceTraffic
+		if err := rows.Scan(&item.NodeID, &item.NodeName, &item.Bytes); err != nil {
+			return nil, err
+		}
+		item.RateBPS = float64(item.Bytes) / window.Seconds()
 		result = append(result, item)
 	}
 	return result, rows.Err()

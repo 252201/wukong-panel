@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeItem, type Overview, type Settings } from './api'
+import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeItem, type Overview, type Settings, type TrafficBucket, type TrafficTimeline } from './api'
 
 type Page = 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 
@@ -18,6 +18,10 @@ const nodes = ref<NodeItem[]>([])
 const jobs = ref<Job[]>([])
 const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, collectEndpoints: true })
 const endpoints = ref<EndpointStat[]>([])
+const timeline = ref<TrafficTimeline | null>(null)
+const timelineRange = ref<'today' | 'billing'>('today')
+const activeTimelineBucket = ref(0)
+const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
 const language = ref<'zh-CN' | 'en-US'>('zh-CN')
@@ -50,14 +54,28 @@ const trafficPercent = computed(() => {
   return Math.min(100, data.trafficUsed / data.trafficQuota * 100)
 })
 const quotaRing = computed(() => ({ '--progress': `${trafficPercent.value * 3.6}deg` }))
-const chartPath = computed(() => {
+function makeChartPath(field: 'rxBps' | 'txBps') {
   const rows = overview.value?.history || []
   if (rows.length < 2) return 'M 0 70 L 1000 70'
-  const values = rows.map(row => row.rxBps + row.txBps)
-  const max = Math.max(1, ...values)
-  return values.map((value, index) => `${index ? 'L' : 'M'} ${(index / (values.length - 1)) * 1000} ${125 - (value / max) * 105}`).join(' ')
+  const max = Math.max(1, ...rows.flatMap(row => [row.rxBps, row.txBps]))
+  return rows.map((row, index) => `${index ? 'L' : 'M'} ${(index / (rows.length - 1)) * 1000} ${125 - (row[field] / max) * 105}`).join(' ')
+}
+const rxChartPath = computed(() => makeChartPath('rxBps'))
+const txChartPath = computed(() => makeChartPath('txBps'))
+const rxAreaPath = computed(() => `${rxChartPath.value} L 1000 140 L 0 140 Z`)
+const activeDevices = computed(() => overview.value?.devices || [])
+const visibleDevices = computed(() => activeDevices.value.slice(0, deviceLimit.value))
+const hiddenDeviceCount = computed(() => Math.max(0, activeDevices.value.length - deviceLimit.value))
+const timelineBuckets = computed(() => timelineRange.value === 'today' ? timeline.value?.today || [] : timeline.value?.billing || [])
+const timelineTotals = computed(() => timelineRange.value === 'today'
+  ? { rx: timeline.value?.todayRx || 0, tx: timeline.value?.todayTx || 0 }
+  : { rx: timeline.value?.billingRx || 0, tx: timeline.value?.billingTx || 0 })
+const timelineMax = computed(() => Math.max(1, ...timelineBuckets.value.map(item => item.rxBytes + item.txBytes)))
+const timelineAverage = computed(() => {
+  const rows = timelineBuckets.value
+  return rows.length ? rows.reduce((sum, item) => sum + item.rxBytes + item.txBytes, 0) / rows.length : 0
 })
-const areaPath = computed(() => `${chartPath.value} L 1000 140 L 0 140 Z`)
+const selectedTimelineBucket = computed<TrafficBucket | null>(() => timelineBuckets.value[activeTimelineBucket.value] || null)
 const activeJobs = computed(() => jobs.value.filter(job => job.status === 'running' || job.status === 'queued').length)
 
 function bytes(value = 0) {
@@ -72,6 +90,20 @@ function uptime(value = 0) { const days = Math.floor(value / 86400); const hours
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
 function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
 function notify(message: string) { toast.value = message; window.setTimeout(() => { if (toast.value === message) toast.value = '' }, 3200) }
+function timelineNow() {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timeline.value?.timezone || settings.value.timezone, month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false }).formatToParts(new Date())
+  const value = (type: string) => parts.find(part => part.type === type)?.value || '00'
+  return { hour: Number(value('hour')) % 24, label: `${value('month')}-${value('day')}` }
+}
+function setTimelineRange(range: 'today' | 'billing') {
+  timelineRange.value = range
+  const current = timelineNow()
+  activeTimelineBucket.value = range === 'today' ? current.hour : Math.max(0, (timeline.value?.billing || []).findIndex(item => item.label === current.label))
+}
+function bucketHeight(item: TrafficBucket) { return Math.max(item.rxBytes + item.txBytes > 0 ? 3 : 0, (item.rxBytes + item.txBytes) / timelineMax.value * 100) }
+function bucketSegment(value: number, item: TrafficBucket) { const total = item.rxBytes + item.txBytes; return total ? value / total * 100 : 0 }
+function timelineLabel(item: TrafficBucket) { return timelineRange.value === 'today' ? `${item.label}:00` : item.label }
+function updateDeviceLimit() { deviceLimit.value = window.innerWidth < 720 ? 2 : window.innerWidth < 1100 ? 3 : 4 }
 
 async function bootstrap() {
   loading.value = true
@@ -95,8 +127,8 @@ async function changePassword() {
 }
 async function logout() { try { await api.logout() } finally { authenticated.value = false; overview.value = null } }
 async function refreshAll() {
-  const [overviewData, nodeData, jobData, settingData, endpointData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints()])
-  overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
+  const [overviewData, nodeData, jobData, settingData, endpointData, timelineData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline()])
+  overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; timeline.value = timelineData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
 }
 async function createNode() {
   busy.value = true
@@ -145,8 +177,8 @@ async function rotateSubscription() {
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
-onMounted(async () => { await bootstrap(); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) refreshAll().catch(() => {}) }, 10_000) })
-onBeforeUnmount(() => window.clearInterval(timer))
+onMounted(async () => { updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) refreshAll().catch(() => {}) }, 10_000) })
+onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
 <template>
@@ -198,8 +230,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
         </section>
 
         <section class="panel-card trend-card">
-          <div class="card-head"><div><span class="section-mark">流</span><div><h3>流量脉络</h3><p>最近 80 个采样点 · 每 10 秒刷新</p></div></div><div class="legend"><span><i class="jade"></i>下载 + 上传</span><strong>{{ rate((overview?.now.rxBps || 0) + (overview?.now.txBps || 0)) }}</strong></div></div>
-          <div class="chart-wrap"><svg viewBox="0 0 1000 150" preserveAspectRatio="none"><defs><linearGradient id="goldArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cba652" stop-opacity=".35"/><stop offset="1" stop-color="#cba652" stop-opacity="0"/></linearGradient></defs><path :d="areaPath" fill="url(#goldArea)"/><path :d="chartPath" class="chart-line"/></svg><div class="chart-grid"></div></div>
+          <div class="card-head flow-head"><div><span class="section-mark">流</span><div><h3>流量脉络</h3><p>最近 80 个采样点 · 每 10 秒刷新</p></div></div><div v-if="activeDevices.length" class="device-rack" aria-label="当前活跃设备"><span v-for="device in visibleDevices" :key="device.nodeId" class="device-chip" :title="`${device.nodeName} · 近 30 秒下行 ${rate(device.rateBps)}`"><i></i><b>{{ device.nodeName }}</b><em>{{ rate(device.rateBps) }}</em></span><span v-if="hiddenDeviceCount" class="device-overflow" :title="`另有 ${hiddenDeviceCount} 个活跃设备`">+{{ hiddenDeviceCount }}</span></div><div v-else class="device-silent"><i></i>设备静默</div></div>
+          <div class="flow-metrics"><span class="flow-rx"><small>下载</small><b>{{ rate(overview?.now.rxBps) }}</b></span><span class="flow-tx"><small>上传</small><b>{{ rate(overview?.now.txBps) }}</b></span><em>端点速率为近 30 秒下行估算</em></div>
+          <div class="chart-wrap"><svg viewBox="0 0 1000 150" preserveAspectRatio="none" aria-label="实时下载与上传趋势"><defs><linearGradient id="jadeArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#52b690" stop-opacity=".28"/><stop offset="1" stop-color="#52b690" stop-opacity="0"/></linearGradient></defs><path :d="rxAreaPath" fill="url(#jadeArea)"/><path :d="rxChartPath" class="chart-line rx-line"/><path :d="txChartPath" class="chart-line tx-line"/></svg><div class="chart-grid"></div></div>
         </section>
 
         <section class="overview-lower">
@@ -216,7 +249,24 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <div v-else-if="page === 'traffic'" class="page-content">
         <div class="page-intro"><div><p>TRAFFIC OBSERVATORY</p><h2>整机流量与账期观测</h2></div><span class="live-badge"><i></i>10 秒实时刷新</span></div>
         <section class="traffic-stat-grid"><article><small>本账期使用</small><strong>{{ bytes(overview?.trafficUsed) }}</strong><span>{{ trafficPercent.toFixed(1) }}% 配额</span></article><article><small>下载速率</small><strong>{{ rate(overview?.now.rxBps) }}</strong><span>当前出口</span></article><article><small>上传速率</small><strong>{{ rate(overview?.now.txBps) }}</strong><span>当前出口</span></article><article><small>账期重置</small><strong>{{ overview?.billingEnd || '—' }}</strong><span>{{ settings.timezone }}</span></article></section>
-        <section class="panel-card large-chart"><div class="card-head"><div><span class="section-mark">潮</span><div><h3>吞吐趋势</h3><p>{{ overview?.now.interface }} · RX / TX 合计</p></div></div></div><div class="chart-wrap tall"><svg viewBox="0 0 1000 220" preserveAspectRatio="none"><path :d="areaPath" fill="url(#goldArea)"/><path :d="chartPath" class="chart-line"/></svg><div class="chart-grid"></div></div></section>
+        <section class="panel-card timeline-card">
+          <div class="timeline-head"><div class="timeline-title"><span class="section-mark">时</span><div><h3>流量时间轴</h3><p>{{ timelineRange === 'today' ? `今日 00:00 — 24:00 · ${timeline?.timezone || settings.timezone}` : `${timeline?.billingStart} — ${timeline?.billingEnd} · 本账期逐日` }}</p></div></div><div class="timeline-switch" role="tablist" aria-label="时间轴范围"><button :class="{ active: timelineRange === 'today' }" role="tab" :aria-selected="timelineRange === 'today'" @click="setTimelineRange('today')"><b>今日</b><small>{{ bytes((timeline?.todayRx || 0) + (timeline?.todayTx || 0)) }}</small></button><button :class="{ active: timelineRange === 'billing' }" role="tab" :aria-selected="timelineRange === 'billing'" @click="setTimelineRange('billing')"><b>本账期</b><small>{{ bytes((timeline?.billingRx || 0) + (timeline?.billingTx || 0)) }}</small></button></div></div>
+          <div class="timeline-summary"><span class="rx"><i></i><small>下载</small><b>{{ bytes(timelineTotals.rx) }}</b></span><span class="tx"><i></i><small>上传</small><b>{{ bytes(timelineTotals.tx) }}</b></span><span class="total"><small>合计</small><b>{{ bytes(timelineTotals.rx + timelineTotals.tx) }}</b></span></div>
+          <div class="timeline-viewport">
+            <div class="timeline-plot" :class="timelineRange">
+              <div class="timeline-grid"><i></i><i></i><i></i></div>
+              <div class="timeline-y"><span>{{ bytes(timelineMax) }}</span><span>{{ bytes(timelineMax / 2) }}</span><span>0 B</span></div>
+              <div v-if="timelineAverage" class="average-line" :style="{ bottom: `${timelineAverage / timelineMax * 100}%` }"><span>Avg {{ bytes(timelineAverage) }}</span></div>
+              <div class="timeline-bars" :style="{ gridTemplateColumns: `repeat(${Math.max(1, timelineBuckets.length)}, minmax(10px, 1fr))` }">
+                <button v-for="(item,index) in timelineBuckets" :key="item.startedAt" class="timeline-bar" :class="{ selected: index === activeTimelineBucket }" :aria-label="`${timelineLabel(item)}，下载 ${bytes(item.rxBytes)}，上传 ${bytes(item.txBytes)}`" @mouseenter="activeTimelineBucket = index" @focus="activeTimelineBucket = index" @click="activeTimelineBucket = index">
+                  <span class="bar-stack" :style="{ height: `${bucketHeight(item)}%` }"><i class="bar-rx" :style="{ height: `${bucketSegment(item.rxBytes, item)}%` }"></i><i class="bar-tx" :style="{ height: `${bucketSegment(item.txBytes, item)}%` }"></i></span>
+                  <em v-if="timelineRange === 'today' ? index % 6 === 0 : index % 5 === 0">{{ timelineRange === 'billing' ? item.label.slice(3) : item.label }}</em>
+                </button>
+              </div>
+              <div v-if="selectedTimelineBucket" class="timeline-tooltip" :style="{ left: `${Math.min(86, Math.max(14, (activeTimelineBucket + .5) / Math.max(1, timelineBuckets.length) * 100))}%` }"><strong>{{ timelineLabel(selectedTimelineBucket) }} <small>{{ timeline?.timezone }}</small></strong><span><i class="rx"></i>下载 <b>{{ bytes(selectedTimelineBucket.rxBytes) }}</b></span><span><i class="tx"></i>上传 <b>{{ bytes(selectedTimelineBucket.txBytes) }}</b></span><em>总计 <b>{{ bytes(selectedTimelineBucket.rxBytes + selectedTimelineBucket.txBytes) }}</b></em></div>
+            </div>
+          </div>
+        </section>
         <section class="endpoint-section panel-card"><div class="card-head"><div><span class="section-mark red">端</span><div><h3>近 24 小时客户端端点</h3><p>仅展示脱敏地址 · 按下行包长度聚合</p></div></div></div><div class="endpoint-list"><div v-for="(item,index) in endpoints" :key="`${item.nodeId}-${item.endpoint}`"><b>{{ String(index + 1).padStart(2, '0') }}</b><span><strong>{{ item.nodeName }}</strong><small>{{ item.endpoint }}</small></span><em>{{ bytes(item.bytes) }}</em></div><p v-if="!endpoints.length" class="empty">等待端点采样；未安装 tcpdump 时整机流量仍正常统计。</p></div></section>
         <div class="privacy-banner"><span>隐</span><div><b>端点隐私策略</b><p>客户端 IP 默认脱敏；原始端点保留 24 小时，设备聚合保留 90 天。</p></div><label class="switch"><input v-model="settings.collectEndpoints" type="checkbox" @change="saveSettings"><i></i></label></div>
       </div>

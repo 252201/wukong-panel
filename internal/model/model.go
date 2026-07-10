@@ -90,17 +90,44 @@ type EndpointStat struct {
 	Bytes    int64  `json:"bytes"`
 }
 
+type DeviceTraffic struct {
+	NodeID   string  `json:"nodeId"`
+	NodeName string  `json:"nodeName"`
+	Bytes    int64   `json:"bytes"`
+	RateBPS  float64 `json:"rateBps"`
+}
+
+type TrafficBucket struct {
+	Label     string `json:"label"`
+	StartedAt int64  `json:"startedAt"`
+	RXBytes   int64  `json:"rxBytes"`
+	TXBytes   int64  `json:"txBytes"`
+}
+
+type TrafficTimeline struct {
+	Today        []TrafficBucket `json:"today"`
+	Billing      []TrafficBucket `json:"billing"`
+	TodayRX      int64           `json:"todayRx"`
+	TodayTX      int64           `json:"todayTx"`
+	BillingRX    int64           `json:"billingRx"`
+	BillingTX    int64           `json:"billingTx"`
+	Timezone     string          `json:"timezone"`
+	BillingStart string          `json:"billingStart"`
+	BillingEnd   string          `json:"billingEnd"`
+}
+
 type Overview struct {
-	Now            Metric   `json:"now"`
-	History        []Metric `json:"history"`
-	NodeCount      int      `json:"nodeCount"`
-	OnlineNodes    int      `json:"onlineNodes"`
-	TrafficUsed    int64    `json:"trafficUsed"`
-	TrafficQuota   int64    `json:"trafficQuota"`
-	BillingStart   string   `json:"billingStart"`
-	BillingEnd     string   `json:"billingEnd"`
-	SingBoxVersion string   `json:"singBoxVersion"`
-	PanelVersion   string   `json:"panelVersion"`
+	Now            Metric          `json:"now"`
+	History        []Metric        `json:"history"`
+	Devices        []DeviceTraffic `json:"devices"`
+	NodeCount      int             `json:"nodeCount"`
+	OnlineNodes    int             `json:"onlineNodes"`
+	TrafficUsed    int64           `json:"trafficUsed"`
+	TrafficQuota   int64           `json:"trafficQuota"`
+	BillingStart   string          `json:"billingStart"`
+	BillingEnd     string          `json:"billingEnd"`
+	SingBoxVersion string          `json:"singBoxVersion"`
+	PanelVersion   string          `json:"panelVersion"`
 }
 
 type Job struct {

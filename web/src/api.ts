@@ -37,6 +37,7 @@ export interface Metric {
 export interface Overview {
   now: Metric
   history: Metric[]
+  devices: DeviceTraffic[]
   nodeCount: number
   onlineNodes: number
   trafficUsed: number
@@ -45,6 +46,20 @@ export interface Overview {
   billingEnd: string
   singBoxVersion: string
   panelVersion: string
+}
+
+export interface DeviceTraffic { nodeId: string; nodeName: string; bytes: number; rateBps: number }
+export interface TrafficBucket { label: string; startedAt: number; rxBytes: number; txBytes: number }
+export interface TrafficTimeline {
+  today: TrafficBucket[]
+  billing: TrafficBucket[]
+  todayRx: number
+  todayTx: number
+  billingRx: number
+  billingTx: number
+  timezone: string
+  billingStart: string
+  billingEnd: string
 }
 
 export interface Job {
@@ -105,6 +120,7 @@ export const api = {
   changePassword: (password: string) => request<{ok: boolean}>('auth/password', { method: 'POST', body: JSON.stringify({ password }) }),
   overview: () => request<Overview>('overview'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
+  timeline: () => request<TrafficTimeline>('metrics/timeline'),
   nodes: () => request<NodeItem[]>('nodes'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),

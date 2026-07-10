@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.overview, false))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.metrics, false))
 	mux.HandleFunc("GET /api/v1/metrics/endpoints", s.auth(s.endpoints, false))
+	mux.HandleFunc("GET /api/v1/metrics/timeline", s.auth(s.timeline, false))
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
 	mux.HandleFunc("POST /api/v1/nodes", s.auth(s.createNode, true))
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
@@ -151,6 +152,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, session 
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.Session) {
 	metrics, _ := s.store.Metrics(80)
+	devices, _ := s.store.ActiveDevices(30*time.Second, 12)
 	nodes, _ := s.store.Nodes(r.Context())
 	settings, _ := s.store.Settings()
 	var now model.Metric
@@ -176,7 +178,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.
 			version = fmt.Sprint(result["version"])
 		}
 	}
-	writeJSON(w, 200, model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
+	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request, session store.Session) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -197,6 +199,76 @@ func (s *Server) endpoints(w http.ResponseWriter, r *http.Request, session store
 		items[i].Endpoint = maskEndpoint(items[i].Endpoint)
 	}
 	writeJSON(w, 200, items)
+}
+
+func (s *Server) timeline(w http.ResponseWriter, r *http.Request, session store.Session) {
+	settings, err := s.store.Settings()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	result, err := buildTrafficTimeline(s.store, time.Now(), settings)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+
+func buildTrafficTimeline(s *store.Store, now time.Time, settings model.Settings) (model.TrafficTimeline, error) {
+	location, err := time.LoadLocation(settings.Timezone)
+	if err != nil {
+		location = time.Local
+	}
+	localNow := now.In(location)
+	todayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	result := model.TrafficTimeline{Today: make([]model.TrafficBucket, 24), Timezone: location.String()}
+	for hour := range 24 {
+		started := todayStart.Add(time.Duration(hour) * time.Hour)
+		result.Today[hour] = model.TrafficBucket{Label: fmt.Sprintf("%02d", hour), StartedAt: started.Unix()}
+	}
+	metrics, err := s.MetricsBetween(todayStart.Add(-time.Minute).Unix(), now.Unix())
+	if err != nil {
+		return result, err
+	}
+	for index := 1; index < len(metrics); index++ {
+		current, previous := metrics[index], metrics[index-1]
+		if current.Timestamp < todayStart.Unix() {
+			continue
+		}
+		hour := time.Unix(current.Timestamp, 0).In(location).Hour()
+		rx := current.RXBytes - previous.RXBytes
+		tx := current.TXBytes - previous.TXBytes
+		if rx > 0 {
+			result.Today[hour].RXBytes += rx
+			result.TodayRX += rx
+		}
+		if tx > 0 {
+			result.Today[hour].TXBytes += tx
+			result.TodayTX += tx
+		}
+	}
+	billingStart, billingEnd := billingPeriod(now, settings.BillingResetDay, location.String())
+	result.BillingStart = billingStart.Format("2006-01-02")
+	result.BillingEnd = billingEnd.Format("2006-01-02")
+	daily, err := s.TrafficBuckets(result.BillingStart, result.BillingEnd)
+	if err != nil {
+		return result, err
+	}
+	byDay := make(map[string]model.TrafficBucket, len(daily))
+	for _, item := range daily {
+		byDay[item.Label] = item
+	}
+	for day := billingStart; !day.After(billingEnd); day = day.AddDate(0, 0, 1) {
+		key := day.Format("2006-01-02")
+		item := byDay[key]
+		item.Label = day.Format("01-02")
+		item.StartedAt = day.Unix()
+		result.Billing = append(result.Billing, item)
+		result.BillingRX += item.RXBytes
+		result.BillingTX += item.TXBytes
+	}
+	return result, nil
 }
 func (s *Server) nodes(w http.ResponseWriter, r *http.Request, session store.Session) {
 	items, err := s.store.Nodes(r.Context())
