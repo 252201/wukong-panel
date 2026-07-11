@@ -20,7 +20,7 @@ const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', i
 const endpoints = ref<EndpointStat[]>([])
 const timeline = ref<TrafficTimeline | null>(null)
 const timelineRange = ref<'today' | 'billing'>('today')
-const activeTimelineBucket = ref(0)
+const activeTimelineBucket = ref<number | null>(null)
 const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
@@ -75,7 +75,15 @@ const timelineAverage = computed(() => {
   const rows = timelineBuckets.value
   return rows.length ? rows.reduce((sum, item) => sum + item.rxBytes + item.txBytes, 0) / rows.length : 0
 })
-const selectedTimelineBucket = computed<TrafficBucket | null>(() => timelineBuckets.value[activeTimelineBucket.value] || null)
+const selectedTimelineBucket = computed<TrafficBucket | null>(() => {
+  if (activeTimelineBucket.value === null) return null
+  const item = timelineBuckets.value[activeTimelineBucket.value]
+  return item && item.rxBytes + item.txBytes > 0 ? item : null
+})
+const timelineTooltipLeft = computed(() => {
+  const index = activeTimelineBucket.value ?? 0
+  return `${Math.min(86, Math.max(14, (index + .5) / Math.max(1, timelineBuckets.value.length) * 100))}%`
+})
 const activeJobs = computed(() => jobs.value.filter(job => job.status === 'running' || job.status === 'queued').length)
 
 function bytes(value = 0) {
@@ -90,15 +98,16 @@ function uptime(value = 0) { const days = Math.floor(value / 86400); const hours
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
 function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
 function notify(message: string) { toast.value = message; window.setTimeout(() => { if (toast.value === message) toast.value = '' }, 3200) }
-function timelineNow() {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timeline.value?.timezone || settings.value.timezone, month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false }).formatToParts(new Date())
-  const value = (type: string) => parts.find(part => part.type === type)?.value || '00'
-  return { hour: Number(value('hour')) % 24, label: `${value('month')}-${value('day')}` }
-}
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
-  const current = timelineNow()
-  activeTimelineBucket.value = range === 'today' ? current.hour : Math.max(0, (timeline.value?.billing || []).findIndex(item => item.label === current.label))
+  activeTimelineBucket.value = null
+}
+function showTimelineBucket(index: number) {
+  const item = timelineBuckets.value[index]
+  activeTimelineBucket.value = item && item.rxBytes + item.txBytes > 0 ? index : null
+}
+function clearTimelineBucket(index?: number) {
+  if (index === undefined || activeTimelineBucket.value === index) activeTimelineBucket.value = null
 }
 function bucketHeight(item: TrafficBucket) { return Math.max(item.rxBytes + item.txBytes > 0 ? 3 : 0, (item.rxBytes + item.txBytes) / timelineMax.value * 100) }
 function bucketSegment(value: number, item: TrafficBucket) { const total = item.rxBytes + item.txBytes; return total ? value / total * 100 : 0 }
@@ -252,18 +261,18 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <section class="panel-card timeline-card">
           <div class="timeline-head"><div class="timeline-title"><span class="section-mark">时</span><div><h3>流量时间轴</h3><p>{{ timelineRange === 'today' ? `今日 00:00 — 24:00 · ${timeline?.timezone || settings.timezone}` : `${timeline?.billingStart} — ${timeline?.billingEnd} · 本账期逐日` }}</p></div></div><div class="timeline-switch" role="tablist" aria-label="时间轴范围"><button :class="{ active: timelineRange === 'today' }" role="tab" :aria-selected="timelineRange === 'today'" @click="setTimelineRange('today')"><b>今日</b><small>{{ bytes((timeline?.todayRx || 0) + (timeline?.todayTx || 0)) }}</small></button><button :class="{ active: timelineRange === 'billing' }" role="tab" :aria-selected="timelineRange === 'billing'" @click="setTimelineRange('billing')"><b>本账期</b><small>{{ bytes((timeline?.billingRx || 0) + (timeline?.billingTx || 0)) }}</small></button></div></div>
           <div class="timeline-summary"><span class="rx"><i></i><small>下载</small><b>{{ bytes(timelineTotals.rx) }}</b></span><span class="tx"><i></i><small>上传</small><b>{{ bytes(timelineTotals.tx) }}</b></span><span class="total"><small>合计</small><b>{{ bytes(timelineTotals.rx + timelineTotals.tx) }}</b></span></div>
-          <div class="timeline-viewport">
+          <div class="timeline-viewport" @mouseleave="clearTimelineBucket()">
             <div class="timeline-plot" :class="timelineRange">
               <div class="timeline-grid"><i></i><i></i><i></i></div>
               <div class="timeline-y"><span>{{ bytes(timelineMax) }}</span><span>{{ bytes(timelineMax / 2) }}</span><span>0 B</span></div>
               <div v-if="timelineAverage" class="average-line" :style="{ bottom: `${timelineAverage / timelineMax * 100}%` }"><span>Avg {{ bytes(timelineAverage) }}</span></div>
               <div class="timeline-bars" :style="{ gridTemplateColumns: `repeat(${Math.max(1, timelineBuckets.length)}, minmax(10px, 1fr))` }">
-                <button v-for="(item,index) in timelineBuckets" :key="item.startedAt" class="timeline-bar" :class="{ selected: index === activeTimelineBucket }" :aria-label="`${timelineLabel(item)}，下载 ${bytes(item.rxBytes)}，上传 ${bytes(item.txBytes)}`" @mouseenter="activeTimelineBucket = index" @focus="activeTimelineBucket = index" @click="activeTimelineBucket = index">
+                <button v-for="(item,index) in timelineBuckets" :key="item.startedAt" class="timeline-bar" :class="{ selected: index === activeTimelineBucket }" :aria-label="`${timelineLabel(item)}，下载 ${bytes(item.rxBytes)}，上传 ${bytes(item.txBytes)}`" @mouseenter="showTimelineBucket(index)" @focus="showTimelineBucket(index)" @blur="clearTimelineBucket(index)" @click="showTimelineBucket(index)">
                   <span class="bar-stack" :style="{ height: `${bucketHeight(item)}%` }"><i class="bar-rx" :style="{ height: `${bucketSegment(item.rxBytes, item)}%` }"></i><i class="bar-tx" :style="{ height: `${bucketSegment(item.txBytes, item)}%` }"></i></span>
                   <em v-if="timelineRange === 'today' ? index % 6 === 0 : index % 5 === 0">{{ timelineRange === 'billing' ? item.label.slice(3) : item.label }}</em>
                 </button>
               </div>
-              <div v-if="selectedTimelineBucket" class="timeline-tooltip" :style="{ left: `${Math.min(86, Math.max(14, (activeTimelineBucket + .5) / Math.max(1, timelineBuckets.length) * 100))}%` }"><strong>{{ timelineLabel(selectedTimelineBucket) }} <small>{{ timeline?.timezone }}</small></strong><span><i class="rx"></i>下载 <b>{{ bytes(selectedTimelineBucket.rxBytes) }}</b></span><span><i class="tx"></i>上传 <b>{{ bytes(selectedTimelineBucket.txBytes) }}</b></span><em>总计 <b>{{ bytes(selectedTimelineBucket.rxBytes + selectedTimelineBucket.txBytes) }}</b></em></div>
+              <div v-if="selectedTimelineBucket" class="timeline-tooltip" :style="{ left: timelineTooltipLeft }"><strong>{{ timelineLabel(selectedTimelineBucket) }} <small>{{ timeline?.timezone }}</small></strong><span><i class="rx"></i>下载 <b>{{ bytes(selectedTimelineBucket.rxBytes) }}</b></span><span><i class="tx"></i>上传 <b>{{ bytes(selectedTimelineBucket.txBytes) }}</b></span><em>总计 <b>{{ bytes(selectedTimelineBucket.rxBytes + selectedTimelineBucket.txBytes) }}</b></em></div>
             </div>
           </div>
         </section>
