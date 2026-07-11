@@ -1,12 +1,21 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -243,21 +252,20 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	service := "sing-box-wukong-" + id
 	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".json")
 	manager := detectServiceManager()
-	certPath, keyPath := request.CertificatePath, request.KeyPath
-	if certPath == "" || keyPath == "" {
-		certPath = filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".cer")
-		keyPath = filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".key")
+	certPath, keyPath, generateCertificate, err := m.certificatePaths(request, id)
+	if err != nil {
+		return model.Node{}, err
 	}
 	if !m.cfg.Demo {
 		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
 			return model.Node{}, err
 		}
-		if _, err := os.Stat(certPath); errors.Is(err, os.ErrNotExist) {
+		if generateCertificate {
 			sni := request.Domain
 			if sni == "" {
 				sni = "www.bing.com"
 			}
-			if err := generateSelfSigned(ctx, keyPath, certPath, sni); err != nil {
+			if err := generateSelfSigned(keyPath, certPath, sni); err != nil {
 				return model.Node{}, err
 			}
 		}
@@ -284,6 +292,82 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
 	return node, nil
+}
+
+func (m *Manager) certificatePaths(request model.NodeCreateRequest, id string) (certPath, keyPath string, generate bool, err error) {
+	if request.CertificatePath != "" || request.KeyPath != "" {
+		if request.CertificatePath == "" || request.KeyPath == "" {
+			return "", "", false, errors.New("certificate and private key paths must be provided together")
+		}
+		if !regularFile(request.CertificatePath) || !regularFile(request.KeyPath) {
+			return "", "", false, errors.New("certificate or private key file is not readable")
+		}
+		if !certificatePairCoversDomain(request.CertificatePath, request.KeyPath, request.Domain) {
+			return "", "", false, fmt.Errorf("certificate and private key do not form a valid pair for TLS domain %s", request.Domain)
+		}
+		return request.CertificatePath, request.KeyPath, false, nil
+	}
+	if request.Domain != "" && certificatePairCoversDomain(m.cfg.TLSCertFile, m.cfg.TLSKeyFile, request.Domain) {
+		return m.cfg.TLSCertFile, m.cfg.TLSKeyFile, false, nil
+	}
+	return filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".cer"), filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".key"), true, nil
+}
+
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func certificateCoversDomain(path, domain string) bool {
+	certificate, err := loadCertificate(path)
+	return err == nil && certificate.VerifyHostname(domain) == nil
+}
+
+func loadCertificate(path string) (*x509.Certificate, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.New("certificate PEM block not found")
+	}
+	return x509.ParseCertificate(block.Bytes)
+}
+
+func certificatePairCoversDomain(certPath, keyPath, domain string) bool {
+	if !regularFile(certPath) || !regularFile(keyPath) {
+		return false
+	}
+	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
+		return false
+	}
+	return domain == "" || certificateCoversDomain(certPath, domain)
+}
+
+func configUsesSelfSignedCertificate(configPath string) bool {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+	var root map[string]any
+	if json.Unmarshal(data, &root) != nil {
+		return false
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	for _, item := range inbounds {
+		inbound, _ := item.(map[string]any)
+		if stringValue(inbound["type"]) != "hysteria2" {
+			continue
+		}
+		tlsConfig, _ := inbound["tls"].(map[string]any)
+		certificate, err := loadCertificate(stringValue(tlsConfig["certificate_path"]))
+		if err != nil {
+			return false
+		}
+		return bytes.Equal(certificate.RawIssuer, certificate.RawSubject) && certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature) == nil
+	}
+	return false
 }
 
 func (m *Manager) Action(ctx context.Context, id, action, confirmName string) error {
@@ -365,7 +449,11 @@ func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 	if sni == "" {
 		sni = "www.bing.com"
 	}
-	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?sni=%s#%s", urlEncode(secret), hostForURI(server), node.ListenPort, urlEncode(sni), urlEncode(node.Name))
+	query := "sni=" + urlEncode(sni)
+	if configUsesSelfSignedCertificate(node.ConfigPath) {
+		query += "&insecure=1"
+	}
+	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?%s#%s", urlEncode(secret), hostForURI(server), node.ListenPort, query, urlEncode(node.Name))
 	return model.Share{URI: uri, ExpiresAt: time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339)}, nil
 }
 
@@ -584,11 +672,46 @@ func validateCreate(r model.NodeCreateRequest) error {
 	}
 	return nil
 }
-func generateSelfSigned(ctx context.Context, key, cert, domain string) error {
-	if err := command(ctx, "openssl", "ecparam", "-genkey", "-name", "prime256v1", "-out", key); err != nil {
+func generateSelfSigned(keyPath, certPath, domain string) error {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		return err
 	}
-	return command(ctx, "openssl", "req", "-new", "-x509", "-days", "3650", "-key", key, "-out", cert, "-subj", "/CN="+domain)
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: domain},
+		NotBefore:    now.Add(-5 * time.Minute),
+		NotAfter:     now.AddDate(10, 0, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	if ip := net.ParseIP(domain); ip != nil {
+		template.IPAddresses = []net.IP{ip}
+	} else {
+		template.DNSNames = []string{domain}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		return err
+	}
+	if err = os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		_ = os.Remove(keyPath)
+		return err
+	}
+	return nil
 }
 func command(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)

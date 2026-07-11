@@ -247,6 +247,8 @@ WUKONG_AGENT_SOCKET=/run/wukong-panel/agent.sock
 WUKONG_AGENT_TOKEN_FILE=/etc/wukong-panel/agent.token
 WUKONG_SINGBOX_CONFIG_DIR=/etc/s-box
 WUKONG_SINGBOX_BIN=/etc/s-box/sing-box
+WUKONG_TLS_CERT=$TLS_CERT
+WUKONG_TLS_KEY=$TLS_KEY
 WUKONG_LISTEN=127.0.0.1:8788
 WUKONG_BASE_PATH=$BASE_PATH
 WUKONG_SECURE_COOKIE=true
@@ -326,10 +328,12 @@ command_background=true
 pidfile="/run/wukong-panel/agent.pid"
 output_log="/var/log/wukong-agent.log"
 error_log="/var/log/wukong-agent.log"
-export WUKONG_DATA_DIR=/var/lib/wukong-panel WUKONG_SECRET_DIR=/etc/wukong-panel/secrets WUKONG_AGENT_SOCKET=/run/wukong-panel/agent.sock WUKONG_AGENT_TOKEN_FILE=/etc/wukong-panel/agent.token WUKONG_SINGBOX_CONFIG_DIR=/etc/s-box WUKONG_SINGBOX_BIN=/etc/s-box/sing-box
+set -a
+. /etc/wukong-panel/env
+set +a
 depend() { need net; }
 EOF
-  cat > /etc/init.d/wukong-web <<EOF
+  cat > /etc/init.d/wukong-web <<'EOF'
 #!/sbin/openrc-run
 name="Wukong Panel Web"
 command="/usr/local/bin/wukong-panel"
@@ -339,7 +343,9 @@ command_background=true
 pidfile="/run/wukong-panel/web.pid"
 output_log="/var/log/wukong-web.log"
 error_log="/var/log/wukong-web.log"
-export WUKONG_DATA_DIR=/var/lib/wukong-panel WUKONG_SECRET_DIR=/etc/wukong-panel/secrets WUKONG_AGENT_SOCKET=/run/wukong-panel/agent.sock WUKONG_AGENT_TOKEN_FILE=/etc/wukong-panel/agent.token WUKONG_SINGBOX_CONFIG_DIR=/etc/s-box WUKONG_SINGBOX_BIN=/etc/s-box/sing-box WUKONG_LISTEN=127.0.0.1:8788 WUKONG_BASE_PATH=$BASE_PATH WUKONG_SECURE_COOKIE=true
+set -a
+. /etc/wukong-panel/env
+set +a
 depend() { need net wukong-agent; }
 EOF
   chmod 0755 /etc/init.d/wukong-agent /etc/init.d/wukong-web
