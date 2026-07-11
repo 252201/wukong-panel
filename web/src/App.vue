@@ -67,6 +67,11 @@ const rxAreaPath = computed(() => `${rxChartPath.value} L 1000 140 L 0 140 Z`)
 const activeDevices = computed(() => overview.value?.devices || [])
 const visibleDevices = computed(() => activeDevices.value.slice(0, deviceLimit.value))
 const hiddenDeviceCount = computed(() => Math.max(0, activeDevices.value.length - deviceLimit.value))
+const vitalItems = computed(() => [
+  { name: 'CPU', value: overview.value?.now.cpu || 0, meta: `负载 ${overview.value?.now.load1.toFixed(2) || 0}`, usage: '' },
+  { name: '内存', value: overview.value?.now.memory || 0, meta: 'MemAvailable 口径', usage: `${bytes(overview.value?.now.memoryUsedBytes)} / ${bytes(overview.value?.now.memoryTotalBytes)}` },
+  { name: '磁盘', value: overview.value?.now.disk || 0, meta: '根分区 /', usage: `${bytes(overview.value?.now.diskUsedBytes)} / ${bytes(overview.value?.now.diskTotalBytes)}` },
+])
 const timelineBuckets = computed(() => timelineRange.value === 'today' ? timeline.value?.today || [] : timeline.value?.billing || [])
 const timelineTotals = computed(() => timelineRange.value === 'today'
   ? { rx: timeline.value?.todayRx || 0, tx: timeline.value?.todayTx || 0 }
@@ -291,8 +296,9 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 
       <div v-else-if="page === 'system'" class="page-content">
         <div class="page-intro"><div><p>HOST VITALS</p><h2>主机资源与运行态势</h2></div><span class="live-badge"><i></i>Agent 正常</span></div>
-        <section class="vital-grid"><article v-for="item in [{name:'CPU',value:overview?.now.cpu || 0,meta:`负载 ${overview?.now.load1.toFixed(2) || 0}`},{name:'内存',value:overview?.now.memory || 0,meta:'MemAvailable 口径'},{name:'磁盘',value:overview?.now.disk || 0,meta:'根分区 /'}]" :key="item.name"><div class="vital-dial" :style="{ '--vital': `${item.value * 3.6}deg` }"><b>{{ item.value.toFixed(1) }}<small>%</small></b></div><h3>{{ item.name }}</h3><p>{{ item.meta }}</p></article></section>
+        <section class="vital-grid"><article v-for="item in vitalItems" :key="item.name"><div class="vital-dial" :style="{ '--vital': `${item.value * 3.6}deg` }"><b>{{ item.value.toFixed(1) }}<small>%</small></b></div><h3>{{ item.name }}</h3><p>{{ item.meta }}</p><strong v-if="item.usage" class="vital-usage">{{ item.usage }}</strong></article></section>
         <section class="panel-card host-table"><div class="card-head"><div><span class="section-mark jade">机</span><div><h3>系统信息</h3><p>不展示进程完整命令行</p></div></div></div><dl><div><dt>出口网卡</dt><dd>{{ overview?.now.interface || '—' }}</dd></div><div><dt>运行时间</dt><dd>{{ uptime(overview?.now.uptime) }}</dd></div><div><dt>sing-box</dt><dd>{{ overview?.singBoxVersion }}</dd></div><div><dt>悟空面板</dt><dd>{{ overview?.panelVersion }}</dd></div><div><dt>服务模式</dt><dd>Web / Root Agent 分权</dd></div><div><dt>指标保留</dt><dd>90 天</dd></div></dl></section>
+        <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span>CPU</span><span>内存</span></div><div class="process-scroll"><div v-for="process in overview?.processes || []" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="process.name">{{ process.name }}</b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div></section>
       </div>
 
       <div v-else-if="page === 'jobs'" class="page-content">

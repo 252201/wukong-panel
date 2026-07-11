@@ -70,17 +70,29 @@ type Share struct {
 }
 
 type Metric struct {
-	Timestamp int64   `json:"timestamp"`
-	Interface string  `json:"interface"`
-	RXBytes   int64   `json:"rxBytes"`
-	TXBytes   int64   `json:"txBytes"`
-	RXBPS     float64 `json:"rxBps"`
-	TXBPS     float64 `json:"txBps"`
-	CPU       float64 `json:"cpu"`
-	Memory    float64 `json:"memory"`
-	Disk      float64 `json:"disk"`
-	Load1     float64 `json:"load1"`
-	Uptime    int64   `json:"uptime"`
+	Timestamp        int64   `json:"timestamp"`
+	Interface        string  `json:"interface"`
+	RXBytes          int64   `json:"rxBytes"`
+	TXBytes          int64   `json:"txBytes"`
+	RXBPS            float64 `json:"rxBps"`
+	TXBPS            float64 `json:"txBps"`
+	CPU              float64 `json:"cpu"`
+	Memory           float64 `json:"memory"`
+	MemoryUsedBytes  int64   `json:"memoryUsedBytes"`
+	MemoryTotalBytes int64   `json:"memoryTotalBytes"`
+	Disk             float64 `json:"disk"`
+	DiskUsedBytes    int64   `json:"diskUsedBytes"`
+	DiskTotalBytes   int64   `json:"diskTotalBytes"`
+	Load1            float64 `json:"load1"`
+	Uptime           int64   `json:"uptime"`
+}
+
+type ProcessStat struct {
+	PID           int     `json:"pid"`
+	Name          string  `json:"name"`
+	CPU           float64 `json:"cpu"`
+	RSSBytes      int64   `json:"rssBytes"`
+	MemoryPercent float64 `json:"memoryPercent"`
 }
 
 type EndpointStat struct {
@@ -120,6 +132,8 @@ type Overview struct {
 	Now            Metric          `json:"now"`
 	History        []Metric        `json:"history"`
 	Devices        []DeviceTraffic `json:"devices"`
+	Processes      []ProcessStat   `json:"processes"`
+	ProcessCount   int             `json:"processCount"`
 	NodeCount      int             `json:"nodeCount"`
 	OnlineNodes    int             `json:"onlineNodes"`
 	TrafficUsed    int64           `json:"trafficUsed"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -56,8 +57,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_config_port ON nodes(config_path, li
 CREATE TABLE IF NOT EXISTS metrics (
   ts INTEGER PRIMARY KEY, iface TEXT NOT NULL, rx_bytes INTEGER NOT NULL, tx_bytes INTEGER NOT NULL,
   rx_bps REAL NOT NULL, tx_bps REAL NOT NULL, cpu REAL NOT NULL, memory REAL NOT NULL,
-  disk REAL NOT NULL, load1 REAL NOT NULL, uptime INTEGER NOT NULL
+  memory_used_bytes INTEGER NOT NULL DEFAULT 0, memory_total_bytes INTEGER NOT NULL DEFAULT 0,
+  disk REAL NOT NULL, disk_used_bytes INTEGER NOT NULL DEFAULT 0, disk_total_bytes INTEGER NOT NULL DEFAULT 0,
+  load1 REAL NOT NULL, uptime INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS process_recent (
+  pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
+  memory_percent REAL NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS process_state (
+  id INTEGER PRIMARY KEY CHECK(id=1), total_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO process_state(id) VALUES(1);
 CREATE TABLE IF NOT EXISTS traffic_state (
   id INTEGER PRIMARY KEY CHECK(id=1), iface TEXT NOT NULL DEFAULT '', last_rx INTEGER NOT NULL DEFAULT 0,
   last_tx INTEGER NOT NULL DEFAULT 0, accumulated_rx INTEGER NOT NULL DEFAULT 0,
@@ -94,6 +105,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
 	}
+	for name, definition := range map[string]string{
+		"memory_used_bytes":  "INTEGER NOT NULL DEFAULT 0",
+		"memory_total_bytes": "INTEGER NOT NULL DEFAULT 0",
+		"disk_used_bytes":    "INTEGER NOT NULL DEFAULT 0",
+		"disk_total_bytes":   "INTEGER NOT NULL DEFAULT 0",
+	} {
+		if err := s.ensureColumn("metrics", name, definition); err != nil {
+			return err
+		}
+	}
 	defaults := map[string]string{
 		"language": "zh-CN", "timezone": "Asia/Shanghai", "interface": "auto",
 		"traffic_quota_bytes": "0", "billing_reset_day": "1", "collect_endpoints": "true",
@@ -104,6 +125,35 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 		}
 	}
 	return nil
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	rows, err := s.DB.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, kind string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err = rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err = rows.Close(); err != nil || found {
+		return err
+	}
+	_, err = s.DB.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return nil
+	}
+	return err
 }
 
 func (s *Store) EnsureAdmin() (string, bool, error) {
@@ -272,7 +322,7 @@ func (s *Store) DeleteNode(id string) error {
 }
 
 func (s *Store) AddMetric(m model.Metric) error {
-	_, err := s.DB.Exec(`INSERT OR REPLACE INTO metrics(ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,disk,load1,uptime) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, m.Timestamp, m.Interface, m.RXBytes, m.TXBytes, m.RXBPS, m.TXBPS, m.CPU, m.Memory, m.Disk, m.Load1, m.Uptime)
+	_, err := s.DB.Exec(`INSERT OR REPLACE INTO metrics(ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,memory_used_bytes,memory_total_bytes,disk,disk_used_bytes,disk_total_bytes,load1,uptime) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, m.Timestamp, m.Interface, m.RXBytes, m.TXBytes, m.RXBPS, m.TXBPS, m.CPU, m.Memory, m.MemoryUsedBytes, m.MemoryTotalBytes, m.Disk, m.DiskUsedBytes, m.DiskTotalBytes, m.Load1, m.Uptime)
 	if err == nil {
 		_, _ = s.DB.Exec("DELETE FROM metrics WHERE ts<?", time.Now().Add(-90*24*time.Hour).Unix())
 	}
@@ -283,7 +333,7 @@ func (s *Store) Metrics(limit int) ([]model.Metric, error) {
 	if limit < 1 || limit > 1000 {
 		limit = 120
 	}
-	rows, err := s.DB.Query(`SELECT ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,disk,load1,uptime FROM metrics ORDER BY ts DESC LIMIT ?`, limit)
+	rows, err := s.DB.Query(`SELECT ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,memory_used_bytes,memory_total_bytes,disk,disk_used_bytes,disk_total_bytes,load1,uptime FROM metrics ORDER BY ts DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +341,7 @@ func (s *Store) Metrics(limit int) ([]model.Metric, error) {
 	items := []model.Metric{}
 	for rows.Next() {
 		var m model.Metric
-		if err := rows.Scan(&m.Timestamp, &m.Interface, &m.RXBytes, &m.TXBytes, &m.RXBPS, &m.TXBPS, &m.CPU, &m.Memory, &m.Disk, &m.Load1, &m.Uptime); err != nil {
+		if err := rows.Scan(&m.Timestamp, &m.Interface, &m.RXBytes, &m.TXBytes, &m.RXBPS, &m.TXBPS, &m.CPU, &m.Memory, &m.MemoryUsedBytes, &m.MemoryTotalBytes, &m.Disk, &m.DiskUsedBytes, &m.DiskTotalBytes, &m.Load1, &m.Uptime); err != nil {
 			return nil, err
 		}
 		items = append(items, m)
@@ -303,7 +353,7 @@ func (s *Store) Metrics(limit int) ([]model.Metric, error) {
 }
 
 func (s *Store) MetricsBetween(start, end int64) ([]model.Metric, error) {
-	rows, err := s.DB.Query(`SELECT ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,disk,load1,uptime FROM metrics WHERE ts>=? AND ts<=? ORDER BY ts`, start, end)
+	rows, err := s.DB.Query(`SELECT ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,memory_used_bytes,memory_total_bytes,disk,disk_used_bytes,disk_total_bytes,load1,uptime FROM metrics WHERE ts>=? AND ts<=? ORDER BY ts`, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -311,12 +361,59 @@ func (s *Store) MetricsBetween(start, end int64) ([]model.Metric, error) {
 	items := []model.Metric{}
 	for rows.Next() {
 		var m model.Metric
-		if err := rows.Scan(&m.Timestamp, &m.Interface, &m.RXBytes, &m.TXBytes, &m.RXBPS, &m.TXBPS, &m.CPU, &m.Memory, &m.Disk, &m.Load1, &m.Uptime); err != nil {
+		if err := rows.Scan(&m.Timestamp, &m.Interface, &m.RXBytes, &m.TXBytes, &m.RXBPS, &m.TXBPS, &m.CPU, &m.Memory, &m.MemoryUsedBytes, &m.MemoryTotalBytes, &m.Disk, &m.DiskUsedBytes, &m.DiskTotalBytes, &m.Load1, &m.Uptime); err != nil {
 			return nil, err
 		}
 		items = append(items, m)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) ReplaceProcesses(ts int64, totalCount int, processes []model.ProcessStat) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM process_recent"); err != nil {
+		return err
+	}
+	for _, process := range processes {
+		if process.PID <= 0 || process.Name == "" {
+			continue
+		}
+		if _, err = tx.Exec(`INSERT INTO process_recent(pid,name,cpu,rss_bytes,memory_percent,updated_at) VALUES(?,?,?,?,?,?)`, process.PID, process.Name, process.CPU, process.RSSBytes, process.MemoryPercent, ts); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec("UPDATE process_state SET total_count=?,updated_at=? WHERE id=1", totalCount, ts); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) Processes(limit int) ([]model.ProcessStat, int, error) {
+	if limit < 1 || limit > 200 {
+		limit = 100
+	}
+	var total int
+	if err := s.DB.QueryRow("SELECT total_count FROM process_state WHERE id=1").Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.DB.Query(`SELECT pid,name,cpu,rss_bytes,memory_percent FROM process_recent ORDER BY cpu DESC,rss_bytes DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := []model.ProcessStat{}
+	for rows.Next() {
+		var item model.ProcessStat
+		if err = rows.Scan(&item.PID, &item.Name, &item.CPU, &item.RSSBytes, &item.MemoryPercent); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
 }
 
 func (s *Store) TrafficState() (iface string, lastRX, lastTX, accRX, accTX int64, err error) {

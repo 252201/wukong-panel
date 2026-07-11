@@ -1,6 +1,10 @@
 package monitor
 
-import "testing"
+import (
+	"os"
+	"runtime"
+	"testing"
+)
 
 func TestEndpointPacketUsesIPv4PacketLength(t *testing.T) {
 	var pending int64
@@ -26,5 +30,40 @@ func TestEndpointPacketRejectsLineWithoutLengthMetadata(t *testing.T) {
 	var pending int64
 	if _, _, _, _, ok := endpointPacket("192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 100", &pending); ok {
 		t.Fatal("endpoint without IP packet length metadata must be ignored")
+	}
+}
+
+func TestParseProcessStatHandlesNamesWithSpaces(t *testing.T) {
+	name, ticks, ok := parseProcessStat("123 (worker process) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15")
+	if !ok || name != "worker process" || ticks != 23 {
+		t.Fatalf("unexpected process stat: %q %d %v", name, ticks, ok)
+	}
+}
+
+func TestProcessStatusReadsNameAndRSS(t *testing.T) {
+	name, rss := processStatus("Name:\tsing-box\nState:\tS\nVmRSS:\t  82256 kB\n")
+	if name != "sing-box" || rss != 82_256*1024 {
+		t.Fatalf("unexpected process status: %q %d", name, rss)
+	}
+}
+
+func TestProcessSnapshotOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux procfs")
+	}
+	collector := &Collector{lastProcessCPU: map[int]uint64{}}
+	items, count := collector.processSnapshot(1_000_000_000)
+	if count == 0 || len(items) == 0 {
+		t.Fatalf("empty Linux process snapshot: count=%d items=%d", count, len(items))
+	}
+	found := false
+	for _, item := range items {
+		if item.PID == os.Getpid() {
+			found = item.Name != "" && item.RSSBytes > 0
+			break
+		}
+	}
+	if !found {
+		t.Fatal("current process missing from Linux process snapshot")
 	}
 }

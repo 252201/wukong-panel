@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,5 +95,72 @@ func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 	devices, err = s.ActiveDevices(30*time.Second, 10)
 	if err != nil || len(devices) != 0 {
 		t.Fatalf("empty recent window did not clear active devices: %#v, %v", devices, err)
+	}
+}
+
+func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	processes := []model.ProcessStat{
+		{PID: 20, Name: "wukong-panel", CPU: 1.2, RSSBytes: 40_000_000, MemoryPercent: 2},
+		{PID: 10, Name: "sing-box", CPU: 6.9, RSSBytes: 84_000_000, MemoryPercent: 4.2},
+	}
+	if err := s.ReplaceProcesses(time.Now().Unix(), 106, processes); err != nil {
+		t.Fatal(err)
+	}
+	items, count, err := s.Processes(10)
+	if err != nil || count != 106 || len(items) != 2 || items[0].Name != "sing-box" {
+		t.Fatalf("unexpected processes: %#v count=%d err=%v", items, count, err)
+	}
+}
+
+func TestMetricResourceTotalsRoundTrip(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	metric := model.Metric{Timestamp: time.Now().Unix(), Interface: "eth0", Memory: 50, MemoryUsedBytes: 1_000, MemoryTotalBytes: 2_000, Disk: 25, DiskUsedBytes: 2_500, DiskTotalBytes: 10_000}
+	if err := s.AddMetric(metric); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.Metrics(1)
+	if err != nil || len(items) != 1 || items[0].MemoryUsedBytes != 1_000 || items[0].DiskTotalBytes != 10_000 {
+		t.Fatalf("unexpected metric resource totals: %#v err=%v", items, err)
+	}
+}
+
+func TestLegacyMetricsSchemaMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`CREATE TABLE metrics (
+		ts INTEGER PRIMARY KEY, iface TEXT NOT NULL, rx_bytes INTEGER NOT NULL, tx_bytes INTEGER NOT NULL,
+		rx_bps REAL NOT NULL, tx_bps REAL NOT NULL, cpu REAL NOT NULL, memory REAL NOT NULL,
+		disk REAL NOT NULL, load1 REAL NOT NULL, uptime INTEGER NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	metric := model.Metric{Timestamp: time.Now().Unix(), Interface: "eth0", MemoryUsedBytes: 1_000, MemoryTotalBytes: 2_000, DiskUsedBytes: 2_500, DiskTotalBytes: 10_000}
+	if err = s.AddMetric(metric); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.Metrics(1)
+	if err != nil || len(items) != 1 || items[0].MemoryTotalBytes != 2_000 || items[0].DiskUsedBytes != 2_500 {
+		t.Fatalf("legacy migration did not preserve resource totals: %#v err=%v", items, err)
 	}
 }

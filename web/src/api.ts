@@ -29,7 +29,11 @@ export interface Metric {
   txBps: number
   cpu: number
   memory: number
+  memoryUsedBytes: number
+  memoryTotalBytes: number
   disk: number
+  diskUsedBytes: number
+  diskTotalBytes: number
   load1: number
   uptime: number
 }
@@ -38,6 +42,8 @@ export interface Overview {
   now: Metric
   history: Metric[]
   devices: DeviceTraffic[]
+  processes: ProcessStat[]
+  processCount: number
   nodeCount: number
   onlineNodes: number
   trafficUsed: number
@@ -47,6 +53,8 @@ export interface Overview {
   singBoxVersion: string
   panelVersion: string
 }
+
+export interface ProcessStat { pid: number; name: string; cpu: number; rssBytes: number; memoryPercent: number }
 
 export interface DeviceTraffic { nodeId: string; nodeName: string; bytes: number; rateBps: number }
 export interface TrafficBucket { label: string; startedAt: number; rxBytes: number; txBytes: number }

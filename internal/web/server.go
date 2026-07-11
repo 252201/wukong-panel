@@ -153,6 +153,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, session 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.Session) {
 	metrics, _ := s.store.Metrics(80)
 	devices, _ := s.store.ActiveDevices(25*time.Second, 12)
+	processes, processCount, _ := s.store.Processes(100)
 	nodes, _ := s.store.Nodes(r.Context())
 	settings, _ := s.store.Settings()
 	var now model.Metric
@@ -178,7 +179,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.
 			version = fmt.Sprint(result["version"])
 		}
 	}
-	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
+	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, Processes: processes, ProcessCount: processCount, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request, session store.Session) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))

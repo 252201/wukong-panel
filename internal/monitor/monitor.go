@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,9 +26,13 @@ type Collector struct {
 	store             *store.Store
 	demo              bool
 	lastCPU, lastIdle uint64
+	lastProcessTotal  uint64
+	lastProcessCPU    map[int]uint64
 }
 
-func New(s *store.Store, demo bool) *Collector { return &Collector{store: s, demo: demo} }
+func New(s *store.Store, demo bool) *Collector {
+	return &Collector{store: s, demo: demo, lastProcessCPU: map[int]uint64{}}
+}
 
 func (c *Collector) Run(ctx context.Context) {
 	c.sample()
@@ -200,11 +205,29 @@ func (c *Collector) sample() {
 	if last, err := c.store.Metrics(1); err == nil && len(last) == 1 {
 		elapsed = math.Max(1, float64(now.Unix()-last[0].Timestamp))
 	}
-	m := model.Metric{Timestamp: now.Unix(), Interface: iface, RXBytes: accRX, TXBytes: accTX, RXBPS: float64(deltaRX) / elapsed, TXBPS: float64(deltaTX) / elapsed, CPU: c.cpuPercent(), Memory: memoryPercent(), Disk: diskPercent(), Load1: load1(), Uptime: uptime()}
+	memoryUsed, memoryTotal, memoryValue := memoryUsage()
+	diskUsed, diskTotal, diskValue := diskUsage()
+	if c.demo {
+		memoryTotal = 2_000_000_000
+		memoryUsed = 852_000_000
+		memoryValue = 42.6
+		diskTotal = 40_000_000_000
+		diskUsed = 10_960_000_000
+		diskValue = 27.4
+	}
+	processes, processCount := c.processSnapshot(memoryTotal)
+	if c.demo && len(processes) == 0 {
+		processes = []model.ProcessStat{
+			{PID: 1421, Name: "sing-box", CPU: 6.9, RSSBytes: 84_230_000, MemoryPercent: 4.2},
+			{PID: os.Getpid(), Name: "wukong-panel", CPU: 4.1, RSSBytes: 40_190_000, MemoryPercent: 2.0},
+			{PID: 852, Name: "python3", CPU: 1.6, RSSBytes: 11_960_000, MemoryPercent: .6},
+			{PID: 872, Name: "tcpdump", CPU: .4, RSSBytes: 6_760_000, MemoryPercent: .3},
+		}
+		processCount = 106
+	}
+	m := model.Metric{Timestamp: now.Unix(), Interface: iface, RXBytes: accRX, TXBytes: accTX, RXBPS: float64(deltaRX) / elapsed, TXBPS: float64(deltaTX) / elapsed, CPU: c.cpuPercent(), Memory: memoryValue, MemoryUsedBytes: memoryUsed, MemoryTotalBytes: memoryTotal, Disk: diskValue, DiskUsedBytes: diskUsed, DiskTotalBytes: diskTotal, Load1: load1(), Uptime: uptime()}
 	if c.demo {
 		m.CPU = 18 + 8*math.Sin(float64(now.Unix())/17)
-		m.Memory = 42.6
-		m.Disk = 27.4
 		m.Load1 = .38
 	}
 	_ = c.store.UpdateTrafficState(iface, rx, tx, accRX, accTX)
@@ -214,6 +237,7 @@ func (c *Collector) sample() {
 	}
 	_ = c.store.AddDailyTraffic(now.In(location).Format("2006-01-02"), deltaRX, deltaTX, "internal")
 	_ = c.store.AddMetric(m)
+	_ = c.store.ReplaceProcesses(now.Unix(), processCount, processes)
 }
 
 func ImportVNStat(s *store.Store) error {
@@ -333,37 +357,132 @@ func (c *Collector) cpuPercent() float64 {
 	}
 	return value
 }
-func memoryPercent() float64 {
+func memoryUsage() (used, total int64, percent float64) {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		return 0
+		return 0, 0, 0
 	}
-	values := map[string]float64{}
+	values := map[string]int64{}
 	for _, line := range strings.Split(string(data), "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 2 {
-			values[strings.TrimSuffix(f[0], ":")], _ = strconv.ParseFloat(f[1], 64)
+			value, _ := strconv.ParseInt(f[1], 10, 64)
+			values[strings.TrimSuffix(f[0], ":")] = value * 1024
 		}
 	}
-	total := values["MemTotal"]
+	total = values["MemTotal"]
 	if total == 0 {
-		return 0
+		return 0, 0, 0
 	}
-	return (total - values["MemAvailable"]) / total * 100
+	used = max64(0, total-values["MemAvailable"])
+	return used, total, float64(used) / float64(total) * 100
 }
-func diskPercent() float64 {
+func diskUsage() (used, total int64, percent float64) {
 	var stat syscall.Statfs_t
 	if syscall.Statfs("/", &stat) != nil {
-		return 0
+		return 0, 0, 0
 	}
-	total := float64(stat.Blocks) * float64(stat.Bsize)
-	free := float64(stat.Bavail) * float64(stat.Bsize)
+	total = int64(stat.Blocks) * int64(stat.Bsize)
+	free := int64(stat.Bavail) * int64(stat.Bsize)
 	if total == 0 {
-		return 0
+		return 0, 0, 0
 	}
-	return (total - free) / total * 100
+	used = max64(0, total-free)
+	return used, total, float64(used) / float64(total) * 100
+}
+
+func parseProcessStat(data string) (string, uint64, bool) {
+	start, end := strings.Index(data, "("), strings.LastIndex(data, ")")
+	if start < 0 || end <= start {
+		return "", 0, false
+	}
+	fields := strings.Fields(data[end+1:])
+	if len(fields) < 13 {
+		return "", 0, false
+	}
+	userTicks, errUser := strconv.ParseUint(fields[11], 10, 64)
+	systemTicks, errSystem := strconv.ParseUint(fields[12], 10, 64)
+	if errUser != nil || errSystem != nil {
+		return "", 0, false
+	}
+	return data[start+1 : end], userTicks + systemTicks, true
+}
+
+func processStatus(data string) (string, int64) {
+	name := ""
+	rss := int64(0)
+	for _, line := range strings.Split(data, "\n") {
+		if strings.HasPrefix(line, "Name:") {
+			name = strings.TrimSpace(strings.TrimPrefix(line, "Name:"))
+		}
+		if strings.HasPrefix(line, "VmRSS:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				value, _ := strconv.ParseInt(fields[1], 10, 64)
+				rss = value * 1024
+			}
+		}
+	}
+	return name, rss
+}
+
+func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, 0
+	}
+	totalCPU, _ := readCPU()
+	totalDelta := uint64(0)
+	if totalCPU >= c.lastProcessTotal {
+		totalDelta = totalCPU - c.lastProcessTotal
+	}
+	current := map[int]uint64{}
+	items := []model.ProcessStat{}
+	totalCount := 0
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		statData, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		name, ticks, ok := parseProcessStat(string(statData))
+		if !ok {
+			continue
+		}
+		totalCount++
+		statusData, _ := os.ReadFile("/proc/" + entry.Name() + "/status")
+		statusName, rss := processStatus(string(statusData))
+		if statusName != "" {
+			name = statusName
+		}
+		cpu := 0.0
+		if previous, exists := c.lastProcessCPU[pid]; exists && ticks >= previous && totalDelta > 0 {
+			cpu = float64(ticks-previous) / float64(totalDelta) * float64(max(1, runtime.NumCPU())) * 100
+		}
+		memoryPercent := 0.0
+		if memoryTotal > 0 {
+			memoryPercent = float64(rss) / float64(memoryTotal) * 100
+		}
+		current[pid] = ticks
+		items = append(items, model.ProcessStat{PID: pid, Name: name, CPU: cpu, RSSBytes: rss, MemoryPercent: memoryPercent})
+	}
+	c.lastProcessCPU = current
+	c.lastProcessTotal = totalCPU
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CPU == items[j].CPU {
+			return items[i].RSSBytes > items[j].RSSBytes
+		}
+		return items[i].CPU > items[j].CPU
+	})
+	if len(items) > 100 {
+		items = items[:100]
+	}
+	return items, totalCount
 }
 func load1() float64 {
 	data, err := os.ReadFile("/proc/loadavg")
