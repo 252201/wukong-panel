@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2 部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.3.0-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.3.1-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -27,11 +27,24 @@
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh
 ```
 
+在终端中执行上述命令会进入交互向导，可依次填写面板域名、HTTPS 端口、证书方式和 ACME 邮箱。填写域名后默认申请 Let’s Encrypt 证书，并可选择 HTTP-01 自动验证、仅 IPv4、仅 IPv6 或 Cloudflare DNS-01。纯脚本/CI 环境会自动保持非交互；也可显式使用 `--unattended`。
+
+申请证书前应先把域名的 A/AAAA 记录指向该 VPS。HTTP-01 要求公网 TCP 80 可达；IPv4 NAT 端口受限但 IPv6 不限端口时，选择“仅 IPv6”，并确保域名 AAAA 记录正确。
+
+NAT VPS、只开放指定端口的 VPS，需要在安装时把面板 HTTPS 端口设为可用的 **TCP** 端口。通过管道执行时，参数必须写在 `sh -s --` 后面：
+
+```bash
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --port 你的可用TCP端口
+```
+
+如果提供商的公网端口与 VPS 内部端口不同，安装器的 `--port` 填内部监听端口，浏览器使用提供商分配的公网映射端口。IPv6 没有限制时，安装完成信息也会单独打印带方括号的 IPv6 访问地址。
+
 常用安装参数：
 
 ```bash
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.3.0 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.3.1 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -39,6 +52,10 @@ sudo sh install.sh --domain panel.example.com \
 
 # HTTP-01（要求公网 80 未被占用）
 sudo sh install.sh --domain panel.example.com --acme http --email admin@example.com
+
+# IPv6 HTTP-01（适用于 IPv4 NAT 端口受限、IPv6 公网 80 可达）
+sudo sh install.sh --domain panel.example.com --acme http \
+  --acme-ip-version 6 --email admin@example.com
 
 # Cloudflare DNS-01
 sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
