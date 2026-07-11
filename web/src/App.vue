@@ -54,11 +54,12 @@ const trafficPercent = computed(() => {
   return Math.min(100, data.trafficUsed / data.trafficQuota * 100)
 })
 const quotaRing = computed(() => ({ '--progress': `${trafficPercent.value * 3.6}deg` }))
+const chartPeak = computed(() => Math.max(0, ...(overview.value?.history || []).flatMap(row => [row.rxBps, row.txBps])))
 function makeChartPath(field: 'rxBps' | 'txBps') {
   const rows = overview.value?.history || []
   if (rows.length < 2) return 'M 0 70 L 1000 70'
-  const max = Math.max(1, ...rows.flatMap(row => [row.rxBps, row.txBps]))
-  return rows.map((row, index) => `${index ? 'L' : 'M'} ${(index / (rows.length - 1)) * 1000} ${125 - (row[field] / max) * 105}`).join(' ')
+  const scale = Math.max(1, chartPeak.value)
+  return rows.map((row, index) => `${index ? 'L' : 'M'} ${(index / (rows.length - 1)) * 1000} ${125 - (row[field] / scale) * 105}`).join(' ')
 }
 const rxChartPath = computed(() => makeChartPath('rxBps'))
 const txChartPath = computed(() => makeChartPath('txBps'))
@@ -94,6 +95,14 @@ function bytes(value = 0) {
   return `${size.toFixed(index < 2 ? 0 : 2)} ${units[index]}`
 }
 function rate(value = 0) { return `${bytes(value)}/s` }
+function axisRate(value = 0) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B/s'
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
+  let size = value; let index = 0
+  while (size >= 1000 && index < units.length - 1) { size /= 1000; index++ }
+  const digits = index === 0 ? 0 : index === 1 ? 1 : 2
+  return `${size.toFixed(digits)} ${units[index]}`
+}
 function uptime(value = 0) { const days = Math.floor(value / 86400); const hours = Math.floor(value % 86400 / 3600); return days ? `${days}天 ${hours}时` : `${hours}时` }
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
 function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
@@ -241,7 +250,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <section class="panel-card trend-card">
           <div class="card-head flow-head"><div><span class="section-mark">流</span><div><h3>流量脉络</h3><p>最近 80 个采样点 · 每 10 秒刷新</p></div></div><div v-if="activeDevices.length" class="device-rack" aria-label="当前活跃设备"><span v-for="device in visibleDevices" :key="device.nodeId" class="device-chip" :title="`${device.nodeName} · HY2 最近窗口下行 ${rate(device.rateBps)}`"><i></i><b>{{ device.nodeName }}</b><em>{{ rate(device.rateBps) }}</em></span><span v-if="hiddenDeviceCount" class="device-overflow" :title="`另有 ${hiddenDeviceCount} 个活跃设备`">+{{ hiddenDeviceCount }}</span></div><div v-else class="device-silent"><i></i>设备静默</div></div>
           <div class="flow-metrics"><span class="flow-rx"><small>下载</small><b>{{ rate(overview?.now.rxBps) }}</b></span><span class="flow-tx"><small>上传</small><b>{{ rate(overview?.now.txBps) }}</b></span><em>设备速率来自 HY2 采集器最近完成窗口</em></div>
-          <div class="chart-wrap"><svg viewBox="0 0 1000 150" preserveAspectRatio="none" aria-label="实时下载与上传趋势"><defs><linearGradient id="jadeArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#52b690" stop-opacity=".28"/><stop offset="1" stop-color="#52b690" stop-opacity="0"/></linearGradient></defs><path :d="rxAreaPath" fill="url(#jadeArea)"/><path :d="rxChartPath" class="chart-line rx-line"/><path :d="txChartPath" class="chart-line tx-line"/></svg><div class="chart-grid"></div></div>
+          <div class="chart-wrap"><div class="chart-plot"><svg viewBox="0 0 1000 150" preserveAspectRatio="none" aria-label="实时下载与上传趋势"><defs><linearGradient id="jadeArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#52b690" stop-opacity=".28"/><stop offset="1" stop-color="#52b690" stop-opacity="0"/></linearGradient></defs><path :d="rxAreaPath" fill="url(#jadeArea)"/><path :d="rxChartPath" class="chart-line rx-line"/><path :d="txChartPath" class="chart-line tx-line"/></svg><div class="chart-grid"></div></div><div class="chart-axis" aria-label="流量速率刻度"><span>{{ axisRate(chartPeak) }}</span><span>{{ axisRate(chartPeak / 2) }}</span><span>0 B/s</span></div></div>
         </section>
 
         <section class="overview-lower">
