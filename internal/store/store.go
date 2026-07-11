@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS endpoint_daily (
   day TEXT NOT NULL, node_id TEXT NOT NULL, node_name TEXT NOT NULL, bytes INTEGER NOT NULL,
   PRIMARY KEY(day,node_id)
 );
+CREATE TABLE IF NOT EXISTS endpoint_recent (
+  node_id TEXT PRIMARY KEY, node_name TEXT NOT NULL, bytes INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS traffic_daily (
   day TEXT PRIMARY KEY, rx_bytes INTEGER NOT NULL, tx_bytes INTEGER NOT NULL, source TEXT NOT NULL
 );
@@ -377,6 +381,59 @@ func (s *Store) AddEndpointSample(ts int64, nodeID, nodeName, endpoint string, b
 	return tx.Commit()
 }
 
+type EndpointWindowSample struct {
+	NodeID   string
+	NodeName string
+	Endpoint string
+	Bytes    int64
+}
+
+func (s *Store) ReplaceEndpointWindow(ts int64, duration time.Duration, samples []EndpointWindowSample) error {
+	if duration <= 0 {
+		return errors.New("endpoint window duration must be positive")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM endpoint_recent"); err != nil {
+		return err
+	}
+	bucket := ts - ts%10
+	day := time.Unix(ts, 0).UTC().Format("2006-01-02")
+	nodeTotals := map[string]EndpointWindowSample{}
+	for _, sample := range samples {
+		if sample.NodeID == "" || sample.Endpoint == "" || sample.Bytes <= 0 {
+			continue
+		}
+		if _, err = tx.Exec(`INSERT INTO endpoint_samples(ts,node_id,endpoint,bytes) VALUES(?,?,?,?) ON CONFLICT(ts,node_id,endpoint) DO UPDATE SET bytes=bytes+excluded.bytes`, bucket, sample.NodeID, sample.Endpoint, sample.Bytes); err != nil {
+			return err
+		}
+		total := nodeTotals[sample.NodeID]
+		total.NodeID = sample.NodeID
+		total.NodeName = sample.NodeName
+		total.Bytes += sample.Bytes
+		nodeTotals[sample.NodeID] = total
+	}
+	durationMS := max(int64(1), duration.Milliseconds())
+	for _, total := range nodeTotals {
+		if _, err = tx.Exec(`INSERT INTO endpoint_recent(node_id,node_name,bytes,duration_ms,updated_at) VALUES(?,?,?,?,?)`, total.NodeID, total.NodeName, total.Bytes, durationMS, ts); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO endpoint_daily(day,node_id,node_name,bytes) VALUES(?,?,?,?) ON CONFLICT(day,node_id) DO UPDATE SET bytes=bytes+excluded.bytes,node_name=excluded.node_name`, day, total.NodeID, total.NodeName, total.Bytes); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec("DELETE FROM endpoint_samples WHERE ts<?", time.Now().Add(-24*time.Hour).Unix()); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM endpoint_daily WHERE day<?", time.Now().AddDate(0, 0, -90).UTC().Format("2006-01-02")); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) TopEndpoints(limit int) ([]model.EndpointStat, error) {
 	if limit < 1 || limit > 50 {
 		limit = 10
@@ -399,13 +456,13 @@ func (s *Store) TopEndpoints(limit int) ([]model.EndpointStat, error) {
 
 func (s *Store) ActiveDevices(window time.Duration, limit int) ([]model.DeviceTraffic, error) {
 	if window < 10*time.Second {
-		window = 30 * time.Second
+		window = 25 * time.Second
 	}
 	if limit < 1 || limit > 50 {
 		limit = 12
 	}
 	cutoff := time.Now().Add(-window).Unix()
-	rows, err := s.DB.Query(`SELECT e.node_id,COALESCE(n.name,e.node_id),SUM(e.bytes) FROM endpoint_samples e LEFT JOIN nodes n ON n.id=e.node_id WHERE e.ts>=? GROUP BY e.node_id ORDER BY SUM(e.bytes) DESC LIMIT ?`, cutoff, limit)
+	rows, err := s.DB.Query(`SELECT e.node_id,COALESCE(n.name,e.node_name,e.node_id),e.bytes,e.duration_ms FROM endpoint_recent e LEFT JOIN nodes n ON n.id=e.node_id WHERE e.updated_at>=? ORDER BY e.bytes DESC LIMIT ?`, cutoff, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -413,10 +470,11 @@ func (s *Store) ActiveDevices(window time.Duration, limit int) ([]model.DeviceTr
 	result := []model.DeviceTraffic{}
 	for rows.Next() {
 		var item model.DeviceTraffic
-		if err := rows.Scan(&item.NodeID, &item.NodeName, &item.Bytes); err != nil {
+		var durationMS int64
+		if err := rows.Scan(&item.NodeID, &item.NodeName, &item.Bytes, &durationMS); err != nil {
 			return nil, err
 		}
-		item.RateBPS = float64(item.Bytes) / window.Seconds()
+		item.RateBPS = float64(item.Bytes) / (float64(max(int64(1), durationMS)) / 1000)
 		result = append(result, item)
 	}
 	return result, rows.Err()

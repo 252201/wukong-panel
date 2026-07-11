@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -58,7 +59,35 @@ func (c *Collector) RunEndpoints(ctx context.Context) {
 	}
 }
 
-var endpointLine = regexp.MustCompile(`(?:IP6?|)\s+(.+?)\.(\d+) > (.+?)\.(\d+):.*length (\d+)`)
+var (
+	endpointLine = regexp.MustCompile(`^\s*(?:\d+(?:\.\d+)?\s+)?([^\s]+)\.(\d+) > ([^\s]+)\.(\d+):`)
+	ipv4Length   = regexp.MustCompile(`proto UDP \(\d+\), length (\d+)\)`)
+	ipv6Payload  = regexp.MustCompile(`payload length: (\d+)`)
+)
+
+func endpointPacket(line string, pendingBytes *int64) (sourcePort int, host, port string, packetBytes int64, ok bool) {
+	if strings.Contains(line, " IP6 ") {
+		if match := ipv6Payload.FindStringSubmatch(line); len(match) == 2 {
+			payload, _ := strconv.ParseInt(match[1], 10, 64)
+			*pendingBytes = payload + 40
+		}
+		return 0, "", "", 0, false
+	}
+	if strings.Contains(line, " IP ") {
+		if match := ipv4Length.FindStringSubmatch(line); len(match) == 2 {
+			*pendingBytes, _ = strconv.ParseInt(match[1], 10, 64)
+		}
+		return 0, "", "", 0, false
+	}
+	match := endpointLine.FindStringSubmatch(line)
+	if len(match) != 5 || *pendingBytes <= 0 {
+		return 0, "", "", 0, false
+	}
+	sourcePort, _ = strconv.Atoi(match[2])
+	host, port, packetBytes = strings.TrimSpace(match[3]), match[4], *pendingBytes
+	*pendingBytes = 0
+	return sourcePort, host, port, packetBytes, true
+}
 
 func (c *Collector) sampleEndpoints(parent context.Context) {
 	settings, err := c.store.Settings()
@@ -85,30 +114,54 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 	if iface == "" || iface == "auto" {
 		iface = defaultInterface()
 	}
-	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	args := []string{"-i", iface, "-nn", "-q", "-l", "-c", "500", "udp and (" + strings.Join(filters, " or ") + ")"}
-	output, _ := exec.CommandContext(ctx, "tcpdump", args...).CombinedOutput()
-	now := time.Now().Unix()
-	for _, line := range strings.Split(string(output), "\n") {
-		match := endpointLine.FindStringSubmatch(line)
-		if len(match) != 6 {
+	args := []string{"-i", iface, "-nn", "-tt", "-v", "-l", "udp and (" + strings.Join(filters, " or ") + ")"}
+	command := exec.CommandContext(ctx, "tcpdump", args...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return
+	}
+	command.Stderr = io.Discard
+	startedAt := time.Now()
+	if err = command.Start(); err != nil {
+		return
+	}
+	samples := map[string]store.EndpointWindowSample{}
+	var pendingBytes int64
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		sourcePort, host, port, packetBytes, ok := endpointPacket(scanner.Text(), &pendingBytes)
+		if !ok {
 			continue
 		}
-		sourcePort, _ := strconv.Atoi(match[2])
 		node, ok := byPort[sourcePort]
 		if !ok {
 			continue
 		}
-		bytes, _ := strconv.ParseInt(match[5], 10, 64)
-		host := strings.TrimSpace(match[3])
-		port := match[4]
 		endpoint := host + ":" + port
 		if strings.Contains(host, ":") {
 			endpoint = "[" + host + "]:" + port
 		}
-		_ = c.store.AddEndpointSample(now, node.ID, node.Name, endpoint, bytes)
+		key := node.ID + "\x00" + endpoint
+		sample := samples[key]
+		sample.NodeID = node.ID
+		sample.NodeName = node.Name
+		sample.Endpoint = endpoint
+		sample.Bytes += packetBytes
+		samples[key] = sample
 	}
+	_ = command.Wait()
+	duration := time.Since(startedAt)
+	if parent.Err() != nil || duration < time.Second {
+		return
+	}
+	now := time.Now().Unix()
+	window := make([]store.EndpointWindowSample, 0, len(samples))
+	for _, sample := range samples {
+		window = append(window, sample)
+	}
+	_ = c.store.ReplaceEndpointWindow(now, duration, window)
 }
 
 func (c *Collector) sample() {

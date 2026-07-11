@@ -152,7 +152,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, session 
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.Session) {
 	metrics, _ := s.store.Metrics(80)
-	devices, _ := s.store.ActiveDevices(30*time.Second, 12)
+	devices, _ := s.store.ActiveDevices(25*time.Second, 12)
 	nodes, _ := s.store.Nodes(r.Context())
 	settings, _ := s.store.Settings()
 	var now model.Metric

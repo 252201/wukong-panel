@@ -75,17 +75,24 @@ func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Unix()
-	if err := s.AddEndpointSample(now, node.ID, node.Name, "192.0.2.1:443", 3_000); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddEndpointSample(now, node.ID, node.Name, "192.0.2.2:443", 6_000); err != nil {
+	if err := s.ReplaceEndpointWindow(now, 9*time.Second, []EndpointWindowSample{
+		{NodeID: node.ID, NodeName: node.Name, Endpoint: "192.0.2.1:443", Bytes: 3_000},
+		{NodeID: node.ID, NodeName: node.Name, Endpoint: "192.0.2.2:443", Bytes: 6_000},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	devices, err := s.ActiveDevices(30*time.Second, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(devices) != 1 || devices[0].NodeName != node.Name || devices[0].Bytes != 9_000 || devices[0].RateBPS != 300 {
+	if len(devices) != 1 || devices[0].NodeName != node.Name || devices[0].Bytes != 9_000 || devices[0].RateBPS != 1_000 {
 		t.Fatalf("unexpected device aggregation: %#v", devices)
+	}
+	if err := s.ReplaceEndpointWindow(now+1, 8*time.Second, nil); err != nil {
+		t.Fatal(err)
+	}
+	devices, err = s.ActiveDevices(30*time.Second, 10)
+	if err != nil || len(devices) != 0 {
+		t.Fatalf("empty recent window did not clear active devices: %#v, %v", devices, err)
 	}
 }
