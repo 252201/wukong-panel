@@ -25,6 +25,14 @@ info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[失败]\033[0m %s\n' "$*" >&2; exit 1; }
 
+accept_acme_issue_status() {
+  case "$1" in
+    0) ;;
+    2) info "检测到已有未到续期时间的有效证书，跳过重复签发并继续安装" ;;
+    *) die "Let's Encrypt 证书申请失败（acme.sh 返回码 $1）" ;;
+  esac
+}
+
 prompt_value() {
   prompt_label=$1
   prompt_default=$2
@@ -206,19 +214,21 @@ elif [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; then
   [ -n "$DOMAIN" ] || die "ACME 申请需要 --domain"
   [ -n "$EMAIL" ] || EMAIL="admin@$(printf '%s' "$DOMAIN" | cut -d. -f2-)"
   if [ ! -x /root/.acme.sh/acme.sh ]; then curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" >/dev/null; fi
+  ACME_ISSUE_STATUS=0
   if [ "$ACME_METHOD" = "http" ]; then
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:|\])80$'; then die "公网 80 已被占用；请改用 --acme cloudflare 或导入现有证书"; fi
     info "申请 Let's Encrypt 证书（HTTP-01${ACME_IP_VERSION:+ / IPv$ACME_IP_VERSION}）"
     case "$ACME_IP_VERSION" in
-      4) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v4 --httpport 80 --keylength ec-256 --server letsencrypt ;;
-      6) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v6 --httpport 80 --keylength ec-256 --server letsencrypt ;;
-      *) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --httpport 80 --keylength ec-256 --server letsencrypt ;;
+      4) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v4 --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
+      6) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v6 --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
+      *) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
     esac
   else
     [ -n "${CF_Token:-}" ] || die "Cloudflare DNS-01 需要 CF_Token"
     [ -n "${CF_Zone_ID:-${CF_Account_ID:-}}" ] || die "Cloudflare DNS-01 还需要 CF_Zone_ID 或 CF_Account_ID"
-    /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --dns dns_cf --keylength ec-256 --server letsencrypt
+    /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --dns dns_cf --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$?
   fi
+  accept_acme_issue_status "$ACME_ISSUE_STATUS"
   /root/.acme.sh/acme.sh --install-cert -d "$DOMAIN" --ecc --fullchain-file "$TLS_CERT" --key-file "$TLS_KEY" --reloadcmd "nginx -t && nginx -s reload || true"
 else
   if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
