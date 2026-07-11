@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2 部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.3.3-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.3.4-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -27,7 +27,9 @@
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh
 ```
 
-在终端中执行上述命令会进入交互向导，可依次填写面板域名、HTTPS 端口、证书方式和 ACME 邮箱。填写域名后默认申请 Let’s Encrypt 证书，并可选择 HTTP-01 自动验证、仅 IPv4、仅 IPv6 或 Cloudflare DNS-01。纯脚本/CI 环境会自动保持非交互；也可显式使用 `--unattended`。
+同一个入口同时负责安装、更新和卸载：未安装时进入安装向导；检测到已有面板时默认提供安全更新，并可选择重新配置、保留数据卸载或彻底卸载。更新模式只替换校验后的二进制，不重新申请证书、不改 nginx 和节点配置；更新前会停服务复制 SQLite 一致性备份，健康检查失败则自动回滚。
+
+首次安装可依次填写面板域名、HTTPS 端口、证书方式和 ACME 邮箱。填写域名后默认申请 Let’s Encrypt 证书，并可选择 HTTP-01 自动验证、仅 IPv4、仅 IPv6 或 Cloudflare DNS-01。纯脚本/CI 环境会自动保持非交互；也可显式使用 `--unattended`。
 
 申请证书前应先把域名的 A/AAAA 记录指向该 VPS。HTTP-01 要求公网 TCP 80 可达；IPv4 NAT 端口受限但 IPv6 不限端口时，选择“仅 IPv6”，并确保域名 AAAA 记录正确。
 
@@ -43,8 +45,20 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 常用安装参数：
 
 ```bash
+# 直接更新到 latest（不修改现有配置、证书和节点）
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --update
+
+# 卸载面板并保留配置、数据库和 sing-box 节点
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --uninstall
+
+# 完全删除悟空面板配置和数据；仍不删除 sing-box 节点
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --uninstall --purge
+
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.3.3 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.3.4 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -142,11 +156,11 @@ sing-box 1.10 配置以兼容模式接管；新配置根据检测到的 sing-box
 ## 卸载
 
 ```bash
-sudo sh uninstall.sh          # 保留面板数据、节点和 sing-box
-sudo sh uninstall.sh --purge  # 额外删除悟空面板自身数据
+sudo sh install.sh --uninstall          # 保留面板数据、节点和 sing-box
+sudo sh install.sh --uninstall --purge  # 额外删除悟空面板自身数据
 ```
 
-卸载器不会删除 `/etc/s-box` 或任何节点服务。
+独立的 `uninstall.sh` 仍保留兼容。两种卸载入口都不会删除 `/etc/s-box` 或任何节点服务。
 
 ## License
 

@@ -3,6 +3,7 @@ set -eu
 
 REPO="252201/wukong-panel"
 VERSION="latest"
+ACTION="auto"
 DOMAIN=""
 PORT="9443"
 BASE_PATH=""
@@ -20,10 +21,27 @@ ACME_SET=false
 EMAIL_SET=false
 HAS_CONFIG_ARGS=false
 FORCE_INTERACTIVE=false
+PURGE=false
+PROMPT_TTY="/dev/tty"
+RECONFIGURE_ARGS=false
 
 info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[失败]\033[0m %s\n' "$*" >&2; exit 1; }
+
+detect_prompt_tty() {
+  detected="/dev/tty"
+  process_id=$$
+  while [ "$process_id" -gt 1 ] && [ -r "/proc/$process_id/status" ]; do
+    candidate=$(readlink "/proc/$process_id/fd/0" 2>/dev/null || true)
+    case "$candidate" in /dev/pts/*|/dev/tty*) [ -r "$candidate" ] && [ -w "$candidate" ] && detected="$candidate" ;; esac
+    parent_id=$(awk '/^PPid:/ {print $2}' "/proc/$process_id/status" 2>/dev/null || true)
+    case "$parent_id" in ''|*[!0-9]*) break ;; esac
+    [ "$parent_id" -ne "$process_id" ] || break
+    process_id=$parent_id
+  done
+  printf '%s' "$detected"
+}
 
 accept_acme_issue_status() {
   case "$1" in
@@ -37,16 +55,151 @@ prompt_value() {
   prompt_label=$1
   prompt_default=$2
   if [ -n "$prompt_default" ]; then
-    printf '%s [%s]: ' "$prompt_label" "$prompt_default" >/dev/tty
+    printf '%s [%s]: ' "$prompt_label" "$prompt_default" >"$PROMPT_TTY"
   else
-    printf '%s: ' "$prompt_label" >/dev/tty
+    printf '%s: ' "$prompt_label" >"$PROMPT_TTY"
   fi
-  IFS= read -r prompt_answer </dev/tty || prompt_answer=""
+  IFS= read -r prompt_answer <"$PROMPT_TTY" || prompt_answer=""
   if [ -n "$prompt_answer" ]; then printf '%s' "$prompt_answer"; else printf '%s' "$prompt_default"; fi
 }
 
 interactive_available() {
-  [ "$UNATTENDED" != true ] && { [ "$FORCE_INTERACTIVE" = true ] || [ "$HAS_CONFIG_ARGS" = false ]; } && [ -r /dev/tty ] && [ -w /dev/tty ] && (: </dev/tty) 2>/dev/null
+  [ "$UNATTENDED" != true ] && { [ "$FORCE_INTERACTIVE" = true ] || [ "$HAS_CONFIG_ARGS" = false ]; } && [ -r "$PROMPT_TTY" ] && [ -w "$PROMPT_TTY" ]
+}
+
+panel_installed() {
+  [ -x /usr/local/bin/wukong-panel ] && [ -r /etc/wukong-panel/env ]
+}
+
+resolve_auto_action() {
+  installed=$1
+  reconfigure=$2
+  if [ "$installed" = true ] && [ "$reconfigure" != true ]; then printf 'update'; else printf 'install'; fi
+}
+
+using_systemd() {
+  [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
+}
+
+uninstall_panel() {
+  purge=$1
+  info "停止并卸载悟空面板"
+  if using_systemd; then
+    systemctl disable --now wukong-web.service wukong-agent.service 2>/dev/null || true
+    rm -f /etc/systemd/system/wukong-web.service /etc/systemd/system/wukong-agent.service
+    systemctl daemon-reload
+  else
+    rc-service wukong-web stop 2>/dev/null || true
+    rc-service wukong-agent stop 2>/dev/null || true
+    rc-update del wukong-web default 2>/dev/null || true
+    rc-update del wukong-agent default 2>/dev/null || true
+    rm -f /etc/init.d/wukong-web /etc/init.d/wukong-agent
+  fi
+  rm -f /etc/nginx/conf.d/wukong-panel.conf /etc/nginx/http.d/wukong-panel.conf
+  rm -f /usr/local/bin/wukong-panel /usr/local/bin/wukongctl
+  if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+    if using_systemd; then systemctl reload nginx 2>/dev/null || true; else rc-service nginx reload 2>/dev/null || true; fi
+  fi
+  if [ "$purge" = true ]; then
+    rm -rf /var/lib/wukong-panel /etc/wukong-panel /run/wukong-panel
+    rm -f /var/log/wukong-agent.log /var/log/wukong-web.log
+    info "面板程序、配置和数据已彻底删除"
+  else
+    info "已保留 /var/lib/wukong-panel 与 /etc/wukong-panel，重新安装可恢复数据"
+  fi
+  info "悟空面板已卸载；sing-box 节点、节点配置和节点服务未改动"
+}
+
+download_panel_binary() {
+  if [ -n "$BINARY_SOURCE" ]; then
+    info "读取本地二进制"
+    cp "$BINARY_SOURCE" "$TMP_DIR/wukong-panel"
+  else
+    info "下载悟空面板 ${VERSION}（linux-${ASSET_ARCH}）"
+    if [ "$VERSION" = "latest" ]; then
+      BASE_URL="https://github.com/${REPO}/releases/latest/download"
+    else
+      case "$VERSION" in v*) ;; *) VERSION="v$VERSION" ;; esac
+      BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+    fi
+    curl -fL --retry 3 "$BASE_URL/wukong-panel-linux-${ASSET_ARCH}" -o "$TMP_DIR/wukong-panel"
+    curl -fL --retry 3 "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
+    expected=$(awk -v file="wukong-panel-linux-${ASSET_ARCH}" '$2 == file {print $1}' "$TMP_DIR/SHA256SUMS")
+    [ -n "$expected" ] || die "发布清单中没有当前架构"
+    if command -v openssl >/dev/null 2>&1; then
+      actual=$(openssl dgst -sha256 "$TMP_DIR/wukong-panel" | awk '{print $NF}')
+    elif command -v sha256sum >/dev/null 2>&1; then
+      actual=$(sha256sum "$TMP_DIR/wukong-panel" | awk '{print $1}')
+    else
+      die "缺少 openssl 或 sha256sum，无法校验更新包"
+    fi
+    [ "$actual" = "$expected" ] || die "二进制 SHA-256 校验失败"
+  fi
+  chmod 0755 "$TMP_DIR/wukong-panel"
+}
+
+stop_panel_services() {
+  if using_systemd; then
+    systemctl stop wukong-web.service wukong-agent.service 2>/dev/null || true
+  else
+    rc-service wukong-web stop 2>/dev/null || true
+    rc-service wukong-agent stop 2>/dev/null || true
+  fi
+}
+
+start_panel_services() {
+  if using_systemd; then
+    systemctl restart wukong-agent.service && systemctl restart wukong-web.service
+  else
+    rc-service wukong-agent restart && rc-service wukong-web restart
+  fi
+}
+
+wait_for_web() {
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    if curl -fsS --max-time 2 http://127.0.0.1:8788/healthz 2>/dev/null; then return 0; fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  return 1
+}
+
+update_panel() {
+  download_panel_binary
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  backup_dir="/var/lib/wukong-panel/backups/update-$timestamp"
+  install -d -m 0700 "$backup_dir"
+  cp -a /usr/local/bin/wukong-panel "$backup_dir/wukong-panel"
+  [ ! -r /etc/wukong-panel/env ] || cp -a /etc/wukong-panel/env "$backup_dir/env"
+  stop_panel_services
+  for database_file in /var/lib/wukong-panel/wukong.db*; do
+    [ -e "$database_file" ] || continue
+    if ! cp -a "$database_file" "$backup_dir/"; then
+      start_panel_services || true
+      die "数据库备份失败，已取消更新"
+    fi
+  done
+  if ! install -m 0755 "$TMP_DIR/wukong-panel" /usr/local/bin/wukong-panel || ! ln -sf /usr/local/bin/wukong-panel /usr/local/bin/wukongctl; then
+    install -m 0755 "$backup_dir/wukong-panel" /usr/local/bin/wukong-panel
+    start_panel_services || true
+    die "替换二进制失败，已恢复更新前版本"
+  fi
+  if start_panel_services && health=$(wait_for_web); then
+    info "悟空面板更新完成：$health"
+    info "更新前备份：$backup_dir"
+    return 0
+  fi
+  warn "新版本启动失败，正在自动回滚"
+  stop_panel_services
+  install -m 0755 "$backup_dir/wukong-panel" /usr/local/bin/wukong-panel
+  rm -f /var/lib/wukong-panel/wukong.db /var/lib/wukong-panel/wukong.db-shm /var/lib/wukong-panel/wukong.db-wal
+  for database_file in "$backup_dir"/wukong.db*; do
+    [ -e "$database_file" ] || continue
+    cp -a "$database_file" /var/lib/wukong-panel/
+  done
+  start_panel_services || true
+  die "更新失败，已恢复更新前版本；备份位于 $backup_dir"
 }
 
 usage() {
@@ -58,6 +211,10 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
+  --action ACTION      install、update 或 uninstall
+  --update             等同于 --action update
+  --uninstall          等同于 --action uninstall
+  --purge              卸载时同时删除面板配置和数据
   --port PORT          nginx HTTPS 监听端口（默认 9443）
   --domain DOMAIN      面板域名
   --base-path PATH     随机管理路径；留空时自动生成
@@ -76,15 +233,19 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --action) ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --update) ACTION=update; HAS_CONFIG_ARGS=true; shift ;;
+    --uninstall) ACTION=uninstall; HAS_CONFIG_ARGS=true; shift ;;
+    --purge) ACTION=uninstall; PURGE=true; HAS_CONFIG_ARGS=true; shift ;;
     --version) VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --domain) DOMAIN="$2"; DOMAIN_SET=true; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --port) PORT="$2"; PORT_SET=true; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --base-path) BASE_PATH="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --acme) ACME_METHOD="$2"; ACME_SET=true; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --acme-ip-version) ACME_IP_VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --cert-file) CERT_FILE="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --key-file) KEY_FILE="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
-    --email) EMAIL="$2"; EMAIL_SET=true; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --domain) DOMAIN="$2"; DOMAIN_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --port) PORT="$2"; PORT_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --base-path) BASE_PATH="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --acme) ACME_METHOD="$2"; ACME_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --acme-ip-version) ACME_IP_VERSION="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --cert-file) CERT_FILE="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --key-file) KEY_FILE="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --email) EMAIL="$2"; EMAIL_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --binary) BINARY_SOURCE="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --interactive) FORCE_INTERACTIVE=true; shift ;;
     --unattended|-y|--yes) UNATTENDED=true; shift ;;
@@ -95,8 +256,46 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || die "请使用 root 或 sudo 执行安装器"
+PROMPT_TTY=$(detect_prompt_tty)
 
+INTERACTIVE_SESSION=false
 if interactive_available; then
+  INTERACTIVE_SESSION=true
+  if [ "$ACTION" = "auto" ]; then
+    if panel_installed; then
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新面板（推荐，不改配置和节点）" "  2) 重新配置 / 修复安装" "  3) 卸载面板（保留配置和数据）" "  4) 完全卸载（删除面板配置和数据）" "  5) 取消" >"$PROMPT_TTY"
+      action_choice=$(prompt_value "选择" "1")
+      case "$action_choice" in 1|update) ACTION=update ;; 2|install|repair) ACTION=install ;; 3|uninstall) ACTION=uninstall ;; 4|purge) ACTION=uninstall; PURGE=true ;; 5|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+    else
+      printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
+      action_choice=$(prompt_value "选择" "1")
+      case "$action_choice" in 1|install) ACTION=install ;; 2|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+    fi
+  fi
+fi
+
+if [ "$ACTION" = "auto" ]; then
+  installed=false
+  panel_installed && installed=true
+  ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
+fi
+case "$ACTION" in install|update|uninstall) ;; *) die "--action 必须是 install、update 或 uninstall" ;; esac
+
+if [ "$ACTION" = "uninstall" ]; then
+  if [ "$INTERACTIVE_SESSION" = true ]; then
+    if [ "$PURGE" = true ]; then uninstall_scope="程序、配置和数据"; else uninstall_scope="程序（保留配置和数据）"; fi
+    confirm_uninstall=$(prompt_value "确认卸载${uninstall_scope}？(y/N)" "N")
+    case "$confirm_uninstall" in Y|y|yes|YES|Yes) ;; *) info "已取消卸载"; exit 0 ;; esac
+  fi
+  uninstall_panel "$PURGE"
+  exit 0
+fi
+
+if [ "$ACTION" = "update" ] && ! panel_installed; then
+  die "未检测到已安装的悟空面板，无法执行更新；请使用 --action install"
+fi
+
+if [ "$ACTION" = "install" ] && [ "$INTERACTIVE_SESSION" = true ]; then
   info "进入交互安装向导（直接回车采用默认值）"
   if [ "$DOMAIN_SET" != true ]; then
     DOMAIN=$(prompt_value "面板域名（留空则使用 IP 和自签名证书）" "$DOMAIN")
@@ -105,12 +304,12 @@ if interactive_available; then
     PORT=$(prompt_value "面板 HTTPS 端口" "$PORT")
   fi
   if [ -n "$DOMAIN" ] && [ "$ACME_SET" != true ]; then
-    printf '%s\n' "请选择 TLS 证书方式：" "  1) Let's Encrypt HTTP-01（推荐，域名需指向本机且公网 80 可达）" "  2) Let's Encrypt Cloudflare DNS-01" "  3) 自签名证书" >/dev/tty
+    printf '%s\n' "请选择 TLS 证书方式：" "  1) Let's Encrypt HTTP-01（推荐，域名需指向本机且公网 80 可达）" "  2) Let's Encrypt Cloudflare DNS-01" "  3) 自签名证书" >"$PROMPT_TTY"
     cert_choice=$(prompt_value "选择" "1")
     case "$cert_choice" in 1|http) ACME_METHOD=http ;; 2|cloudflare) ACME_METHOD=cloudflare ;; 3|selfsigned) ACME_METHOD=selfsigned ;; *) die "无效的证书方式选项: $cert_choice" ;; esac
   fi
   if [ "$ACME_METHOD" = "http" ] && [ -z "$ACME_IP_VERSION" ]; then
-    printf '%s\n' "请选择 HTTP-01 验证网络：" "  1) 自动选择" "  2) 仅 IPv4" "  3) 仅 IPv6（适合 IPv4 NAT 端口受限的 VPS）" >/dev/tty
+    printf '%s\n' "请选择 HTTP-01 验证网络：" "  1) 自动选择" "  2) 仅 IPv4" "  3) 仅 IPv6（适合 IPv4 NAT 端口受限的 VPS）" >"$PROMPT_TTY"
     ip_choice=$(prompt_value "选择" "1")
     case "$ip_choice" in 1|auto) ACME_IP_VERSION="" ;; 2|4) ACME_IP_VERSION=4 ;; 3|6) ACME_IP_VERSION=6 ;; *) die "无效的 IP 版本选项: $ip_choice" ;; esac
   fi
@@ -118,7 +317,7 @@ if interactive_available; then
     email_default="admin@$(printf '%s' "$DOMAIN" | cut -d. -f2-)"
     EMAIL=$(prompt_value "Let's Encrypt 账户邮箱" "$email_default")
   fi
-  printf '\n安装配置确认\n  域名: %s\n  HTTPS 端口: %s\n  证书方式: %s\n  HTTP-01 网络: %s\n\n' "${DOMAIN:-不使用域名}" "$PORT" "$ACME_METHOD" "${ACME_IP_VERSION:-自动/不适用}" >/dev/tty
+  printf '\n安装配置确认\n  域名: %s\n  HTTPS 端口: %s\n  证书方式: %s\n  HTTP-01 网络: %s\n\n' "${DOMAIN:-不使用域名}" "$PORT" "$ACME_METHOD" "${ACME_IP_VERSION:-自动/不适用}" >"$PROMPT_TTY"
   confirm_install=$(prompt_value "确认开始安装？(Y/n)" "Y")
   case "$confirm_install" in Y|y|yes|YES|Yes) ;; *) info "已取消安装"; exit 0 ;; esac
 fi
@@ -147,6 +346,14 @@ esac
 
 ARCH=$(uname -m)
 case "$ARCH" in x86_64|amd64) ASSET_ARCH="amd64" ;; aarch64|arm64) ASSET_ARCH="arm64" ;; *) die "不支持的架构: $ARCH" ;; esac
+
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+
+if [ "$ACTION" = "update" ]; then
+  update_panel
+  exit 0
+fi
 
 if [ "$SKIP_PACKAGES" != true ]; then
   info "安装运行依赖（$OS_ID / $INIT）"
@@ -177,28 +384,7 @@ if [ -z "$BASE_PATH" ]; then BASE_PATH="/wukong-$(openssl rand -hex 12)/"; fi
 case "$BASE_PATH" in /*) ;; *) BASE_PATH="/$BASE_PATH" ;; esac
 case "$BASE_PATH" in */) ;; *) BASE_PATH="$BASE_PATH/" ;; esac
 
-TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
-
-if [ -n "$BINARY_SOURCE" ]; then
-  info "安装本地二进制"
-  cp "$BINARY_SOURCE" "$TMP_DIR/wukong-panel"
-else
-  info "下载悟空面板 ${VERSION}（linux-${ASSET_ARCH}）"
-  if [ "$VERSION" = "latest" ]; then
-    BASE_URL="https://github.com/${REPO}/releases/latest/download"
-  else
-    case "$VERSION" in v*) ;; *) VERSION="v$VERSION" ;; esac
-    BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-  fi
-  curl -fL --retry 3 "$BASE_URL/wukong-panel-linux-${ASSET_ARCH}" -o "$TMP_DIR/wukong-panel"
-  curl -fL --retry 3 "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
-  expected=$(awk -v file="wukong-panel-linux-${ASSET_ARCH}" '$2 == file {print $1}' "$TMP_DIR/SHA256SUMS")
-  [ -n "$expected" ] || die "发布清单中没有当前架构"
-  actual=$(openssl dgst -sha256 "$TMP_DIR/wukong-panel" | awk '{print $NF}')
-  [ "$actual" = "$expected" ] || die "二进制 SHA-256 校验失败"
-fi
-chmod 0755 "$TMP_DIR/wukong-panel"
+download_panel_binary
 if [ -x /usr/local/bin/wukong-panel ]; then
   cp /usr/local/bin/wukong-panel "/var/lib/wukong-panel/wukong-panel.before-update"
 fi
@@ -355,17 +541,7 @@ EOF
   rc-service wukong-web restart
 fi
 
-WEB_READY=false
-attempt=0
-while [ "$attempt" -lt 30 ]; do
-  if curl -fsS --max-time 2 http://127.0.0.1:8788/healthz >/dev/null 2>&1; then
-    WEB_READY=true
-    break
-  fi
-  attempt=$((attempt + 1))
-  sleep 1
-done
-if [ "$WEB_READY" != true ]; then
+if ! wait_for_web >/dev/null; then
   if [ "$INIT" = "systemd" ]; then
     systemctl status wukong-agent.service wukong-web.service --no-pager >&2 || true
   else
