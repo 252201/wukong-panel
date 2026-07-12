@@ -316,6 +316,10 @@ func (s *Store) UpdateNodeBinds(id, ipv4, ipv6 string) error {
 	_, err := s.DB.Exec("UPDATE nodes SET ipv4_bind=?,ipv6_bind=?,updated_at=? WHERE id=?", ipv4, ipv6, time.Now().Unix(), id)
 	return err
 }
+func (s *Store) UpdateNodeConfigVersions(version string) error {
+	_, err := s.DB.Exec("UPDATE nodes SET config_version=?,updated_at=? WHERE config_version<>?", version, time.Now().Unix(), version)
+	return err
+}
 func (s *Store) DeleteNode(id string) error {
 	_, err := s.DB.Exec("DELETE FROM nodes WHERE id=?", id)
 	return err

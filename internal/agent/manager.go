@@ -40,6 +40,7 @@ type Manager struct {
 }
 
 func (m *Manager) RunReconciler(ctx context.Context) {
+	_ = m.ReconcileRuntimeVersion(ctx)
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -47,9 +48,21 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			_ = m.ReconcileRuntimeVersion(ctx)
 			_ = m.ReconcileBindings(ctx)
 		}
 	}
+}
+
+func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
+	if m.cfg.Demo {
+		return nil
+	}
+	version := m.Version(ctx)
+	if version == "" || version == "not-installed" {
+		return errors.New("sing-box version is unavailable")
+	}
+	return m.store.UpdateNodeConfigVersions(version)
 }
 
 func (m *Manager) ReconcileBindings(ctx context.Context) error {

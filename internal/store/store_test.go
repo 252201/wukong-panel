@@ -98,6 +98,25 @@ func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeConfigVersionsTracksRuntimeVersion(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "legacy", Name: "Legacy", Protocol: "hysteria2", Mode: "v6only", ListenPort: 45119, ServiceName: "sing-box-legacy", ServiceManager: "openrc", ConfigPath: "/etc/s-box/legacy.json", ConfigVersion: "1.10.7", Ownership: "imported", Status: "active"}
+	if err := s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateNodeConfigVersions("1.13.14"); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := s.Nodes(t.Context())
+	if err != nil || len(nodes) != 1 || nodes[0].ConfigVersion != "1.13.14" {
+		t.Fatalf("runtime version not synchronized: %#v, %v", nodes, err)
+	}
+}
+
 func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

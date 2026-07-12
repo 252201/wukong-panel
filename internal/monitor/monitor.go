@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -428,6 +429,26 @@ func processStatus(data string) (string, int64) {
 	return name, rss
 }
 
+func processDisplayName(name string, cmdline []byte) string {
+	if name != "wukong-panel" {
+		return name
+	}
+	fields := strings.FieldsFunc(string(cmdline), func(r rune) bool { return r == 0 })
+	if len(fields) < 2 || filepath.Base(fields[0]) != "wukong-panel" {
+		return name
+	}
+	switch fields[1] {
+	case "web":
+		return "悟空 Web"
+	case "agent":
+		return "悟空 Agent"
+	case "serve":
+		return "悟空单体服务"
+	default:
+		return name
+	}
+}
+
 func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -459,6 +480,10 @@ func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int
 		statusName, rss := processStatus(string(statusData))
 		if statusName != "" {
 			name = statusName
+		}
+		if name == "wukong-panel" {
+			cmdline, _ := os.ReadFile("/proc/" + entry.Name() + "/cmdline")
+			name = processDisplayName(name, cmdline)
 		}
 		cpu := 0.0
 		if previous, exists := c.lastProcessCPU[pid]; exists && ticks >= previous && totalDelta > 0 {

@@ -47,6 +47,25 @@ func TestProcessStatusReadsNameAndRSS(t *testing.T) {
 	}
 }
 
+func TestProcessDisplayNameOnlyClassifiesWukongSubcommands(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmdline string
+		want    string
+	}{
+		{"wukong-panel", "/usr/local/bin/wukong-panel\x00web\x00", "悟空 Web"},
+		{"wukong-panel", "/usr/local/bin/wukong-panel\x00agent\x00", "悟空 Agent"},
+		{"wukong-panel", "/usr/local/bin/wukong-panel\x00serve\x00", "悟空单体服务"},
+		{"wukong-panel", "/usr/local/bin/wukong-panel\x00doctor\x00", "wukong-panel"},
+		{"python3", "python3\x00script.py\x00--token\x00secret\x00", "python3"},
+	}
+	for _, test := range tests {
+		if got := processDisplayName(test.name, []byte(test.cmdline)); got != test.want {
+			t.Fatalf("processDisplayName(%q) = %q, want %q", test.cmdline, got, test.want)
+		}
+	}
+}
+
 func TestProcessSnapshotOnLinux(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("requires Linux procfs")
