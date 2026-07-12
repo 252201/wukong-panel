@@ -4,6 +4,7 @@ set -eu
 REPO="252201/wukong-panel"
 VERSION="latest"
 ACTION="auto"
+SINGBOX_VERSION="1.11.15"
 DOMAIN=""
 PORT="9443"
 BASE_PATH=""
@@ -81,6 +82,16 @@ using_systemd() {
   [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
 }
 
+sha256_file() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    die "缺少 openssl 或 sha256sum，无法校验下载包"
+  fi
+}
+
 uninstall_panel() {
   purge=$1
   info "停止并卸载悟空面板"
@@ -126,13 +137,7 @@ download_panel_binary() {
     curl -fL --retry 3 "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
     expected=$(awk -v file="wukong-panel-linux-${ASSET_ARCH}" '$2 == file {print $1}' "$TMP_DIR/SHA256SUMS")
     [ -n "$expected" ] || die "发布清单中没有当前架构"
-    if command -v openssl >/dev/null 2>&1; then
-      actual=$(openssl dgst -sha256 "$TMP_DIR/wukong-panel" | awk '{print $NF}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual=$(sha256sum "$TMP_DIR/wukong-panel" | awk '{print $1}')
-    else
-      die "缺少 openssl 或 sha256sum，无法校验更新包"
-    fi
+    actual=$(sha256_file "$TMP_DIR/wukong-panel")
     [ "$actual" = "$expected" ] || die "二进制 SHA-256 校验失败"
   fi
   chmod 0755 "$TMP_DIR/wukong-panel"
@@ -202,6 +207,192 @@ update_panel() {
   die "更新失败，已恢复更新前版本；备份位于 $backup_dir"
 }
 
+singbox_binary_path() {
+  path=""
+  if [ -r /etc/wukong-panel/env ]; then path=$(sed -n 's/^WUKONG_SINGBOX_BIN=//p' /etc/wukong-panel/env | head -1); fi
+  printf '%s' "${path:-/etc/s-box/sing-box}"
+}
+
+singbox_config_dir() {
+  path=""
+  if [ -r /etc/wukong-panel/env ]; then path=$(sed -n 's/^WUKONG_SINGBOX_CONFIG_DIR=//p' /etc/wukong-panel/env | head -1); fi
+  printf '%s' "${path:-/etc/s-box}"
+}
+
+singbox_version_of() {
+  "$1" version 2>/dev/null | sed -n 's/^sing-box version //p' | head -1
+}
+
+singbox_expected_sha256() {
+  case "$1-$2" in
+    1.11.15-amd64) printf '950af37eb2d7e55dddae34a18411cd617303fd99d2dc75bc76b6dd9fcd97d9c5' ;;
+    1.11.15-arm64) printf '20a6a9cd259a95411599f811a5066513a98db63705a51121252ad27daf96c029' ;;
+    *) return 1 ;;
+  esac
+}
+
+download_singbox_binary() {
+  download_target_version=${SINGBOX_VERSION#v}
+  download_expected=$(singbox_expected_sha256 "$download_target_version" "$ASSET_ARCH") || die "悟空面板尚未验证 sing-box $download_target_version / $ASSET_ARCH，请先更新面板的版本清单"
+  command -v tar >/dev/null 2>&1 || die "缺少 tar，无法解压 sing-box"
+  download_archive="sing-box-${download_target_version}-linux-${ASSET_ARCH}.tar.gz"
+  download_url="https://github.com/SagerNet/sing-box/releases/download/v${download_target_version}/${download_archive}"
+  info "下载悟空验证版本 sing-box $download_target_version（linux-$ASSET_ARCH）"
+  curl -fL --retry 3 "$download_url" -o "$TMP_DIR/$download_archive"
+  download_actual=$(sha256_file "$TMP_DIR/$download_archive")
+  [ "$download_actual" = "$download_expected" ] || die "sing-box 官方资产 SHA-256 校验失败"
+  tar -xzf "$TMP_DIR/$download_archive" -C "$TMP_DIR"
+  SINGBOX_CANDIDATE="$TMP_DIR/sing-box-${download_target_version}-linux-${ASSET_ARCH}/sing-box"
+  [ -x "$SINGBOX_CANDIDATE" ] || die "sing-box 发布包内未找到可执行文件"
+  download_candidate_version=$(singbox_version_of "$SINGBOX_CANDIDATE")
+  [ "$download_candidate_version" = "$download_target_version" ] || die "sing-box 包版本不匹配：期望 $download_target_version，实际 ${download_candidate_version:-unknown}"
+}
+
+check_singbox_configs() {
+  check_binary=$1
+  check_config_dir=$(singbox_config_dir)
+  check_found=false
+  for check_config_file in "$check_config_dir"/*.json; do
+    [ -f "$check_config_file" ] || continue
+    check_found=true
+    if ! "$check_binary" check -c "$check_config_file"; then
+      warn "配置不兼容：$check_config_file"
+      return 1
+    fi
+  done
+  [ "$check_found" = true ] || warn "未在 $check_config_dir 找到 sing-box JSON 配置"
+}
+
+capture_active_singbox_services() {
+  capture_output=$1
+  capture_binary=$2
+  : >"$capture_output"
+  if using_systemd; then
+    for capture_unit_file in /etc/systemd/system/sing-box*.service /usr/lib/systemd/system/sing-box*.service /lib/systemd/system/sing-box*.service; do
+      [ -f "$capture_unit_file" ] || continue
+      grep -F "$capture_binary" "$capture_unit_file" >/dev/null 2>&1 || continue
+      capture_unit=$(basename "$capture_unit_file")
+      systemctl is-active --quiet "$capture_unit" || continue
+      printf 'systemd:%s\n' "$capture_unit" >>"$capture_output"
+    done
+  else
+    for capture_init_file in /etc/init.d/sing-box*; do
+      [ -f "$capture_init_file" ] || continue
+      grep -F "$capture_binary" "$capture_init_file" >/dev/null 2>&1 || continue
+      capture_service=$(basename "$capture_init_file")
+      rc-service "$capture_service" status >/dev/null 2>&1 || continue
+      printf 'openrc:%s\n' "$capture_service" >>"$capture_output"
+    done
+  fi
+  sort -u "$capture_output" >"$capture_output.sorted"
+  mv "$capture_output.sorted" "$capture_output"
+}
+
+stop_singbox_services() {
+  stop_services_file=$1
+  stop_failed=false
+  while IFS=: read -r stop_manager stop_service; do
+    [ -n "$stop_service" ] || continue
+    if [ "$stop_manager" = systemd ]; then systemctl stop "$stop_service" || stop_failed=true; else rc-service "$stop_service" stop || stop_failed=true; fi
+  done <"$stop_services_file"
+  [ "$stop_failed" = false ]
+}
+
+start_singbox_services() {
+  start_services_file=$1
+  start_failed=false
+  while IFS=: read -r start_manager start_service; do
+    [ -n "$start_service" ] || continue
+    if [ "$start_manager" = systemd ]; then systemctl restart "$start_service" || start_failed=true; else rc-service "$start_service" restart || start_failed=true; fi
+  done <"$start_services_file"
+  sleep 2
+  while IFS=: read -r start_manager start_service; do
+    [ -n "$start_service" ] || continue
+    if [ "$start_manager" = systemd ]; then systemctl is-active --quiet "$start_service" || return 1; else rc-service "$start_service" status >/dev/null 2>&1 || return 1; fi
+  done <"$start_services_file"
+  [ "$start_failed" = false ]
+}
+
+backup_singbox() {
+  label=$1
+  binary=$2
+  services_file=$3
+  version=$(singbox_version_of "$binary")
+  backup_root=/var/lib/wukong-panel/backups/sing-box
+  backup_dir="$backup_root/$(date +%Y%m%d-%H%M%S)-$$-${label}-${version:-unknown}"
+  install -d -m 0700 "$backup_dir/configs"
+  cp -a "$binary" "$backup_dir/sing-box"
+  cp -a "$services_file" "$backup_dir/active-services"
+  config_dir=$(singbox_config_dir)
+  for config_file in "$config_dir"/*.json; do [ ! -f "$config_file" ] || cp -a "$config_file" "$backup_dir/configs/"; done
+  printf '%s\n' "$version" >"$backup_dir/VERSION"
+  printf '%s' "$backup_dir"
+}
+
+update_singbox() {
+  singbox_binary=$(singbox_binary_path)
+  [ -x "$singbox_binary" ] || die "未找到 sing-box 二进制：$singbox_binary"
+  singbox_current_version=$(singbox_version_of "$singbox_binary")
+  singbox_target_version=${SINGBOX_VERSION#v}
+  if [ "$singbox_current_version" = "$singbox_target_version" ]; then info "sing-box 已是 $singbox_target_version，无需更新"; return 0; fi
+  download_singbox_binary
+  info "用新版本检查全部 sing-box 配置"
+  check_singbox_configs "$SINGBOX_CANDIDATE" || die "新版本与现有配置不兼容，未修改任何文件"
+  singbox_services_file="$TMP_DIR/singbox-active-services"
+  capture_active_singbox_services "$singbox_services_file" "$singbox_binary"
+  singbox_backup_dir=$(backup_singbox update "$singbox_binary" "$singbox_services_file")
+  if ! stop_singbox_services "$singbox_services_file"; then start_singbox_services "$singbox_services_file" || true; die "无法停止全部 sing-box 服务，已取消更新"; fi
+  if ! install -m 0755 "$SINGBOX_CANDIDATE" "$singbox_binary"; then
+    install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary" || true
+    start_singbox_services "$singbox_services_file" || true
+    die "替换 sing-box 二进制失败，已恢复旧版"
+  fi
+  if check_singbox_configs "$singbox_binary" && start_singbox_services "$singbox_services_file"; then
+    rm -f /var/lib/wukong-panel/backups/sing-box/previous
+    ln -s "$singbox_backup_dir" /var/lib/wukong-panel/backups/sing-box/previous
+    info "sing-box 已从 ${singbox_current_version:-unknown} 更新到 $singbox_target_version"
+    info "旧版本备份：$singbox_backup_dir"
+    return 0
+  fi
+  warn "新版本启动失败，正在恢复 sing-box ${singbox_current_version:-unknown}"
+  stop_singbox_services "$singbox_services_file" || true
+  install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary"
+  start_singbox_services "$singbox_services_file" || true
+  die "sing-box 更新失败，已自动恢复旧版"
+}
+
+rollback_singbox() {
+  rollback_binary=$(singbox_binary_path)
+  [ -x "$rollback_binary" ] || die "未找到 sing-box 二进制：$rollback_binary"
+  rollback_backup_root=/var/lib/wukong-panel/backups/sing-box
+  rollback_previous=$(readlink "$rollback_backup_root/previous" 2>/dev/null || true)
+  [ -n "$rollback_previous" ] && [ -x "$rollback_previous/sing-box" ] || die "没有可回退的 sing-box 备份"
+  rollback_version=$(singbox_version_of "$rollback_previous/sing-box")
+  info "用备份版本检查当前全部 sing-box 配置"
+  check_singbox_configs "$rollback_previous/sing-box" || die "当前配置与备份版本不兼容，已拒绝回退"
+  rollback_services_file="$TMP_DIR/singbox-active-services"
+  capture_active_singbox_services "$rollback_services_file" "$rollback_binary"
+  rollback_current_backup=$(backup_singbox rollback "$rollback_binary" "$rollback_services_file")
+  if ! stop_singbox_services "$rollback_services_file"; then start_singbox_services "$rollback_services_file" || true; die "无法停止全部 sing-box 服务，已取消回退"; fi
+  if ! install -m 0755 "$rollback_previous/sing-box" "$rollback_binary"; then
+    install -m 0755 "$rollback_current_backup/sing-box" "$rollback_binary" || true
+    start_singbox_services "$rollback_services_file" || true
+    die "替换 sing-box 二进制失败，已恢复操作前版本"
+  fi
+  if check_singbox_configs "$rollback_binary" && start_singbox_services "$rollback_services_file"; then
+    rm -f "$rollback_backup_root/previous"
+    ln -s "$rollback_current_backup" "$rollback_backup_root/previous"
+    info "sing-box 已回退到 ${rollback_version:-unknown}"
+    info "刚才版本已保留：$rollback_current_backup"
+    return 0
+  fi
+  warn "回退版本启动失败，正在恢复当前版本"
+  stop_singbox_services "$rollback_services_file" || true
+  install -m 0755 "$rollback_current_backup/sing-box" "$rollback_binary"
+  start_singbox_services "$rollback_services_file" || true
+  die "sing-box 回退失败，已恢复操作前版本"
+}
+
 usage() {
   cat <<'EOF'
 悟空面板安装器
@@ -213,6 +404,9 @@ usage() {
 常用参数：
   --action ACTION      install、update 或 uninstall
   --update             等同于 --action update
+  --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
+  --rollback-sing-box  回退到上一次保留的 sing-box 版本
+  --sing-box-version VERSION  指定悟空支持的 sing-box 版本
   --uninstall          等同于 --action uninstall
   --purge              卸载时同时删除面板配置和数据
   --port PORT          nginx HTTPS 监听端口（默认 9443）
@@ -235,6 +429,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --action) ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --update) ACTION=update; HAS_CONFIG_ARGS=true; shift ;;
+    --update-sing-box) ACTION=singbox-update; HAS_CONFIG_ARGS=true; shift ;;
+    --rollback-sing-box) ACTION=singbox-rollback; HAS_CONFIG_ARGS=true; shift ;;
+    --sing-box-version) ACTION=singbox-update; SINGBOX_VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --uninstall) ACTION=uninstall; HAS_CONFIG_ARGS=true; shift ;;
     --purge) ACTION=uninstall; PURGE=true; HAS_CONFIG_ARGS=true; shift ;;
     --version) VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
@@ -263,9 +460,9 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新面板（推荐，不改配置和节点）" "  2) 重新配置 / 修复安装" "  3) 卸载面板（保留配置和数据）" "  4) 完全卸载（删除面板配置和数据）" "  5) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 更新 sing-box（保留旧版，可回退）" "  3) 回退 sing-box 到上一版本" "  4) 重新配置 / 修复安装" "  5) 卸载面板（保留配置和数据）" "  6) 完全卸载（删除面板配置和数据）" "  7) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|install|repair) ACTION=install ;; 3|uninstall) ACTION=uninstall ;; 4|purge) ACTION=uninstall; PURGE=true ;; 5|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|singbox-update) ACTION=singbox-update ;; 3|singbox-rollback) ACTION=singbox-rollback ;; 4|install|repair) ACTION=install ;; 5|uninstall) ACTION=uninstall ;; 6|purge) ACTION=uninstall; PURGE=true ;; 7|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
@@ -279,7 +476,7 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|uninstall) ;; *) die "--action 必须是 install、update 或 uninstall" ;; esac
+case "$ACTION" in install|update|uninstall|singbox-update|singbox-rollback) ;; *) die "--action 必须是 install、update、uninstall、singbox-update 或 singbox-rollback" ;; esac
 
 if [ "$ACTION" = "uninstall" ]; then
   if [ "$INTERACTIVE_SESSION" = true ]; then
@@ -291,8 +488,23 @@ if [ "$ACTION" = "uninstall" ]; then
   exit 0
 fi
 
-if [ "$ACTION" = "update" ] && ! panel_installed; then
-  die "未检测到已安装的悟空面板，无法执行更新；请使用 --action install"
+case "$ACTION" in
+  update|singbox-update|singbox-rollback) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
+esac
+
+if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-update" ]; then
+  current_singbox=$(singbox_version_of "$(singbox_binary_path)")
+  confirm_singbox=$(prompt_value "确认将 sing-box 从 ${current_singbox:-unknown} 更新到 ${SINGBOX_VERSION#v}？旧版会保留 (y/N)" "N")
+  case "$confirm_singbox" in Y|y|yes|YES|Yes) ;; *) info "已取消 sing-box 更新"; exit 0 ;; esac
+fi
+
+if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-rollback" ]; then
+  previous_path=$(readlink /var/lib/wukong-panel/backups/sing-box/previous 2>/dev/null || true)
+  previous_version=""
+  [ -z "$previous_path" ] || previous_version=$(singbox_version_of "$previous_path/sing-box")
+  [ -n "$previous_version" ] || die "没有可回退的 sing-box 备份"
+  confirm_singbox=$(prompt_value "确认回退 sing-box 到 $previous_version？(y/N)" "N")
+  case "$confirm_singbox" in Y|y|yes|YES|Yes) ;; *) info "已取消 sing-box 回退"; exit 0 ;; esac
 fi
 
 if [ "$ACTION" = "install" ] && [ "$INTERACTIVE_SESSION" = true ]; then
@@ -352,6 +564,14 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
 if [ "$ACTION" = "update" ]; then
   update_panel
+  exit 0
+fi
+if [ "$ACTION" = "singbox-update" ]; then
+  update_singbox
+  exit 0
+fi
+if [ "$ACTION" = "singbox-rollback" ]; then
+  rollback_singbox
   exit 0
 fi
 
