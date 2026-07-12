@@ -21,6 +21,7 @@ import (
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
@@ -33,6 +34,7 @@ type AgentAPI interface {
 	Create(context.Context, model.NodeCreateRequest) (model.Node, error)
 	Action(context.Context, string, model.NodeActionRequest) error
 	Share(context.Context, string) (model.Share, error)
+	MigrationPlan(context.Context, string) (singboxconfig.Plan, error)
 }
 
 type Server struct {
@@ -63,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
 	mux.HandleFunc("GET /api/v1/imports/scan", s.auth(s.scan, false))
+	mux.HandleFunc("GET /api/v1/system/sing-box/migration", s.auth(s.singBoxMigration, false))
 	mux.HandleFunc("POST /api/v1/imports/confirm", s.auth(s.confirmImport, true))
 	mux.HandleFunc("GET /api/v1/jobs", s.auth(s.jobs, false))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.auth(s.job, false))
@@ -323,6 +326,18 @@ func (s *Server) scan(w http.ResponseWriter, r *http.Request, session store.Sess
 		return
 	}
 	writeJSON(w, 200, items)
+}
+func (s *Server) singBoxMigration(w http.ResponseWriter, r *http.Request, session store.Session) {
+	target := r.URL.Query().Get("target")
+	if target == "" {
+		target = "1.13.14"
+	}
+	plan, err := s.agent.MigrationPlan(r.Context(), target)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, plan)
 }
 func (s *Server) confirmImport(w http.ResponseWriter, r *http.Request, session store.Session) {
 	var request struct {

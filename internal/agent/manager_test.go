@@ -30,7 +30,7 @@ func TestBuildLegacyConfig(t *testing.T) {
 }
 
 func TestBuildModernConfig(t *testing.T) {
-	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.14.0")
+	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.13.14")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,17 @@ func TestBuildModernConfig(t *testing.T) {
 	}
 	if strings.Contains(text, `"domain_strategy"`) {
 		t.Fatal("modern config contains removed domain_strategy")
+	}
+}
+
+func TestBuildRuleActionConfig(t *testing.T) {
+	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.11.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(payload)
+	if !strings.Contains(text, `"action": "sniff"`) || !strings.Contains(text, `"domain_strategy"`) || strings.Contains(text, `"domain_resolver"`) {
+		t.Fatalf("1.11 capability split is incorrect: %s", text)
 	}
 }
 

@@ -9,12 +9,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 )
 
 type Server struct {
@@ -51,6 +53,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("POST /nodes", s.authorize(s.create))
 	mux.HandleFunc("POST /nodes/{id}/action", s.authorize(s.action))
 	mux.HandleFunc("GET /nodes/{id}/share", s.authorize(s.share))
+	mux.HandleFunc("GET /sing-box/migration-plan", s.authorize(s.migrationPlan))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -126,6 +129,18 @@ func (s *Server) share(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, share)
 }
+func (s *Server) migrationPlan(w http.ResponseWriter, r *http.Request) {
+	target := r.URL.Query().Get("target")
+	if target == "" {
+		target = "1.13.14"
+	}
+	plan, err := s.manager.MigrationPlan(r.Context(), target)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, plan)
+}
 
 type Client struct {
 	http  *http.Client
@@ -194,6 +209,11 @@ func (c *Client) Share(ctx context.Context, id string) (model.Share, error) {
 	var share model.Share
 	err := c.request(ctx, "GET", "/nodes/"+id+"/share", nil, &share)
 	return share, err
+}
+func (c *Client) MigrationPlan(ctx context.Context, target string) (singboxconfig.Plan, error) {
+	var plan singboxconfig.Plan
+	err := c.request(ctx, "GET", "/sing-box/migration-plan?target="+url.QueryEscape(target), nil, &plan)
+	return plan, err
 }
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {

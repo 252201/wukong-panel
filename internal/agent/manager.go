@@ -29,6 +29,7 @@ import (
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
@@ -138,6 +139,13 @@ func (m *Manager) Version(ctx context.Context) string {
 		return match[1]
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func (m *Manager) MigrationPlan(_ context.Context, target string) (singboxconfig.Plan, error) {
+	if m.cfg.Demo {
+		return singboxconfig.Plan{Target: target, Compatible: true, Files: []singboxconfig.FilePlan{}}, nil
+	}
+	return singboxconfig.PlanDirectory(m.cfg.ConfigDir, target)
 }
 
 func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
@@ -500,7 +508,7 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 
 func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, keyPath, version string) ([]byte, error) {
 	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
-	modern := majorMinor(version) >= 114
+	capabilities := singboxconfig.CapabilitiesFor(version)
 	outbounds := []any{}
 	rules := []any{}
 	direct := func(tag, strategy string) map[string]any {
@@ -511,7 +519,7 @@ func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, ke
 		if request.IPv6Bind != "" {
 			o["inet6_bind_address"] = request.IPv6Bind
 		}
-		if modern {
+		if capabilities.NewDNSServers {
 			o["domain_resolver"] = map[string]any{"server": "local", "strategy": strategy}
 		} else {
 			o["domain_strategy"] = strategy
@@ -530,14 +538,16 @@ func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, ke
 	if request.Mode == "prefer_v6" && len(request.V6OnlyDomains) > 0 {
 		outbounds = append(outbounds, direct("out-v6only", "ipv6_only"))
 		rule := map[string]any{"domain_suffix": request.V6OnlyDomains, "outbound": "out-v6only"}
-		if modern {
+		if capabilities.RuleActions {
 			rule["action"] = "route"
 		}
 		rules = append(rules, rule)
 	}
 	root := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": []any{inbound}, "outbounds": outbounds, "route": map[string]any{"rules": rules, "final": final}}
-	if modern {
+	if capabilities.NewDNSServers {
 		root["dns"] = map[string]any{"servers": []any{map[string]any{"type": "local", "tag": "local"}}}
+	}
+	if capabilities.RuleActions {
 		root["route"].(map[string]any)["rules"] = append([]any{map[string]any{"action": "sniff"}}, rules...)
 	}
 	return json.MarshalIndent(root, "", "  ")
@@ -760,16 +770,6 @@ func numberValue(v any) float64 {
 		return n
 	}
 	return 0
-}
-func majorMinor(version string) int {
-	re := regexp.MustCompile(`(\d+)\.(\d+)`)
-	m := re.FindStringSubmatch(version)
-	if len(m) < 3 {
-		return 110
-	}
-	major, _ := strconv.Atoi(m[1])
-	minor, _ := strconv.Atoi(m[2])
-	return major*100 + minor
 }
 func hostForURI(host string) string {
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {

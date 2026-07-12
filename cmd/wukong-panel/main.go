@@ -7,18 +7,21 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/252201/wukong-panel/internal/agent"
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/monitor"
 	"github.com/252201/wukong-panel/internal/security"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 	webserver "github.com/252201/wukong-panel/internal/web"
 )
@@ -47,9 +50,16 @@ func (d directAgent) Action(ctx context.Context, id string, r model.NodeActionRe
 func (d directAgent) Share(ctx context.Context, id string) (model.Share, error) {
 	return d.manager.Share(ctx, id)
 }
+func (d directAgent) MigrationPlan(ctx context.Context, target string) (singboxconfig.Plan, error) {
+	return d.manager.MigrationPlan(ctx, target)
+}
 
 func main() {
 	cfg := config.Parse(version)
+	if cfg.Command == "singbox" {
+		runSingBoxCLI(context.Background(), cfg, cfg.Args)
+		return
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		log.Fatal(err)
 	}
@@ -137,7 +147,92 @@ func main() {
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:
-		log.Fatalf("unknown command %q (use serve, agent, web, init, doctor, scan)", cfg.Command)
+		log.Fatalf("unknown command %q (use serve, agent, web, init, doctor, scan, node, singbox)", cfg.Command)
+	}
+}
+
+func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
+	if len(args) == 0 {
+		log.Fatal("usage: wukong-panel singbox plan|migrate|check-interfaces|probe [options]")
+	}
+	flags := flag.NewFlagSet("singbox "+args[0], flag.ExitOnError)
+	target := flags.String("target", "1.13.14", "target sing-box version")
+	configDir := flags.String("config-dir", cfg.ConfigDir, "source configuration directory")
+	outputDir := flags.String("output-dir", "", "migration output directory")
+	binary := flags.String("binary", cfg.SingBoxBin, "sing-box binary used for protocol probing")
+	server := flags.String("server", "", "override HY2 server address for an external-path probe")
+	serverName := flags.String("server-name", "", "TLS server name for an external-path probe")
+	jsonOutput := flags.Bool("json", false, "print JSON result")
+	if err := flags.Parse(args[1:]); err != nil {
+		log.Fatal(err)
+	}
+	var plan singboxconfig.Plan
+	var err error
+	switch args[0] {
+	case "plan":
+		plan, err = singboxconfig.PlanDirectory(*configDir, *target)
+	case "migrate":
+		if *outputDir == "" {
+			log.Fatal("--output-dir is required")
+		}
+		plan, err = singboxconfig.MigrateDirectory(*configDir, *outputDir, *target)
+	case "check-interfaces":
+		plan, err = singboxconfig.PlanDirectory(*configDir, *target)
+		if err == nil {
+			for _, file := range plan.Files {
+				for _, name := range file.Interfaces {
+					if _, interfaceErr := net.InterfaceByName(name); interfaceErr != nil {
+						err = fmt.Errorf("configuration %s references unavailable network interface %s", file.Path, name)
+						break
+					}
+				}
+			}
+		}
+	case "probe":
+		probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		results, probeErr := singboxconfig.ProbeDirectory(probeCtx, *binary, *configDir, *server, *serverName)
+		if *jsonOutput {
+			_ = json.NewEncoder(os.Stdout).Encode(results)
+		} else {
+			for _, result := range results {
+				status := "OK"
+				if !result.OK {
+					status = "FAILED"
+				}
+				fmt.Printf("%s %s:%d %s\n", status, filepath.Base(result.Config), result.Port, result.Error)
+			}
+		}
+		if probeErr != nil {
+			log.Fatal(probeErr)
+		}
+		return
+	default:
+		log.Fatalf("unknown singbox subcommand %q", args[0])
+	}
+	if *jsonOutput {
+		_ = json.NewEncoder(os.Stdout).Encode(plan)
+	} else {
+		printMigrationPlan(plan)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func printMigrationPlan(plan singboxconfig.Plan) {
+	fmt.Printf("sing-box target: %s\ncompatible: %t\nchanges: %d\nwarnings: %d\nerrors: %d\n", plan.Target, plan.Compatible, plan.Changes, plan.Warnings, plan.Errors)
+	for _, file := range plan.Files {
+		fmt.Printf("\n%s\n", file.Path)
+		for _, change := range file.Changes {
+			fmt.Printf("  + %s\n", change)
+		}
+		for _, warning := range file.Warnings {
+			fmt.Printf("  ! %s\n", warning)
+		}
+		for _, problem := range file.Errors {
+			fmt.Printf("  x %s\n", problem)
+		}
 	}
 }
 
