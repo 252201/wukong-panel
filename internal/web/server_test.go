@@ -12,6 +12,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
@@ -24,6 +25,9 @@ func (fakeAgent) Create(context.Context, model.NodeCreateRequest) (model.Node, e
 }
 func (fakeAgent) Action(context.Context, string, model.NodeActionRequest) error { return nil }
 func (fakeAgent) Share(context.Context, string) (model.Share, error)            { return model.Share{}, nil }
+func (fakeAgent) MigrationPlan(context.Context, string) (singboxconfig.Plan, error) {
+	return singboxconfig.Plan{Compatible: true}, nil
+}
 
 func TestBillingPeriodBeforeAndAfterResetDay(t *testing.T) {
 	tz := "Asia/Shanghai"

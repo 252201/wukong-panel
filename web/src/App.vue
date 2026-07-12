@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeItem, type Overview, type Settings, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeItem, type Overview, type Settings, type SingBoxMigrationPlan, type TrafficBucket, type TrafficTimeline } from './api'
 
 type Page = 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 
@@ -19,6 +19,8 @@ const jobs = ref<Job[]>([])
 const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, collectEndpoints: true })
 const endpoints = ref<EndpointStat[]>([])
 const timeline = ref<TrafficTimeline | null>(null)
+const migrationPlan = ref<SingBoxMigrationPlan | null>(null)
+const migrationLoading = ref(false)
 const timelineRange = ref<'today' | 'billing'>('today')
 const activeTimelineBucket = ref<number | null>(null)
 const deviceLimit = ref(3)
@@ -197,6 +199,12 @@ async function rotateSubscription() {
   try { const result = await api.rotateSubscription(); settings.value.subscriptionToken = `${result.token.slice(0, 4)}••••${result.token.slice(-4)}`; notify('订阅令牌已轮换') }
   catch (error) { notify(error instanceof Error ? error.message : '轮换失败') }
 }
+async function scanSingBoxMigration() {
+  migrationLoading.value = true
+  try { migrationPlan.value = await api.singBoxMigration(); notify('sing-box 配置兼容性扫描完成') }
+  catch (error) { notify(error instanceof Error ? error.message : '兼容性扫描失败') }
+  finally { migrationLoading.value = false }
+}
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
@@ -298,6 +306,12 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <div class="page-intro"><div><p>HOST VITALS</p><h2>主机资源与运行态势</h2></div><span class="live-badge"><i></i>Agent 正常</span></div>
         <section class="vital-grid"><article v-for="item in vitalItems" :key="item.name"><div class="vital-dial" :style="{ '--vital': `${item.value * 3.6}deg` }"><b>{{ item.value.toFixed(1) }}<small>%</small></b></div><h3>{{ item.name }}</h3><p>{{ item.meta }}</p><strong v-if="item.usage" class="vital-usage">{{ item.usage }}</strong></article></section>
         <section class="panel-card host-table"><div class="card-head"><div><span class="section-mark jade">机</span><div><h3>系统信息</h3><p>不展示进程完整命令行</p></div></div></div><dl><div><dt>出口网卡</dt><dd>{{ overview?.now.interface || '—' }}</dd></div><div><dt>运行时间</dt><dd>{{ uptime(overview?.now.uptime) }}</dd></div><div><dt>sing-box</dt><dd>{{ overview?.singBoxVersion }}</dd></div><div><dt>悟空面板</dt><dd>{{ overview?.panelVersion }}</dd></div><div><dt>服务模式</dt><dd>Web / Root Agent 分权</dd></div><div><dt>指标保留</dt><dd>90 天</dd></div></dl></section>
+        <section class="panel-card migration-panel">
+          <div class="card-head"><div><span class="section-mark">迁</span><div><h3>sing-box 升级预检</h3><p>目标稳定版 1.13.14 · 只读扫描，不修改配置</p></div></div><button class="secondary" :disabled="migrationLoading" @click="scanSingBoxMigration">{{ migrationLoading ? '扫描中…' : '扫描兼容性' }}</button></div>
+          <div v-if="migrationPlan" class="migration-summary" :class="migrationPlan.compatible ? 'compatible' : 'blocked'"><strong>{{ migrationPlan.compatible ? '可以安全生成迁移配置' : '存在阻断项，需要人工处理' }}</strong><span>{{ migrationPlan.files.length }} 个配置 · {{ migrationPlan.changes }} 项变更 · {{ migrationPlan.warnings }} 项提醒 · {{ migrationPlan.errors }} 项阻断</span></div>
+          <div v-if="migrationPlan" class="migration-files"><article v-for="file in migrationPlan.files" :key="file.path"><div><b>{{ file.path.split('/').pop() }}</b><small v-if="file.interfaces?.length">引用网卡 {{ file.interfaces.join(', ') }}</small></div><span>{{ file.changes.length }} 项变更</span><ul v-if="file.changes.length || file.warnings.length || file.errors.length"><li v-for="item in file.changes" :key="`c-${item}`">＋ {{ item }}</li><li v-for="item in file.warnings" :key="`w-${item}`" class="warning">! {{ item }}</li><li v-for="item in file.errors" :key="`e-${item}`" class="error">× {{ item }}</li></ul></article></div>
+          <p v-else class="migration-empty">扫描结果会列出字段迁移、共享配置、网卡依赖和无法自动处理的项目。实际升级仍由 root 权限安全安装流程执行。</p>
+        </section>
         <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span>CPU</span><span>内存</span></div><div class="process-scroll"><div v-for="process in overview?.processes || []" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="process.name">{{ process.name }}</b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div></section>
       </div>
 

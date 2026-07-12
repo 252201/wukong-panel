@@ -38,7 +38,7 @@ func Parse(version string) Config {
 	if len(originalArgs) > 2 {
 		cfg.Args = originalArgs[2:]
 	}
-	if command == "node" {
+	if command == "node" || command == "singbox" {
 		os.Args = []string{os.Args[0]}
 	}
 	flag.StringVar(&cfg.Listen, "listen", env("WUKONG_LISTEN", "127.0.0.1:8788"), "web listen address")

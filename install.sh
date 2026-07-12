@@ -4,7 +4,7 @@ set -eu
 REPO="252201/wukong-panel"
 VERSION="latest"
 ACTION="auto"
-SINGBOX_VERSION="1.11.15"
+SINGBOX_VERSION="1.13.14"
 DOMAIN=""
 PORT="9443"
 BASE_PATH=""
@@ -16,6 +16,7 @@ ACME_IP_VERSION=""
 UNATTENDED=false
 SKIP_PACKAGES=false
 BINARY_SOURCE="${WUKONG_BINARY:-}"
+MIGRATOR_SOURCE="${WUKONG_MIGRATOR_BINARY:-}"
 DOMAIN_SET=false
 PORT_SET=false
 ACME_SET=false
@@ -225,6 +226,8 @@ singbox_version_of() {
 
 singbox_expected_sha256() {
   case "$1-$2" in
+    1.13.14-amd64) printf 'f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697' ;;
+    1.13.14-arm64) printf '4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e' ;;
     1.11.15-amd64) printf '950af37eb2d7e55dddae34a18411cd617303fd99d2dc75bc76b6dd9fcd97d9c5' ;;
     1.11.15-arm64) printf '20a6a9cd259a95411599f811a5066513a98db63705a51121252ad27daf96c029' ;;
     *) return 1 ;;
@@ -250,7 +253,7 @@ download_singbox_binary() {
 
 check_singbox_configs() {
   check_binary=$1
-  check_config_dir=$(singbox_config_dir)
+  check_config_dir=${2:-$(singbox_config_dir)}
   check_found=false
   for check_config_file in "$check_config_dir"/*.json; do
     [ -f "$check_config_file" ] || continue
@@ -261,6 +264,55 @@ check_singbox_configs() {
     fi
   done
   [ "$check_found" = true ] || warn "未在 $check_config_dir 找到 sing-box JSON 配置"
+}
+
+prepare_singbox_migrator() {
+  if [ -n "$MIGRATOR_SOURCE" ]; then
+    [ -x "$MIGRATOR_SOURCE" ] || die "迁移器不可执行：$MIGRATOR_SOURCE"
+    SINGBOX_MIGRATOR=$MIGRATOR_SOURCE
+    return
+  fi
+  download_panel_binary
+  SINGBOX_MIGRATOR="$TMP_DIR/wukong-panel"
+}
+
+prepare_singbox_configs() {
+  prepare_source_dir=$(singbox_config_dir)
+  SINGBOX_MIGRATED_DIR="$TMP_DIR/singbox-migrated"
+  prepare_singbox_migrator
+  info "生成 sing-box ${SINGBOX_VERSION#v} 配置迁移预览"
+  "$SINGBOX_MIGRATOR" singbox plan --target "${SINGBOX_VERSION#v}" --config-dir "$prepare_source_dir"
+  if [ "$INTERACTIVE_SESSION" = true ]; then
+    prepare_confirm=$(prompt_value "确认按以上预览迁移配置并更新 sing-box？旧版本包会完整保留 (y/N)" "N")
+    case "$prepare_confirm" in Y|y|yes|YES|Yes) ;; *) info "已取消 sing-box 更新"; exit 0 ;; esac
+  fi
+  "$SINGBOX_MIGRATOR" singbox migrate --target "${SINGBOX_VERSION#v}" --config-dir "$prepare_source_dir" --output-dir "$SINGBOX_MIGRATED_DIR"
+  "$SINGBOX_MIGRATOR" singbox check-interfaces --target "${SINGBOX_VERSION#v}" --config-dir "$SINGBOX_MIGRATED_DIR" >/dev/null
+}
+
+install_singbox_configs() {
+  install_source_dir=$1
+  install_config_dir=$(singbox_config_dir)
+  for install_config_file in "$install_source_dir"/*.json; do
+    [ -f "$install_config_file" ] || continue
+    install_config_target="$install_config_dir/$(basename "$install_config_file")"
+    install -m 0600 "$install_config_file" "$install_config_target.tmp"
+    mv "$install_config_target.tmp" "$install_config_target"
+  done
+}
+
+restore_singbox_configs() {
+  restore_source_dir=$1
+  restore_config_dir=$(singbox_config_dir)
+  for restore_current in "$restore_config_dir"/*.json; do [ ! -f "$restore_current" ] || rm -f "$restore_current"; done
+  install_singbox_configs "$restore_source_dir"
+}
+
+probe_singbox_nodes() {
+  probe_binary=$1
+  probe_config_dir=${2:-$(singbox_config_dir)}
+  info "执行 HY2 协议级真实流量探测"
+  "$SINGBOX_MIGRATOR" singbox probe --binary "$probe_binary" --config-dir "$probe_config_dir"
 }
 
 capture_active_singbox_services() {
@@ -320,13 +372,34 @@ backup_singbox() {
   version=$(singbox_version_of "$binary")
   backup_root=/var/lib/wukong-panel/backups/sing-box
   backup_dir="$backup_root/$(date +%Y%m%d-%H%M%S)-$$-${label}-${version:-unknown}"
-  install -d -m 0700 "$backup_dir/configs"
+  install -d -m 0700 "$backup_dir/configs" "$backup_dir/services"
   cp -a "$binary" "$backup_dir/sing-box"
   cp -a "$services_file" "$backup_dir/active-services"
   config_dir=$(singbox_config_dir)
   for config_file in "$config_dir"/*.json; do [ ! -f "$config_file" ] || cp -a "$config_file" "$backup_dir/configs/"; done
+  while IFS=: read -r backup_manager backup_service; do
+    [ -n "$backup_service" ] || continue
+    if [ "$backup_manager" = systemd ]; then
+      for backup_unit in "/etc/systemd/system/$backup_service" "/usr/lib/systemd/system/$backup_service" "/lib/systemd/system/$backup_service"; do [ ! -f "$backup_unit" ] || cp -a "$backup_unit" "$backup_dir/services/"; done
+    else
+      [ ! -f "/etc/init.d/$backup_service" ] || cp -a "/etc/init.d/$backup_service" "$backup_dir/services/"
+    fi
+  done <"$services_file"
   printf '%s\n' "$version" >"$backup_dir/VERSION"
+  { printf '%s  sing-box\n' "$(sha256_file "$backup_dir/sing-box")"; for checksum_file in "$backup_dir/configs"/*.json "$backup_dir/services"/*; do [ ! -f "$checksum_file" ] || printf '%s  %s/%s\n' "$(sha256_file "$checksum_file")" "$(basename "$(dirname "$checksum_file")")" "$(basename "$checksum_file")"; done; } >"$backup_dir/SHA256SUMS"
   printf '%s' "$backup_dir"
+}
+
+verify_singbox_backup() {
+  verify_backup_dir=$1
+  [ -s "$verify_backup_dir/SHA256SUMS" ] || return 1
+  while read -r verify_expected verify_relative; do
+    [ -n "$verify_expected" ] && [ -n "$verify_relative" ] || return 1
+    verify_file="$verify_backup_dir/$verify_relative"
+    [ -f "$verify_file" ] || return 1
+    verify_actual=$(sha256_file "$verify_file")
+    [ "$verify_actual" = "$verify_expected" ] || return 1
+  done <"$verify_backup_dir/SHA256SUMS"
 }
 
 update_singbox() {
@@ -336,18 +409,25 @@ update_singbox() {
   singbox_target_version=${SINGBOX_VERSION#v}
   if [ "$singbox_current_version" = "$singbox_target_version" ]; then info "sing-box 已是 $singbox_target_version，无需更新"; return 0; fi
   download_singbox_binary
-  info "用新版本检查全部 sing-box 配置"
-  check_singbox_configs "$SINGBOX_CANDIDATE" || die "新版本与现有配置不兼容，未修改任何文件"
+  prepare_singbox_configs
+  info "用新版本检查全部迁移后配置"
+  check_singbox_configs "$SINGBOX_CANDIDATE" "$SINGBOX_MIGRATED_DIR" || die "迁移后配置仍与新版本不兼容，未修改任何文件"
   singbox_services_file="$TMP_DIR/singbox-active-services"
   capture_active_singbox_services "$singbox_services_file" "$singbox_binary"
   singbox_backup_dir=$(backup_singbox update "$singbox_binary" "$singbox_services_file")
   if ! stop_singbox_services "$singbox_services_file"; then start_singbox_services "$singbox_services_file" || true; die "无法停止全部 sing-box 服务，已取消更新"; fi
+  if ! install_singbox_configs "$SINGBOX_MIGRATED_DIR"; then
+    restore_singbox_configs "$singbox_backup_dir/configs" || true
+    start_singbox_services "$singbox_services_file" || true
+    die "安装迁移配置失败，已恢复旧配置"
+  fi
   if ! install -m 0755 "$SINGBOX_CANDIDATE" "$singbox_binary"; then
     install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary" || true
+    restore_singbox_configs "$singbox_backup_dir/configs" || true
     start_singbox_services "$singbox_services_file" || true
     die "替换 sing-box 二进制失败，已恢复旧版"
   fi
-  if check_singbox_configs "$singbox_binary" && start_singbox_services "$singbox_services_file"; then
+  if check_singbox_configs "$singbox_binary" && start_singbox_services "$singbox_services_file" && probe_singbox_nodes "$singbox_binary"; then
     rm -f /var/lib/wukong-panel/backups/sing-box/previous
     ln -s "$singbox_backup_dir" /var/lib/wukong-panel/backups/sing-box/previous
     info "sing-box 已从 ${singbox_current_version:-unknown} 更新到 $singbox_target_version"
@@ -357,6 +437,7 @@ update_singbox() {
   warn "新版本启动失败，正在恢复 sing-box ${singbox_current_version:-unknown}"
   stop_singbox_services "$singbox_services_file" || true
   install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary"
+  restore_singbox_configs "$singbox_backup_dir/configs"
   start_singbox_services "$singbox_services_file" || true
   die "sing-box 更新失败，已自动恢复旧版"
 }
@@ -367,19 +448,26 @@ rollback_singbox() {
   rollback_backup_root=/var/lib/wukong-panel/backups/sing-box
   rollback_previous=$(readlink "$rollback_backup_root/previous" 2>/dev/null || true)
   [ -n "$rollback_previous" ] && [ -x "$rollback_previous/sing-box" ] || die "没有可回退的 sing-box 备份"
+  [ -d "$rollback_previous/configs" ] || die "回退备份缺少配置快照"
+  verify_singbox_backup "$rollback_previous" || die "回退备份校验和不匹配，已拒绝使用"
+  prepare_singbox_migrator
   rollback_version=$(singbox_version_of "$rollback_previous/sing-box")
-  info "用备份版本检查当前全部 sing-box 配置"
-  check_singbox_configs "$rollback_previous/sing-box" || die "当前配置与备份版本不兼容，已拒绝回退"
+  info "用备份版本检查配套配置快照"
+  check_singbox_configs "$rollback_previous/sing-box" "$rollback_previous/configs" || die "备份中的二进制与配置快照不匹配，已拒绝回退"
   rollback_services_file="$TMP_DIR/singbox-active-services"
   capture_active_singbox_services "$rollback_services_file" "$rollback_binary"
   rollback_current_backup=$(backup_singbox rollback "$rollback_binary" "$rollback_services_file")
   if ! stop_singbox_services "$rollback_services_file"; then start_singbox_services "$rollback_services_file" || true; die "无法停止全部 sing-box 服务，已取消回退"; fi
+  restore_singbox_configs "$rollback_previous/configs"
   if ! install -m 0755 "$rollback_previous/sing-box" "$rollback_binary"; then
     install -m 0755 "$rollback_current_backup/sing-box" "$rollback_binary" || true
+    restore_singbox_configs "$rollback_current_backup/configs" || true
     start_singbox_services "$rollback_services_file" || true
     die "替换 sing-box 二进制失败，已恢复操作前版本"
   fi
-  if check_singbox_configs "$rollback_binary" && start_singbox_services "$rollback_services_file"; then
+  rollback_target_services="$rollback_previous/active-services"
+  [ -f "$rollback_target_services" ] || rollback_target_services="$rollback_services_file"
+  if check_singbox_configs "$rollback_binary" && start_singbox_services "$rollback_target_services" && probe_singbox_nodes "$rollback_binary"; then
     rm -f "$rollback_backup_root/previous"
     ln -s "$rollback_current_backup" "$rollback_backup_root/previous"
     info "sing-box 已回退到 ${rollback_version:-unknown}"
@@ -389,6 +477,7 @@ rollback_singbox() {
   warn "回退版本启动失败，正在恢复当前版本"
   stop_singbox_services "$rollback_services_file" || true
   install -m 0755 "$rollback_current_backup/sing-box" "$rollback_binary"
+  restore_singbox_configs "$rollback_current_backup/configs"
   start_singbox_services "$rollback_services_file" || true
   die "sing-box 回退失败，已恢复操作前版本"
 }
@@ -402,7 +491,7 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update 或 uninstall
+  --action ACTION      install、update、uninstall、singbox-update 或 singbox-rollback
   --update             等同于 --action update
   --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
   --rollback-sing-box  回退到上一次保留的 sing-box 版本
@@ -491,12 +580,6 @@ fi
 case "$ACTION" in
   update|singbox-update|singbox-rollback) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
 esac
-
-if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-update" ]; then
-  current_singbox=$(singbox_version_of "$(singbox_binary_path)")
-  confirm_singbox=$(prompt_value "确认将 sing-box 从 ${current_singbox:-unknown} 更新到 ${SINGBOX_VERSION#v}？旧版会保留 (y/N)" "N")
-  case "$confirm_singbox" in Y|y|yes|YES|Yes) ;; *) info "已取消 sing-box 更新"; exit 0 ;; esac
-fi
 
 if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-rollback" ]; then
   previous_path=$(readlink /var/lib/wukong-panel/backups/sing-box/previous 2>/dev/null || true)

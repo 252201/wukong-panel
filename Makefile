@@ -1,6 +1,6 @@
 .PHONY: web test build release clean
 
-VERSION ?= 0.1.0
+VERSION ?= 0.4.0
 export GOTOOLCHAIN := go1.26.5
 
 web:
@@ -8,8 +8,12 @@ web:
 
 test:
 	go test ./...
+	go vet ./...
 	cd web && npm run build
 	sh -n install.sh uninstall.sh compat/deploy-hy2.sh
+	sh scripts/test-install-actions.sh
+	sh scripts/test-install-acme-status.sh
+	sh scripts/test-singbox-lifecycle.sh
 
 build: web
 	mkdir -p build

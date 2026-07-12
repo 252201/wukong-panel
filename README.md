@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2 部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.3.4-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.4.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -66,7 +66,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.3.4 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.4.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -88,15 +88,16 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 
 ### sing-box 安全更新与回退
 
-悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前兼容稳定版锁定为 `1.11.15`。1.12 在 `qw` 的 VPNGate `bind_interface` 实际流量回归中出现运行时异常，1.13 又删除了现有 1.10 配置仍在使用的旧 inbound 字段，因此在完成配置迁移和运行时适配前不会开放这两个版本。更新流程会：
+悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.13.14`。面板会按 1.10、1.11、1.12、1.13 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖和 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound 会作为阻断项展示，不会猜测性重写。更新流程会：
 
 1. 下载官方 GitHub Release 并核对固定 SHA-256。
-2. 使用新二进制逐一检查 `/etc/s-box/*.json`，任何配置不兼容都会在替换前停止。
-3. 保存旧二进制、版本号、活动服务清单和全部 JSON 配置快照。
-4. 仅停止当前正在运行且确实使用目标二进制的 sing-box 服务。
-5. 替换后二次检查配置并恢复原活动服务；启动失败自动恢复旧二进制。
+2. 生成逐文件迁移预览，保留未知 JSON 字段，并拒绝存在阻断项的升级。
+3. 检查配置引用的 `bind_interface` 是否存在，再用新二进制逐一检查迁移后的 JSON。
+4. 保存旧二进制、版本号、校验和、服务文件、活动服务清单和全部 JSON 配置快照。
+5. 仅停止当前正在运行且确实使用目标二进制的 sing-box 服务，并在停机窗口内安装配套二进制和配置。
+6. 恢复服务后使用节点真实密码通过本机 HY2 入口访问 Cloudflare 双栈探测地址；配置、服务或协议探测任一失败都会恢复旧二进制和旧配置。
 
-备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退前也会先用旧二进制检查当前配置；若升级后创建的新配置无法被旧版解析，回退会被拒绝，避免盲目降级导致全部节点离线。
+备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退会恢复同一快照中的旧二进制和配套配置，而不是只替换二进制；刚才运行的新版本也会形成反向快照，因此可以再次切回。
 
 ## 架构与安全边界
 
@@ -127,6 +128,11 @@ wukongctl scan
 wukongctl node create --name "AC-HY2" --domain node.example.com \
   --mode prefer_v6 --ipv4-bind 192.0.2.10 --ipv6 2001:db8::10
 wukongctl node action --id NODE_ID --action restart
+wukong-panel singbox plan --target 1.13.14 --config-dir /etc/s-box
+wukong-panel singbox migrate --target 1.13.14 \
+  --config-dir /etc/s-box --output-dir /tmp/s-box-1.13
+wukong-panel singbox check-interfaces --target 1.13.14 --config-dir /tmp/s-box-1.13
+wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
 ```
 
 `compat/deploy-hy2.sh` 保留原参数模式入口，并将参数交给 `wukongctl node create`。交互部署改由面板完成。
@@ -139,6 +145,7 @@ wukongctl node action --id NODE_ID --action restart
 - `overview`、`metrics`、`metrics/endpoints`、`metrics/timeline`
 - `nodes`、`nodes/{id}/actions`、`nodes/{id}/share`
 - `imports/scan|confirm`
+- `system/sing-box/migration`
 - `jobs`、`jobs/{id}/events`
 - `settings`、`settings/subscription-token`
 
@@ -171,7 +178,7 @@ rm -rf /tmp/wukong-demo
 4. 并行运行旧监控和悟空指标至少 24 小时。
 5. 确认订阅、账期和流量一致后再停用旧 timer/service。
 
-sing-box 1.10 配置以兼容模式接管；新配置根据检测到的 sing-box 版本生成。跨版本升级前请阅读[官方迁移文档](https://sing-box.sagernet.org/migration/)。
+sing-box 1.10 配置仍以兼容模式接管；系统页可先只读预览迁移差异，一键脚本升级时再生成 1.13 配置并执行整体快照、协议探测和失败回退。迁移规则对应[官方迁移文档](https://sing-box.sagernet.org/migration/)。
 
 ## 卸载
 

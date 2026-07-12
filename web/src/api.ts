@@ -107,6 +107,16 @@ export interface Settings {
 }
 
 export interface EndpointStat { nodeId: string; nodeName: string; endpoint: string; bytes: number }
+export interface SingBoxMigrationFile { path: string; changes: string[]; warnings: string[]; errors: string[]; interfaces?: string[] }
+export interface SingBoxMigrationPlan {
+  target: string
+  compatible: boolean
+  requiresMigration: boolean
+  files: SingBoxMigrationFile[]
+  changes: number
+  warnings: number
+  errors: number
+}
 
 let csrf = ''
 export function setCSRF(value: string) { csrf = value }
@@ -129,6 +139,7 @@ export const api = {
   overview: () => request<Overview>('overview'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
+  singBoxMigration: (target = '1.13.14') => request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`),
   nodes: () => request<NodeItem[]>('nodes'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),
