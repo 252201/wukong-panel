@@ -19,7 +19,7 @@ type ProbeResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
-func ProbeDirectory(ctx context.Context, binary, configDir string) ([]ProbeResult, error) {
+func ProbeDirectory(ctx context.Context, binary, configDir, serverOverride, serverName string) ([]ProbeResult, error) {
 	files, err := filepath.Glob(filepath.Join(configDir, "*.json"))
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func ProbeDirectory(ctx context.Context, binary, configDir string) ([]ProbeResul
 				continue
 			}
 			result := ProbeResult{Config: path, Inbound: stringValue(inbound["tag"]), Port: intNumber(inbound["listen_port"])}
-			probe, buildErr := buildHY2Probe(inbound)
+			probe, buildErr := buildHY2Probe(inbound, serverOverride, serverName)
 			if buildErr != nil {
 				result.Error = buildErr.Error()
 				results = append(results, result)
@@ -83,7 +83,7 @@ func ProbeDirectory(ctx context.Context, binary, configDir string) ([]ProbeResul
 	return results, nil
 }
 
-func buildHY2Probe(inbound map[string]any) ([]byte, error) {
+func buildHY2Probe(inbound map[string]any, serverOverride, serverName string) ([]byte, error) {
 	port := intNumber(inbound["listen_port"])
 	if port < 1 || port > 65535 {
 		return nil, errorsText("invalid HY2 listen port")
@@ -97,14 +97,22 @@ func buildHY2Probe(inbound map[string]any) ([]byte, error) {
 	if password == "" {
 		return nil, errorsText("HY2 inbound has no probeable user password")
 	}
-	server := stringValue(inbound["listen"])
-	switch server {
-	case "", "::", "::0", "[::]":
-		server = "::1"
-	case "0.0.0.0":
-		server = "127.0.0.1"
+	server := serverOverride
+	insecure := false
+	if server == "" {
+		insecure = true
+		server = stringValue(inbound["listen"])
+		switch server {
+		case "", "::", "::0", "[::]":
+			server = "::1"
+		case "0.0.0.0":
+			server = "127.0.0.1"
+		}
 	}
-	outbound := map[string]any{"type": "hysteria2", "tag": "probe-out", "server": server, "server_port": port, "password": password, "tls": map[string]any{"enabled": true, "server_name": "localhost", "insecure": true, "alpn": []any{"h3"}}}
+	if serverName == "" {
+		serverName = server
+	}
+	outbound := map[string]any{"type": "hysteria2", "tag": "probe-out", "server": server, "server_port": port, "password": password, "tls": map[string]any{"enabled": true, "server_name": serverName, "insecure": insecure, "alpn": []any{"h3"}}}
 	root := map[string]any{"log": map[string]any{"level": "error"}, "outbounds": []any{outbound}, "route": map[string]any{"final": "probe-out"}}
 	return json.MarshalIndent(root, "", "  ")
 }

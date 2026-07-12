@@ -160,6 +160,8 @@ func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
 	configDir := flags.String("config-dir", cfg.ConfigDir, "source configuration directory")
 	outputDir := flags.String("output-dir", "", "migration output directory")
 	binary := flags.String("binary", cfg.SingBoxBin, "sing-box binary used for protocol probing")
+	server := flags.String("server", "", "override HY2 server address for an external-path probe")
+	serverName := flags.String("server-name", "", "TLS server name for an external-path probe")
 	jsonOutput := flags.Bool("json", false, "print JSON result")
 	if err := flags.Parse(args[1:]); err != nil {
 		log.Fatal(err)
@@ -189,7 +191,7 @@ func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
 	case "probe":
 		probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
-		results, probeErr := singboxconfig.ProbeDirectory(probeCtx, *binary, *configDir)
+		results, probeErr := singboxconfig.ProbeDirectory(probeCtx, *binary, *configDir, *server, *serverName)
 		if *jsonOutput {
 			_ = json.NewEncoder(os.Stdout).Encode(results)
 		} else {

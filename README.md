@@ -133,6 +133,10 @@ wukong-panel singbox migrate --target 1.13.14 \
   --config-dir /etc/s-box --output-dir /tmp/s-box-1.13
 wukong-panel singbox check-interfaces --target 1.13.14 --config-dir /tmp/s-box-1.13
 wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
+
+# 从另一台主机验证公网 UDP、域名证书与真实 HY2 链路；纯 IPv6 节点可直接填写真实 IPv6
+wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/probe-config \
+  --server 2001:db8::10 --server-name node.example.com
 ```
 
 `compat/deploy-hy2.sh` 保留原参数模式入口，并将参数交给 `wukongctl node create`。交互部署改由面板完成。
