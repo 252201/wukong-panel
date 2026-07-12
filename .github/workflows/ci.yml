@@ -31,6 +31,7 @@ jobs:
       - run: sh -n install.sh uninstall.sh compat/deploy-hy2.sh
       - run: sh scripts/test-install-acme-status.sh
       - run: sh scripts/test-install-actions.sh
+      - run: sh scripts/test-singbox-lifecycle.sh
       - run: |
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-$arch ./cmd/wukong-panel
@@ -51,4 +52,6 @@ jobs:
             grep -q -- "--action 必须是" /tmp/invalid.log
             if sh /src/install.sh --update --unattended >/tmp/update.log 2>&1; then exit 1; fi
             grep -q "未检测到已安装" /tmp/update.log
+            if sh /src/install.sh --update-sing-box --unattended >/tmp/singbox.log 2>&1; then exit 1; fi
+            grep -q "未检测到已安装" /tmp/singbox.log
           '

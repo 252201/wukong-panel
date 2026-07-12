@@ -49,6 +49,14 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --update
 
+# 更新到悟空验证过的 sing-box 稳定版本；旧二进制和配置快照会保留
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --update-sing-box
+
+# 回退到上一次保留的 sing-box 版本
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --rollback-sing-box
+
 # 卸载面板并保留配置、数据库和 sing-box 节点
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall
@@ -77,6 +85,18 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 ```
 
 无域名时默认监听 HTTPS `9443` 并生成自签名证书。安装器不会修改 SSH、防火墙或云安全组，只会提示需要开放的端口。
+
+### sing-box 安全更新与回退
+
+悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前兼容稳定版锁定为 `1.11.15`。1.12 在 `qw` 的 VPNGate `bind_interface` 实际流量回归中出现运行时异常，1.13 又删除了现有 1.10 配置仍在使用的旧 inbound 字段，因此在完成配置迁移和运行时适配前不会开放这两个版本。更新流程会：
+
+1. 下载官方 GitHub Release 并核对固定 SHA-256。
+2. 使用新二进制逐一检查 `/etc/s-box/*.json`，任何配置不兼容都会在替换前停止。
+3. 保存旧二进制、版本号、活动服务清单和全部 JSON 配置快照。
+4. 仅停止当前正在运行且确实使用目标二进制的 sing-box 服务。
+5. 替换后二次检查配置并恢复原活动服务；启动失败自动恢复旧二进制。
+
+备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退前也会先用旧二进制检查当前配置；若升级后创建的新配置无法被旧版解析，回退会被拒绝，避免盲目降级导致全部节点离线。
 
 ## 架构与安全边界
 
