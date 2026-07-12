@@ -20,7 +20,7 @@ if singbox_expected_sha256 9.9.9 amd64 >/dev/null 2>&1; then
   exit 1
 fi
 
-for function_name in sha256_file verify_singbox_backup; do
+for function_name in sha256_file install_singbox_configs restore_singbox_configs verify_singbox_backup persist_singbox_transaction clear_singbox_transaction rollback_singbox_transaction; do
   body=$(awk -v name="$function_name" '
     $0 ~ "^" name "\\(\\)" { capture = 1 }
     capture { print }
@@ -39,4 +39,41 @@ if verify_singbox_backup "$test_dir"; then
   echo "tampered backup accepted" >&2
   exit 1
 fi
+
+transaction_dir="$test_dir/transaction"
+backup_dir="$test_dir/backup"
+live_dir="$test_dir/live"
+mkdir -p "$backup_dir/configs" "$live_dir/configs"
+printf '#!/bin/sh\necho old\n' >"$backup_dir/sing-box"
+chmod 0755 "$backup_dir/sing-box"
+printf 'old config\n' >"$backup_dir/configs/node.json"
+printf 'systemd:sing-box-node.service\n' >"$backup_dir/active-services"
+{
+  printf '%s  sing-box\n' "$(sha256_file "$backup_dir/sing-box")"
+  printf '%s  configs/node.json\n' "$(sha256_file "$backup_dir/configs/node.json")"
+} >"$backup_dir/SHA256SUMS"
+printf '#!/bin/sh\necho new\n' >"$live_dir/sing-box"
+chmod 0755 "$live_dir/sing-box"
+printf 'new config\n' >"$live_dir/configs/node.json"
+
+SINGBOX_TRANSACTION_ROOT="$transaction_dir"
+SINGBOX_TRANSACTION_ACTIVE=false
+singbox_config_dir() { printf '%s' "$live_dir/configs"; }
+stop_singbox_services() { [ -s "$1" ]; }
+start_singbox_services() { [ -s "$1" ]; }
+check_singbox_configs() { [ -x "$1" ]; }
+singbox_version_of() { printf '1.10.7'; }
+warn() { :; }
+info() { :; }
+
+persist_singbox_transaction "$backup_dir" "$live_dir/sing-box"
+[ -r "$transaction_dir/backup-path" ]
+rollback_singbox_transaction
+[ ! -e "$transaction_dir" ]
+grep -q '^echo old$' "$live_dir/sing-box"
+grep -q '^old config$' "$live_dir/configs/node.json"
+[ "$SINGBOX_TRANSACTION_ACTIVE" = false ]
+grep -q '未检测到正在运行的 sing-box 服务，已拒绝更新' "$ROOT/install.sh"
+grep -q "trap 'exit 129' HUP" "$ROOT/install.sh"
+grep -q '未完成事务已恢复；为便于确认节点连通性，本次不再继续升级' "$ROOT/install.sh"
 echo "sing-box verified version manifest: ok"
