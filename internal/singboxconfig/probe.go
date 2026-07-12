@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ProbeResult struct {
@@ -55,16 +56,21 @@ func ProbeDirectory(ctx context.Context, binary, configDir string) ([]ProbeResul
 			if err = os.WriteFile(probePath, probe, 0o600); err != nil {
 				return results, err
 			}
-			command := exec.CommandContext(ctx, binary, "tools", "fetch", "-c", probePath, "https://www.cloudflare.com/cdn-cgi/trace")
-			output, runErr := command.CombinedOutput()
-			if runErr != nil {
+			for _, target := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://www.google.com/generate_204", "https://api64.ipify.org/"} {
+				attemptCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
+				command := exec.CommandContext(attemptCtx, binary, "tools", "fetch", "-c", probePath, target)
+				output, runErr := command.CombinedOutput()
+				cancel()
+				if runErr == nil {
+					result.OK = true
+					result.Error = ""
+					break
+				}
 				message := strings.TrimSpace(string(output))
 				if len(message) > 800 {
 					message = message[len(message)-800:]
 				}
-				result.Error = fmt.Sprintf("HY2 probe failed: %v: %s", runErr, message)
-			} else {
-				result.OK = true
+				result.Error = fmt.Sprintf("HY2 probe via %s failed: %v: %s", target, runErr, message)
 			}
 			results = append(results, result)
 		}
