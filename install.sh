@@ -26,6 +26,8 @@ FORCE_INTERACTIVE=false
 PURGE=false
 PROMPT_TTY="/dev/tty"
 RECONFIGURE_ARGS=false
+SINGBOX_TRANSACTION_ROOT="${WUKONG_SINGBOX_TRANSACTION_ROOT:-/var/lib/wukong-panel/backups/sing-box/transaction}"
+SINGBOX_TRANSACTION_ACTIVE=false
 
 info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
@@ -402,9 +404,57 @@ verify_singbox_backup() {
   done <"$verify_backup_dir/SHA256SUMS"
 }
 
+persist_singbox_transaction() {
+  persist_backup_dir=$1
+  persist_binary=$2
+  persist_parent=$(dirname "$SINGBOX_TRANSACTION_ROOT")
+  persist_stage="$persist_parent/.transaction-$$"
+  rm -rf "$persist_stage"
+  install -d -m 0700 "$persist_parent" "$persist_stage"
+  printf '%s\n' "$persist_backup_dir" >"$persist_stage/backup-path"
+  printf '%s\n' "$persist_binary" >"$persist_stage/binary-path"
+  rm -rf "$SINGBOX_TRANSACTION_ROOT"
+  mv "$persist_stage" "$SINGBOX_TRANSACTION_ROOT"
+  SINGBOX_TRANSACTION_ACTIVE=true
+}
+
+clear_singbox_transaction() {
+  rm -rf "$SINGBOX_TRANSACTION_ROOT"
+  SINGBOX_TRANSACTION_ACTIVE=false
+}
+
+rollback_singbox_transaction() {
+  [ -r "$SINGBOX_TRANSACTION_ROOT/backup-path" ] || return 0
+  transaction_backup=$(sed -n '1p' "$SINGBOX_TRANSACTION_ROOT/backup-path")
+  transaction_binary=$(sed -n '1p' "$SINGBOX_TRANSACTION_ROOT/binary-path")
+  [ -n "$transaction_backup" ] && [ -n "$transaction_binary" ] || return 1
+  verify_singbox_backup "$transaction_backup" || { warn "未完成事务的备份校验失败，拒绝自动恢复"; return 1; }
+  transaction_services="$transaction_backup/active-services"
+  [ -s "$transaction_services" ] || { warn "未完成事务缺少原活动服务清单，拒绝自动恢复"; return 1; }
+  warn "检测到未完成的 sing-box 事务，正在恢复升级前状态"
+  stop_singbox_services "$transaction_services" || true
+  install -m 0755 "$transaction_backup/sing-box" "$transaction_binary" || return 1
+  restore_singbox_configs "$transaction_backup/configs" || return 1
+  check_singbox_configs "$transaction_binary" || return 1
+  start_singbox_services "$transaction_services" || return 1
+  clear_singbox_transaction
+  info "已恢复未完成事务：$(singbox_version_of "$transaction_binary")，原服务已重新启动"
+}
+
+recover_pending_singbox_transaction() {
+  [ -e "$SINGBOX_TRANSACTION_ROOT" ] || return 0
+  SINGBOX_TRANSACTION_ACTIVE=true
+  rollback_singbox_transaction || die "存在未完成的 sing-box 事务且自动恢复失败；已停止本次更新，请人工检查 $SINGBOX_TRANSACTION_ROOT"
+}
+
 update_singbox() {
   singbox_binary=$(singbox_binary_path)
   [ -x "$singbox_binary" ] || die "未找到 sing-box 二进制：$singbox_binary"
+  if [ -e "$SINGBOX_TRANSACTION_ROOT" ]; then
+    recover_pending_singbox_transaction
+    info "未完成事务已恢复；为便于确认节点连通性，本次不再继续升级，请检查后重新执行更新"
+    return 0
+  fi
   singbox_current_version=$(singbox_version_of "$singbox_binary")
   singbox_target_version=${SINGBOX_VERSION#v}
   if [ "$singbox_current_version" = "$singbox_target_version" ]; then info "sing-box 已是 $singbox_target_version，无需更新"; return 0; fi
@@ -414,37 +464,31 @@ update_singbox() {
   check_singbox_configs "$SINGBOX_CANDIDATE" "$SINGBOX_MIGRATED_DIR" || die "迁移后配置仍与新版本不兼容，未修改任何文件"
   singbox_services_file="$TMP_DIR/singbox-active-services"
   capture_active_singbox_services "$singbox_services_file" "$singbox_binary"
+  [ -s "$singbox_services_file" ] || die "未检测到正在运行的 sing-box 服务，已拒绝更新；请先恢复节点服务"
   singbox_backup_dir=$(backup_singbox update "$singbox_binary" "$singbox_services_file")
-  if ! stop_singbox_services "$singbox_services_file"; then start_singbox_services "$singbox_services_file" || true; die "无法停止全部 sing-box 服务，已取消更新"; fi
-  if ! install_singbox_configs "$SINGBOX_MIGRATED_DIR"; then
-    restore_singbox_configs "$singbox_backup_dir/configs" || true
-    start_singbox_services "$singbox_services_file" || true
-    die "安装迁移配置失败，已恢复旧配置"
-  fi
-  if ! install -m 0755 "$SINGBOX_CANDIDATE" "$singbox_binary"; then
-    install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary" || true
-    restore_singbox_configs "$singbox_backup_dir/configs" || true
-    start_singbox_services "$singbox_services_file" || true
-    die "替换 sing-box 二进制失败，已恢复旧版"
-  fi
+  persist_singbox_transaction "$singbox_backup_dir" "$singbox_binary"
+  stop_singbox_services "$singbox_services_file" || die "无法停止全部 sing-box 服务，正在恢复升级前状态"
+  install_singbox_configs "$SINGBOX_MIGRATED_DIR" || die "安装迁移配置失败，正在恢复升级前状态"
+  install -m 0755 "$SINGBOX_CANDIDATE" "$singbox_binary" || die "替换 sing-box 二进制失败，正在恢复升级前状态"
   if check_singbox_configs "$singbox_binary" && start_singbox_services "$singbox_services_file" && probe_singbox_nodes "$singbox_binary"; then
     rm -f /var/lib/wukong-panel/backups/sing-box/previous
     ln -s "$singbox_backup_dir" /var/lib/wukong-panel/backups/sing-box/previous
+    clear_singbox_transaction
     info "sing-box 已从 ${singbox_current_version:-unknown} 更新到 $singbox_target_version"
     info "旧版本备份：$singbox_backup_dir"
     return 0
   fi
-  warn "新版本启动失败，正在恢复 sing-box ${singbox_current_version:-unknown}"
-  stop_singbox_services "$singbox_services_file" || true
-  install -m 0755 "$singbox_backup_dir/sing-box" "$singbox_binary"
-  restore_singbox_configs "$singbox_backup_dir/configs"
-  start_singbox_services "$singbox_services_file" || true
-  die "sing-box 更新失败，已自动恢复旧版"
+  die "sing-box 更新失败，正在自动恢复 ${singbox_current_version:-unknown} 与原活动服务"
 }
 
 rollback_singbox() {
   rollback_binary=$(singbox_binary_path)
   [ -x "$rollback_binary" ] || die "未找到 sing-box 二进制：$rollback_binary"
+  if [ -e "$SINGBOX_TRANSACTION_ROOT" ]; then
+    recover_pending_singbox_transaction
+    info "未完成事务已恢复，本次无需再执行额外回退"
+    return 0
+  fi
   rollback_backup_root=/var/lib/wukong-panel/backups/sing-box
   rollback_previous=$(readlink "$rollback_backup_root/previous" 2>/dev/null || true)
   [ -n "$rollback_previous" ] && [ -x "$rollback_previous/sing-box" ] || die "没有可回退的 sing-box 备份"
@@ -643,7 +687,19 @@ ARCH=$(uname -m)
 case "$ARCH" in x86_64|amd64) ASSET_ARCH="amd64" ;; aarch64|arm64) ASSET_ARCH="arm64" ;; *) die "不支持的架构: $ARCH" ;; esac
 
 TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+cleanup_install() {
+  cleanup_status=$?
+  trap - EXIT HUP INT TERM
+  if [ "$SINGBOX_TRANSACTION_ACTIVE" = true ]; then
+    rollback_singbox_transaction || warn "自动回滚未完成，请保留终端并人工检查 $SINGBOX_TRANSACTION_ROOT"
+  fi
+  rm -rf "$TMP_DIR"
+  exit "$cleanup_status"
+}
+trap 'cleanup_install' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ "$ACTION" = "update" ]; then
   update_panel
