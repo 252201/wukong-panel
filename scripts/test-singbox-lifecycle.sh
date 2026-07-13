@@ -20,7 +20,7 @@ if singbox_expected_sha256 9.9.9 amd64 >/dev/null 2>&1; then
   exit 1
 fi
 
-for function_name in sha256_file install_singbox_configs restore_singbox_configs verify_singbox_backup persist_singbox_transaction clear_singbox_transaction rollback_singbox_transaction; do
+for function_name in sha256_file singbox_version_of ensure_singbox_for_install install_singbox_configs restore_singbox_configs backup_singbox verify_singbox_backup restore_singbox_service_definitions restore_singbox_after_uninstall_failure remove_singbox_managed_files singbox_binary_is_running uninstall_singbox persist_singbox_transaction clear_singbox_transaction rollback_singbox_transaction; do
   body=$(awk -v name="$function_name" '
     $0 ~ "^" name "\\(\\)" { capture = 1 }
     capture { print }
@@ -76,4 +76,60 @@ grep -q '^old config$' "$live_dir/configs/node.json"
 grep -q '未检测到正在运行的 sing-box 服务，已拒绝更新' "$ROOT/install.sh"
 grep -q "trap 'exit 129' HUP" "$ROOT/install.sh"
 grep -q '未完成事务已恢复；为便于确认节点连通性，本次不再继续升级' "$ROOT/install.sh"
+
+bootstrap_dir="$test_dir/bootstrap"
+mkdir -p "$bootstrap_dir/configs"
+singbox_version_of() { "$1" version 2>/dev/null | sed -n 's/^sing-box version //p' | head -1; }
+SINGBOX_VERSION=1.13.14
+SINGBOX_RUNTIME_BIN=""
+SINGBOX_RUNTIME_CONFIG_DIR=""
+singbox_binary_path() { printf '%s' "$bootstrap_dir/configs/sing-box"; }
+singbox_config_dir() { printf '%s' "$bootstrap_dir/configs"; }
+download_singbox_binary() {
+  SINGBOX_CANDIDATE="$bootstrap_dir/candidate"
+  printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.13.14"\n' >"$SINGBOX_CANDIDATE"
+  chmod 0755 "$SINGBOX_CANDIDATE"
+}
+info() { :; }
+die() { printf '%s\n' "$*" >&2; return 1; }
+ensure_singbox_for_install
+[ "$(singbox_version_of "$bootstrap_dir/configs/sing-box")" = 1.13.14 ]
+[ "$SINGBOX_RUNTIME_BIN" = "$bootstrap_dir/configs/sing-box" ]
+download_singbox_binary() { return 99; }
+ensure_singbox_for_install
+
+uninstall_dir="$test_dir/uninstall"
+mkdir -p "$uninstall_dir/configs" "$uninstall_dir/tmp" "$uninstall_dir/backups"
+printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.13.14"\n[ "$1" = check ] && exit 0\n' >"$uninstall_dir/configs/sing-box"
+chmod 0755 "$uninstall_dir/configs/sing-box"
+printf '{"inbounds":[]}\n' >"$uninstall_dir/configs/node.json"
+printf 'keep certificate\n' >"$uninstall_dir/configs/cert.pem"
+TMP_DIR="$uninstall_dir/tmp"
+SINGBOX_BACKUP_ROOT="$uninstall_dir/backups"
+SINGBOX_TRANSACTION_ROOT="$uninstall_dir/transaction"
+singbox_binary_path() { printf '%s' "$uninstall_dir/configs/sing-box"; }
+singbox_config_dir() { printf '%s' "$uninstall_dir/configs"; }
+capture_active_singbox_services() { : >"$1"; }
+capture_managed_singbox_services() { : >"$1"; }
+stop_singbox_services() { return 0; }
+start_singbox_services() { return 0; }
+remove_singbox_service_definitions() { return 0; }
+using_systemd() { return 1; }
+check_singbox_configs() { "$1" check -c "$2/node.json"; }
+uninstall_singbox
+[ ! -e "$uninstall_dir/configs/sing-box" ]
+[ ! -e "$uninstall_dir/configs/node.json" ]
+[ -f "$uninstall_dir/configs/cert.pem" ]
+uninstall_backup=$(find "$uninstall_dir/backups" -mindepth 1 -maxdepth 1 -type d | head -1)
+[ -n "$uninstall_backup" ]
+verify_singbox_backup "$uninstall_backup"
+[ -f "$uninstall_backup/active-services" ]
+[ -f "$uninstall_backup/managed-services" ]
+grep -q 'node.json' "$uninstall_backup/SHA256SUMS"
+check_singbox_configs() { "$1" check -c "$(singbox_config_dir)/node.json"; }
+restore_singbox_after_uninstall_failure "$uninstall_backup" "$uninstall_dir/configs/sing-box"
+[ "$(singbox_version_of "$uninstall_dir/configs/sing-box")" = 1.13.14 ]
+grep -q 'inbounds' "$uninstall_dir/configs/node.json"
+grep -q -- '--uninstall-sing-box' "$ROOT/install.sh"
+grep -q 'ensure_singbox_for_install' "$ROOT/install.sh"
 echo "sing-box verified version manifest: ok"
