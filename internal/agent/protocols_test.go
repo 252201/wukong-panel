@@ -69,7 +69,7 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 			request.Protocol = protocol
 			request.Domain = "node.example.com"
 			if protocol == protocolVLESS {
-				request.Domain = "www.microsoft.com"
+				request.Domain = realityDefaultSNI
 			}
 			credentials, err := generateProtocolCredentials(protocol, "")
 			if err != nil {
@@ -91,7 +91,7 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 			case protocolVLESS:
 				tlsConfig := inbound["tls"].(map[string]any)
 				reality := tlsConfig["reality"].(map[string]any)
-				if reality["private_key"] != credentials.RealityPrivateKey || inbound["users"].([]any)[0].(map[string]any)["flow"] != "xtls-rprx-vision" {
+				if tlsConfig["server_name"] != realityDefaultSNI || reality["private_key"] != credentials.RealityPrivateKey || inbound["users"].([]any)[0].(map[string]any)["flow"] != "xtls-rprx-vision" {
 					t.Fatal("VLESS REALITY fields missing")
 				}
 			case protocolShadowsocks:
@@ -162,7 +162,7 @@ func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 			request.Protocol = protocol
 			request.Domain = "node.example.com"
 			if protocol == protocolVLESS {
-				request.Domain = "www.microsoft.com"
+				request.Domain = realityDefaultSNI
 			}
 			credentials, err := generateProtocolCredentials(protocol, "")
 			if err != nil {
@@ -196,7 +196,7 @@ func TestScanDiscoversEverySupportedProtocol(t *testing.T) {
 		request.Name = protocol
 		request.Domain = "node.example.com"
 		if protocol == protocolVLESS {
-			request.Domain = "www.microsoft.com"
+			request.Domain = realityDefaultSNI
 		}
 		credentials, err := generateProtocolCredentials(protocol, "")
 		if err != nil {

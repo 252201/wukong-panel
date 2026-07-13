@@ -23,6 +23,7 @@ const (
 	protocolTUIC        = "tuic"
 	protocolTrojan      = "trojan"
 	shadowsocks2022     = "2022-blake3-aes-128-gcm"
+	realityDefaultSNI   = "www.google.com"
 )
 
 var supportedProtocols = map[string]bool{
@@ -236,7 +237,17 @@ func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials
 		inbound["tls"] = certificateTLS(certPath, keyPath, true)
 	case protocolVLESS:
 		inbound["users"] = []any{map[string]any{"name": "wukong", "uuid": credentials.UUID, "flow": "xtls-rprx-vision"}}
-		inbound["tls"] = map[string]any{"enabled": true, "reality": map[string]any{"enabled": true, "handshake": map[string]any{"server": request.Domain, "server_port": 443}, "private_key": credentials.RealityPrivateKey, "short_id": []any{credentials.RealityShortID}, "max_time_difference": "1m"}}
+		inbound["tls"] = map[string]any{
+			"enabled":     true,
+			"server_name": request.Domain,
+			"reality": map[string]any{
+				"enabled":             true,
+				"handshake":           map[string]any{"server": request.Domain, "server_port": 443},
+				"private_key":         credentials.RealityPrivateKey,
+				"short_id":            []any{credentials.RealityShortID},
+				"max_time_difference": "1m",
+			},
+		}
 	case protocolShadowsocks:
 		inbound["method"] = credentials.Method
 		inbound["password"] = credentials.Password

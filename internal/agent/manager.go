@@ -264,6 +264,9 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
 	request.Protocol = normalizeProtocol(request.Protocol)
 	request = normalizeModeBindings(request)
+	if request.Protocol == protocolVLESS && strings.TrimSpace(request.Domain) == "" {
+		request.Domain = realityDefaultSNI
+	}
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
 	}
@@ -314,6 +317,15 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		}
 		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
 			return model.Node{}, err
+		}
+		if request.Protocol == protocolVLESS {
+			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
+				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				if cleanupErr != nil {
+					return model.Node{}, fmt.Errorf("VLESS REALITY preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
+				}
+				return model.Node{}, fmt.Errorf("VLESS REALITY preflight failed; choose another handshake server: %w", probeErr)
+			}
 		}
 	}
 	secret, err := encodeProtocolCredentials(credentials)
@@ -604,6 +616,23 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 		return err
 	}
 	return command(ctx, "rc-service", service, "start")
+}
+
+func (m *Manager) cleanupFailedCreate(ctx context.Context, node model.Node) error {
+	_ = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
+	_ = m.disableService(ctx, node)
+	serviceErr := m.removeService(node)
+	configErr := os.Remove(node.ConfigPath)
+	if errors.Is(serviceErr, os.ErrNotExist) {
+		serviceErr = nil
+	}
+	if errors.Is(configErr, os.ErrNotExist) {
+		configErr = nil
+	}
+	if serviceErr != nil {
+		return serviceErr
+	}
+	return configErr
 }
 
 func buildConfig(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath, version string) ([]byte, error) {
