@@ -45,6 +45,7 @@ type NodeCandidate struct {
 }
 
 type NodeCreateRequest struct {
+	Protocol        string   `json:"protocol"`
 	Name            string   `json:"name"`
 	Mode            string   `json:"mode"`
 	ListenPort      int      `json:"listenPort"`

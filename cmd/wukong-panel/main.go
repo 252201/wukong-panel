@@ -206,7 +206,7 @@ func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
 				if !result.OK {
 					status = "FAILED"
 				}
-				fmt.Printf("%s %s:%d %s\n", status, filepath.Base(result.Config), result.Port, result.Error)
+				fmt.Printf("%s %s %s:%d %s\n", status, result.Protocol, filepath.Base(result.Config), result.Port, result.Error)
 			}
 		}
 		if probeErr != nil {
@@ -251,15 +251,16 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 		flags := flag.NewFlagSet("node create", flag.ExitOnError)
 		var request model.NodeCreateRequest
 		var domains, deviceNames, instance, publicIPv4 string
-		flags.StringVar(&request.Name, "name", "Wukong-HY2", "node display name")
+		flags.StringVar(&request.Name, "name", "Wukong-Node", "node display name")
+		flags.StringVar(&request.Protocol, "protocol", "hysteria2", "hysteria2, vless, shadowsocks, tuic or trojan")
 		flags.StringVar(&request.Mode, "mode", "prefer_v6", "prefer_v6, v4only or v6only")
-		flags.IntVar(&request.ListenPort, "port", 0, "UDP listen port, zero selects a free port")
+		flags.IntVar(&request.ListenPort, "port", 0, "listen port, zero selects a free protocol-compatible port")
 		flags.StringVar(&request.Server, "server", "", "advertised server domain or IP")
 		flags.StringVar(&publicIPv4, "ipv4", "", "compatibility advertised IPv4")
-		flags.StringVar(&request.Domain, "domain", "", "TLS server name")
+		flags.StringVar(&request.Domain, "domain", "", "TLS server name or VLESS REALITY handshake server")
 		flags.StringVar(&request.IPv4Bind, "ipv4-bind", "", "local IPv4 bind address")
 		flags.StringVar(&request.IPv6Bind, "ipv6", "", "local IPv6 bind address")
-		flags.StringVar(&request.Password, "password", "", "explicit HY2 password")
+		flags.StringVar(&request.Password, "password", "", "explicit password or VLESS UUID")
 		flags.StringVar(&request.CertificatePath, "certificate", "", "existing certificate path")
 		flags.StringVar(&request.KeyPath, "key", "", "existing private key path")
 		flags.StringVar(&domains, "v6only-domains", "chatgpt.com,claude.ai,anthropic.com", "comma-separated IPv6-only domains")

@@ -194,7 +194,8 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 		service, manager := m.findService(path)
 		for index, item := range inbounds {
 			inbound, _ := item.(map[string]any)
-			if stringValue(inbound["type"]) != "hysteria2" {
+			protocol := normalizeProtocol(stringValue(inbound["type"]))
+			if !supportedProtocols[protocol] {
 				continue
 			}
 			port := int(numberValue(inbound["listen_port"]))
@@ -205,25 +206,22 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if name == "" {
 				name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 			}
-			secret := ""
-			if users, ok := inbound["users"].([]any); ok && len(users) > 0 {
-				if user, ok := users[0].(map[string]any); ok {
-					secret = stringValue(user["password"])
-				}
+			credentials, credentialErr := credentialsFromInbound(protocol, inbound)
+			if credentialErr != nil {
+				continue
 			}
-			domain := ""
-			if tls, ok := inbound["tls"].(map[string]any); ok {
-				cert := stringValue(tls["certificate_path"])
-				base := filepath.Base(cert)
-				domain = strings.TrimSuffix(strings.TrimSuffix(base, "-fullchain.cer"), ".cer")
+			secret, credentialErr := encodeProtocolCredentials(credentials)
+			if credentialErr != nil {
+				continue
 			}
+			domain := inboundDomain(protocol, inbound)
 			fingerprint := fingerprint(path, port, name)
 			shared := ""
 			if len(inbounds) > 1 {
 				shared = path
 			}
-			candidateName := preferredCandidateName(name, path, index, port, knownNames[candidateKey(path, port)])
-			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: candidateName, Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
+			candidateName := preferredCandidateName(name, path, index, port, protocol, knownNames[candidateKey(path, port)])
+			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: candidateName, Protocol: protocol, Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ListenPort < result[j].ListenPort })
@@ -249,7 +247,11 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 			return count, err
 		}
 		status := m.serviceStatus(ctx, candidate.ServiceManager, candidate.ServiceName)
-		node := model.Node{ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol, Mode: candidate.Mode, ListenPort: candidate.ListenPort, Server: candidate.Domain, Domain: candidate.Domain, IPv4Bind: candidate.IPv4Bind, IPv6Bind: candidate.IPv6Bind, AutoBind: true, ServiceName: candidate.ServiceName, ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath, ConfigVersion: candidate.ConfigVersion, Ownership: "imported", SharedGroup: candidate.SharedGroup, Status: status}
+		server := strings.TrimSpace(m.cfg.PanelDomain)
+		if server == "" {
+			server = candidate.Domain
+		}
+		node := model.Node{ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol, Mode: candidate.Mode, ListenPort: candidate.ListenPort, Server: server, Domain: candidate.Domain, IPv4Bind: candidate.IPv4Bind, IPv6Bind: candidate.IPv6Bind, AutoBind: true, ServiceName: candidate.ServiceName, ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath, ConfigVersion: candidate.ConfigVersion, Ownership: "imported", SharedGroup: candidate.SharedGroup, Status: status}
 		if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 			return count, err
 		}
@@ -260,6 +262,7 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 }
 
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	request.Protocol = normalizeProtocol(request.Protocol)
 	request = normalizeModeBindings(request)
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
@@ -267,7 +270,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	port := request.ListenPort
 	if port == 0 {
 		var err error
-		port, err = freeUDPPort()
+		port, err = freeProtocolPort(request.Protocol)
 		if err != nil {
 			return model.Node{}, err
 		}
@@ -277,19 +280,19 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		return model.Node{}, err
 	}
 	id = strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(id))
-	secret := request.Password
-	if secret == "" {
-		secret, err = security.RandomToken(24)
-		if err != nil {
-			return model.Node{}, err
-		}
+	credentials, err := generateProtocolCredentials(request.Protocol, request.Password)
+	if err != nil {
+		return model.Node{}, err
 	}
 	service := "sing-box-wukong-" + id
 	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".json")
 	manager := detectServiceManager()
-	certPath, keyPath, generateCertificate, err := m.certificatePaths(request, id)
-	if err != nil {
-		return model.Node{}, err
+	certPath, keyPath, generateCertificate := "", "", false
+	if protocolUsesCertificate(request.Protocol) {
+		certPath, keyPath, generateCertificate, err = m.certificatePaths(request, id)
+		if err != nil {
+			return model.Node{}, err
+		}
 	}
 	if !m.cfg.Demo {
 		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
@@ -305,13 +308,17 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 			}
 		}
 		version := m.Version(ctx)
-		payload, err := buildConfig(request, port, secret, certPath, keyPath, version)
+		payload, err := buildConfig(request, port, credentials, certPath, keyPath, version)
 		if err != nil {
 			return model.Node{}, err
 		}
 		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
 			return model.Node{}, err
 		}
+	}
+	secret, err := encodeProtocolCredentials(credentials)
+	if err != nil {
+		return model.Node{}, err
 	}
 	cipher, err := m.vault.Encrypt(secret)
 	if err != nil {
@@ -321,7 +328,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if m.cfg.Demo {
 		version = "1.14-demo"
 	}
-	node := model.Node{ID: id, Name: request.Name, Protocol: "hysteria2", Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
+	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 		return model.Node{}, err
 	}
@@ -402,11 +409,12 @@ func configUsesSelfSignedCertificate(configPath string) bool {
 	inbounds, _ := root["inbounds"].([]any)
 	for _, item := range inbounds {
 		inbound, _ := item.(map[string]any)
-		if stringValue(inbound["type"]) != "hysteria2" {
+		tlsConfig, _ := inbound["tls"].(map[string]any)
+		certificatePath := stringValue(tlsConfig["certificate_path"])
+		if certificatePath == "" {
 			continue
 		}
-		tlsConfig, _ := inbound["tls"].(map[string]any)
-		certificate, err := loadCertificate(stringValue(tlsConfig["certificate_path"]))
+		certificate, err := loadCertificate(certificatePath)
 		if err != nil {
 			return false
 		}
@@ -502,22 +510,14 @@ func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 	if err != nil {
 		return model.Share{}, err
 	}
-	server := node.Server
-	if server == "" {
-		server = node.Domain
+	credentials, err := decodeProtocolCredentials(node.Protocol, secret)
+	if err != nil {
+		return model.Share{}, err
 	}
-	if server == "" {
-		server = "127.0.0.1"
+	uri, err := buildShareURI(node, credentials, configUsesSelfSignedCertificate(node.ConfigPath))
+	if err != nil {
+		return model.Share{}, err
 	}
-	sni := node.Domain
-	if sni == "" {
-		sni = "www.bing.com"
-	}
-	query := "sni=" + urlEncode(sni)
-	if configUsesSelfSignedCertificate(node.ConfigPath) {
-		query += "&insecure=1"
-	}
-	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?%s#%s", urlEncode(secret), hostForURI(server), node.ListenPort, query, urlEncode(node.Name))
 	return model.Share{URI: uri, ExpiresAt: time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339)}, nil
 }
 
@@ -562,8 +562,11 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 	return command(ctx, "rc-service", service, "start")
 }
 
-func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, keyPath, version string) ([]byte, error) {
-	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-" + strings.TrimSpace(request.Name) + "-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
+func buildConfig(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath, version string) ([]byte, error) {
+	inbound, err := buildProtocolInbound(request, port, credentials, certPath, keyPath)
+	if err != nil {
+		return nil, err
+	}
 	capabilities := singboxconfig.CapabilitiesFor(version)
 	outbounds := []any{}
 	rules := []any{}
@@ -724,8 +727,12 @@ func validateCreate(r model.NodeCreateRequest) error {
 	if r.Mode != "prefer_v6" && r.Mode != "v4only" && r.Mode != "v6only" {
 		return errors.New("invalid outbound mode")
 	}
+	protocol := normalizeProtocol(r.Protocol)
+	if !supportedProtocols[protocol] {
+		return errors.New("unsupported node protocol")
+	}
 	if r.ListenPort < 0 || r.ListenPort > 65535 {
-		return errors.New("invalid UDP port")
+		return errors.New("invalid listen port")
 	}
 	if r.IPv4Bind != "" && net.ParseIP(r.IPv4Bind) == nil {
 		return errors.New("invalid IPv4 bind address")
@@ -735,6 +742,15 @@ func validateCreate(r model.NodeCreateRequest) error {
 	}
 	if r.Mode == "v6only" && r.IPv6Bind == "" {
 		return errors.New("IPv6-only mode requires an IPv6 bind address")
+	}
+	if protocol == protocolVLESS && strings.TrimSpace(r.Domain) == "" {
+		return errors.New("VLESS REALITY requires a handshake server name")
+	}
+	if strings.TrimSpace(r.Server) == "" {
+		return errors.New("public server domain or IP is required")
+	}
+	if protocolUsesCertificate(protocol) && strings.TrimSpace(r.Domain) == "" {
+		return errors.New("TLS domain is required for this protocol")
 	}
 	return nil
 }
@@ -795,27 +811,54 @@ func freeUDPPort() (int, error) {
 	defer listener.Close()
 	return listener.LocalAddr().(*net.UDPAddr).Port, nil
 }
+func freeProtocolPort(protocol string) (int, error) {
+	if protocolUsesTCP(protocol) && protocolUsesUDP(protocol) {
+		for range 32 {
+			listener, err := net.Listen("tcp", "[::]:0")
+			if err != nil {
+				return 0, err
+			}
+			port := listener.Addr().(*net.TCPAddr).Port
+			packet, packetErr := net.ListenPacket("udp", fmt.Sprintf("[::]:%d", port))
+			_ = listener.Close()
+			if packetErr == nil {
+				_ = packet.Close()
+				return port, nil
+			}
+		}
+		return 0, errors.New("unable to find a free TCP/UDP port")
+	}
+	if protocolUsesTCP(protocol) {
+		listener, err := net.Listen("tcp", "[::]:0")
+		if err != nil {
+			return 0, err
+		}
+		defer listener.Close()
+		return listener.Addr().(*net.TCPAddr).Port, nil
+	}
+	return freeUDPPort()
+}
 func fingerprint(path string, port int, name string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%s", path, port, name)))
 	return hex.EncodeToString(sum[:8])
 }
-func displayName(tag string, index int) string {
+func displayName(tag string, index int, protocol string) string {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
-		return fmt.Sprintf("HY2 节点 %d", index+1)
+		return fmt.Sprintf("%s 节点 %d", strings.ToUpper(protocolTagPrefix(protocol)), index+1)
 	}
-	tag = strings.TrimPrefix(tag, "hy2-")
+	tag = strings.TrimPrefix(tag, protocolTagPrefix(protocol)+"-")
 	tag = strings.TrimSuffix(tag, "-in")
 	return tag
 }
 func candidateKey(path string, port int) string {
 	return filepath.Clean(path) + "\x00" + strconv.Itoa(port)
 }
-func preferredCandidateName(tag, path string, index, port int, known string) string {
+func preferredCandidateName(tag, path string, index, port int, protocol, known string) string {
 	if strings.TrimSpace(known) != "" && !genericNodeName(known) {
 		return known
 	}
-	name := displayName(tag, index)
+	name := displayName(tag, index, protocol)
 	if genericNodeName(name) {
 		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		if strings.HasPrefix(base, "wukong-") {
@@ -827,7 +870,7 @@ func preferredCandidateName(tag, path string, index, port int, known string) str
 }
 func genericNodeName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in":
+	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in", "vless", "vless-in", "ss", "ss-in", "shadowsocks", "shadowsocks-in", "tuic", "tuic-in", "trojan", "trojan-in":
 		return true
 	default:
 		return false

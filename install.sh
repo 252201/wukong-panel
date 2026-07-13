@@ -359,7 +359,7 @@ restore_singbox_configs() {
 probe_singbox_nodes() {
   probe_binary=$1
   probe_config_dir=${2:-$(singbox_config_dir)}
-  info "执行 HY2 协议级真实流量探测"
+  info "按 inbound 类型执行协议级真实流量探测"
   "$SINGBOX_MIGRATOR" singbox probe --binary "$probe_binary" --config-dir "$probe_config_dir"
 }
 
