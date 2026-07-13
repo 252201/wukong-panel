@@ -37,6 +37,10 @@ type Plan struct {
 	Errors            int        `json:"errors"`
 }
 
+func newFilePlan(path string) FilePlan {
+	return FilePlan{Path: path, Changes: []string{}, Warnings: []string{}, Errors: []string{}, Interfaces: []string{}}
+}
+
 func CapabilitiesFor(version string) Capabilities {
 	major, minor := parseVersion(version)
 	atLeast := func(wantMajor, wantMinor int) bool {
@@ -63,7 +67,7 @@ func PlanDirectory(dir, target string) (Plan, error) {
 	plan := Plan{Target: strings.TrimPrefix(target, "v"), Compatible: true, Files: []FilePlan{}}
 	for _, path := range files {
 		data, readErr := os.ReadFile(path)
-		filePlan := FilePlan{Path: path}
+		filePlan := newFilePlan(path)
 		if readErr != nil {
 			filePlan.Errors = append(filePlan.Errors, readErr.Error())
 		} else {
@@ -110,7 +114,7 @@ func MigrateDirectory(sourceDir, outputDir, target string) (Plan, error) {
 }
 
 func Migrate(data []byte, target, path string) ([]byte, FilePlan, error) {
-	result := FilePlan{Path: path}
+	result := newFilePlan(path)
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
 		result.Errors = append(result.Errors, "invalid JSON: "+err.Error())

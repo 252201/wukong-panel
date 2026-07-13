@@ -37,6 +37,9 @@ func (d directAgent) Health(ctx context.Context) (map[string]any, error) {
 func (d directAgent) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 	return d.manager.Scan(ctx)
 }
+func (d directAgent) DeploymentDefaults(ctx context.Context) (model.NodeDeploymentDefaults, error) {
+	return d.manager.DeploymentDefaults(ctx)
+}
 func (d directAgent) Import(ctx context.Context, ids []string) error {
 	_, err := d.manager.Import(ctx, ids)
 	return err

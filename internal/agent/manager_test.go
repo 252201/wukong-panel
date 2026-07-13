@@ -41,12 +41,55 @@ func TestBuildModernConfig(t *testing.T) {
 	if root["dns"] == nil {
 		t.Fatal("modern DNS configuration missing")
 	}
+	inbound := root["inbounds"].([]any)[0].(map[string]any)
+	if inbound["tag"] != "hy2-Test-in" {
+		t.Fatalf("node name not preserved in inbound tag: %v", inbound["tag"])
+	}
 	text := string(payload)
 	if !strings.Contains(text, `"domain_resolver"`) || !strings.Contains(text, `"action": "sniff"`) {
 		t.Fatal("modern migration fields missing")
 	}
 	if strings.Contains(text, `"domain_strategy"`) {
 		t.Fatal("modern config contains removed domain_strategy")
+	}
+}
+
+func TestPreferredCandidateName(t *testing.T) {
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, "测试001"); got != "测试001" {
+		t.Fatalf("known node name ignored: %q", got)
+	}
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, ""); got != "悟空节点 · 59904" {
+		t.Fatalf("generic inbound tag not replaced: %q", got)
+	}
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 1958, "in"); got != "悟空节点 · 1958" {
+		t.Fatalf("generic stored name not replaced: %q", got)
+	}
+	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, ""); got != "Mac mini" {
+		t.Fatalf("descriptive inbound tag changed: %q", got)
+	}
+}
+
+func TestVirtualBindInterfaceFiltering(t *testing.T) {
+	for _, name := range []string{"tun0", "utun4", "wg0", "docker0", "br-abcd", "veth123", "tailscale0"} {
+		if !virtualBindInterface(name) {
+			t.Fatalf("virtual interface %q was not filtered", name)
+		}
+	}
+	for _, name := range []string{"eth0", "ens3", "enp1s0"} {
+		if virtualBindInterface(name) {
+			t.Fatalf("host interface %q was filtered", name)
+		}
+	}
+}
+
+func TestDeploymentDefaultsUsesPanelDomain(t *testing.T) {
+	manager := &Manager{cfg: config.Config{PanelDomain: " panel.example.com "}}
+	defaults, err := manager.DeploymentDefaults(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.PanelDomain != "panel.example.com" || defaults.IPv4 == nil || defaults.IPv6 == nil {
+		t.Fatalf("unexpected deployment defaults: %#v", defaults)
 	}
 }
 
@@ -71,6 +114,21 @@ func TestValidateCreateRejectsUnsafeValues(t *testing.T) {
 	request.IPv4Bind = "$(touch /tmp/nope)"
 	if validateCreate(request) == nil {
 		t.Fatal("invalid IP accepted")
+	}
+}
+
+func TestNormalizeModeBindingsDropsUnusedAddressFamily(t *testing.T) {
+	v6 := baseRequest()
+	v6.Mode = "v6only"
+	v6 = normalizeModeBindings(v6)
+	if v6.IPv4Bind != "" || v6.IPv6Bind == "" {
+		t.Fatalf("IPv6-only bindings were not normalized: %#v", v6)
+	}
+	v4 := baseRequest()
+	v4.Mode = "v4only"
+	v4 = normalizeModeBindings(v4)
+	if v4.IPv6Bind != "" || v4.IPv4Bind == "" {
+		t.Fatalf("IPv4-only bindings were not normalized: %#v", v4)
 	}
 }
 

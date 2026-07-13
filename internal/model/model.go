@@ -59,6 +59,17 @@ type NodeCreateRequest struct {
 	Password        string   `json:"password,omitempty"`
 }
 
+type BindAddress struct {
+	Address   string `json:"address"`
+	Interface string `json:"interface"`
+}
+
+type NodeDeploymentDefaults struct {
+	PanelDomain string        `json:"panelDomain"`
+	IPv4        []BindAddress `json:"ipv4"`
+	IPv6        []BindAddress `json:"ipv6"`
+}
+
 type NodeActionRequest struct {
 	Action      string `json:"action"`
 	ConfirmName string `json:"confirmName,omitempty"`

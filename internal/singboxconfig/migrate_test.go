@@ -73,3 +73,20 @@ func TestNoopDoesNotAddRoute(t *testing.T) {
 		t.Fatalf("no-op migration added fields: err=%v plan=%+v output=%s", err, plan, output)
 	}
 }
+
+func TestMigrationPlanJSONUsesEmptyArraysInsteadOfNull(t *testing.T) {
+	_, filePlan, err := Migrate([]byte(`{"inbounds":[],"outbounds":[],"route":{"rules":[]}}`), "1.13.14", "noop.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(Plan{Target: "1.13.14", Compatible: true, Files: []FilePlan{filePlan}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, field := range []string{`"changes":null`, `"warnings":null`, `"errors":null`} {
+		if strings.Contains(text, field) {
+			t.Fatalf("migration plan contains nullable collection %s: %s", field, text)
+		}
+	}
+}

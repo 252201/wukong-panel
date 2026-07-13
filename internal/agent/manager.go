@@ -65,6 +65,11 @@ func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
 	return m.store.UpdateNodeConfigVersions(version)
 }
 
+func (m *Manager) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
+	v4, v6 := bindAddressOptions()
+	return model.NodeDeploymentDefaults{PanelDomain: strings.TrimSpace(m.cfg.PanelDomain), IPv4: v4, IPv6: v6}, nil
+}
+
 func (m *Manager) ReconcileBindings(ctx context.Context) error {
 	if m.cfg.Demo {
 		return nil
@@ -167,6 +172,12 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 		return nil, err
 	}
 	version := m.Version(ctx)
+	knownNames := map[string]string{}
+	if knownNodes, knownErr := m.store.Nodes(ctx); knownErr == nil {
+		for _, node := range knownNodes {
+			knownNames[candidateKey(node.ConfigPath, node.ListenPort)] = node.Name
+		}
+	}
 	result := []model.NodeCandidate{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -210,7 +221,8 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if len(inbounds) > 1 {
 				shared = path
 			}
-			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: displayName(name, index), Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
+			candidateName := preferredCandidateName(name, path, index, port, knownNames[candidateKey(path, port)])
+			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: candidateName, Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ListenPort < result[j].ListenPort })
@@ -247,6 +259,7 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 }
 
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	request = normalizeModeBindings(request)
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
 	}
@@ -313,6 +326,16 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
 	return node, nil
+}
+
+func normalizeModeBindings(request model.NodeCreateRequest) model.NodeCreateRequest {
+	switch request.Mode {
+	case "v4only":
+		request.IPv6Bind = ""
+	case "v6only":
+		request.IPv4Bind = ""
+	}
+	return request
 }
 
 func (m *Manager) certificatePaths(request model.NodeCreateRequest, id string) (certPath, keyPath string, generate bool, err error) {
@@ -520,7 +543,7 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 }
 
 func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, keyPath, version string) ([]byte, error) {
-	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
+	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-" + strings.TrimSpace(request.Name) + "-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
 	capabilities := singboxconfig.CapabilitiesFor(version)
 	outbounds := []any{}
 	rules := []any{}
@@ -765,6 +788,31 @@ func displayName(tag string, index int) string {
 	tag = strings.TrimSuffix(tag, "-in")
 	return tag
 }
+func candidateKey(path string, port int) string {
+	return filepath.Clean(path) + "\x00" + strconv.Itoa(port)
+}
+func preferredCandidateName(tag, path string, index, port int, known string) string {
+	if strings.TrimSpace(known) != "" && !genericNodeName(known) {
+		return known
+	}
+	name := displayName(tag, index)
+	if genericNodeName(name) {
+		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		if strings.HasPrefix(base, "wukong-") {
+			return fmt.Sprintf("悟空节点 · %d", port)
+		}
+		return base
+	}
+	return name
+}
+func genericNodeName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in":
+		return true
+	default:
+		return false
+	}
+}
 func stringValue(v any) string {
 	if value, ok := v.(string); ok {
 		return value
@@ -817,6 +865,78 @@ func globalAddresses() (v4s, v6s []string) {
 	sort.Strings(v4s)
 	sort.Strings(v6s)
 	return unique(v4s), unique(v6s)
+}
+
+func bindAddressOptions() (v4, v6 []model.BindAddress) {
+	v4 = make([]model.BindAddress, 0)
+	v6 = make([]model.BindAddress, 0)
+	interfaces, _ := net.Interfaces()
+	var fallback4, fallback6 []model.BindAddress
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, address := range addresses {
+			ip := net.ParseIP(strings.Split(address.String(), "/")[0])
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || !ip.IsGlobalUnicast() {
+				continue
+			}
+			option := model.BindAddress{Address: ip.String(), Interface: iface.Name}
+			if ip.To4() != nil {
+				fallback4 = append(fallback4, option)
+				if !virtualBindInterface(iface.Name) {
+					v4 = append(v4, option)
+				}
+			} else {
+				fallback6 = append(fallback6, option)
+				if !virtualBindInterface(iface.Name) {
+					v6 = append(v6, option)
+				}
+			}
+		}
+	}
+	if len(v4) == 0 {
+		v4 = fallback4
+	}
+	if len(v6) == 0 {
+		v6 = fallback6
+	}
+	sortBindAddresses(v4)
+	sortBindAddresses(v6)
+	return uniqueBindAddresses(v4), uniqueBindAddresses(v6)
+}
+
+func virtualBindInterface(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{"br-", "docker", "veth", "virbr", "tun", "utun", "tap", "wg", "tailscale", "zt"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortBindAddresses(addresses []model.BindAddress) {
+	sort.Slice(addresses, func(i, j int) bool {
+		if addresses[i].Interface == addresses[j].Interface {
+			return addresses[i].Address < addresses[j].Address
+		}
+		return addresses[i].Interface < addresses[j].Interface
+	})
+}
+
+func uniqueBindAddresses(addresses []model.BindAddress) []model.BindAddress {
+	result := make([]model.BindAddress, 0, len(addresses))
+	seen := make(map[string]bool, len(addresses))
+	for _, address := range addresses {
+		if seen[address.Address] {
+			continue
+		}
+		seen[address.Address] = true
+		result = append(result, address)
+	}
+	return result
 }
 
 func unique(values []string) []string {
