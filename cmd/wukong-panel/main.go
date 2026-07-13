@@ -50,6 +50,9 @@ func (d directAgent) Create(ctx context.Context, r model.NodeCreateRequest) (mod
 func (d directAgent) Action(ctx context.Context, id string, r model.NodeActionRequest) error {
 	return d.manager.Action(ctx, id, r.Action, r.ConfirmName)
 }
+func (d directAgent) Rename(ctx context.Context, id string, r model.NodeRenameRequest) error {
+	return d.manager.Rename(ctx, id, r)
+}
 func (d directAgent) Share(ctx context.Context, id string) (model.Share, error) {
 	return d.manager.Share(ctx, id)
 }

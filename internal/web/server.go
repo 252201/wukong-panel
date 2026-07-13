@@ -34,6 +34,7 @@ type AgentAPI interface {
 	Import(context.Context, []string) error
 	Create(context.Context, model.NodeCreateRequest) (model.Node, error)
 	Action(context.Context, string, model.NodeActionRequest) error
+	Rename(context.Context, string, model.NodeRenameRequest) error
 	Share(context.Context, string) (model.Share, error)
 	MigrationPlan(context.Context, string) (singboxconfig.Plan, error)
 }
@@ -64,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
 	mux.HandleFunc("GET /api/v1/nodes/deployment-defaults", s.auth(s.nodeDeploymentDefaults, false))
 	mux.HandleFunc("POST /api/v1/nodes", s.auth(s.createNode, true))
+	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.auth(s.renameNode, true))
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
 	mux.HandleFunc("GET /api/v1/imports/scan", s.auth(s.scan, false))
@@ -319,6 +321,20 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request, session stor
 		return
 	}
 	go s.runJob(job, func(ctx context.Context) error { return s.agent.Action(ctx, id, request) })
+	writeJSON(w, 202, map[string]string{"jobId": job.ID})
+}
+func (s *Server) renameNode(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request model.NodeRenameRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	id := r.PathValue("id")
+	job, err := s.store.CreateJob("node.rename", id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	go s.runJob(job, func(ctx context.Context) error { return s.agent.Rename(ctx, id, request) })
 	writeJSON(w, 202, map[string]string{"jobId": job.ID})
 }
 func (s *Server) share(w http.ResponseWriter, r *http.Request, session store.Session) {
