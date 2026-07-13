@@ -57,6 +57,10 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --rollback-sing-box
 
+# 完整备份后卸载 sing-box、节点 JSON 和对应服务定义；保留悟空面板
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --uninstall-sing-box
+
 # 卸载面板并保留配置、数据库和 sing-box 节点
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall
@@ -88,7 +92,7 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 
 ### sing-box 安全更新与回退
 
-悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.13.14`。面板会按 1.10、1.11、1.12、1.13 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖和 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound 会作为阻断项展示，不会猜测性重写。更新流程会：
+悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.13.14`。全新 VPS 没有 `/etc/s-box/sing-box` 和旧 JSON 时，一键安装会下载官方资产、核对固定 SHA-256、验证包内版本并原子安装；检测到现有二进制则保持原版本不变。若只有旧 JSON 而缺少配套二进制，安装器会拒绝猜测版本，避免用新二进制误启旧配置。面板会按 1.10、1.11、1.12、1.13 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖和 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound 会作为阻断项展示，不会猜测性重写。更新流程会：
 
 1. 下载官方 GitHub Release 并核对固定 SHA-256。
 2. 生成逐文件迁移预览，保留未知 JSON 字段，并拒绝存在阻断项的升级。
@@ -98,6 +102,8 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 6. 恢复服务后使用节点真实密码通过本机 HY2 入口访问 Cloudflare 双栈探测地址；配置、服务或协议探测任一失败都会恢复旧二进制和旧配置。
 
 备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退会恢复同一快照中的旧二进制和配套配置，而不是只替换二进制；刚才运行的新版本也会形成反向快照，因此可以再次切回。
+
+`--uninstall-sing-box` 是独立的破坏性操作：先保存并校验 sing-box 二进制、全部 `/etc/s-box/*.json`、活动服务清单、受管 systemd/OpenRC 服务定义及启用状态，再停止服务并删除这些受管内容。证书等非 JSON 文件、悟空面板和 SQLite 数据库不会删除；删除阶段失败会自动恢复二进制、配置、服务定义和原活动服务。
 
 ## 架构与安全边界
 
@@ -189,9 +195,10 @@ sing-box 1.10 配置仍以兼容模式接管；系统页可先只读预览迁移
 ```bash
 sudo sh install.sh --uninstall          # 保留面板数据、节点和 sing-box
 sudo sh install.sh --uninstall --purge  # 额外删除悟空面板自身数据
+sudo sh install.sh --uninstall-sing-box # 备份后只卸载 sing-box 与节点服务
 ```
 
-独立的 `uninstall.sh` 仍保留兼容。两种卸载入口都不会删除 `/etc/s-box` 或任何节点服务。
+独立的 `uninstall.sh` 仍保留兼容。面板卸载和 purge 都不会删除 `/etc/s-box` 或任何节点服务；只有显式执行 `--uninstall-sing-box` 才会删除 sing-box 二进制、节点 JSON 和对应服务定义。
 
 ## License
 
