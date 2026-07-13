@@ -1,6 +1,7 @@
 package singboxconfig
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBuildHY2Probe(t *testing.T) {
@@ -24,6 +26,44 @@ func TestBuildHY2Probe(t *testing.T) {
 	outbound := root["outbounds"].([]any)[0].(map[string]any)
 	if outbound["server"] != "::1" || outbound["password"] != "secret" {
 		t.Fatalf("unexpected probe outbound: %+v", outbound)
+	}
+}
+
+func TestProbeConfigInboundSelectsNodeAndCapturesExitIP(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "nodes.json")
+	root := map[string]any{"inbounds": []any{
+		map[string]any{"type": "hysteria2", "tag": "first", "listen": "::", "listen_port": 45115, "users": []any{map[string]any{"password": "first-secret"}}},
+		map[string]any{"type": "hysteria2", "tag": "second", "listen": "::", "listen_port": 45116, "users": []any{map[string]any{"password": "second-secret"}}},
+	}}
+	data, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "sing-box")
+	if err = os.WriteFile(binary, []byte("#!/bin/sh\nprintf 'ip=203.0.113.9\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	result, err := ProbeConfigInbound(ctx, binary, configPath, "hysteria2", 45116)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || result.Inbound != "second" || result.Port != 45116 || result.ExitIP != "203.0.113.9" || result.Target != "www.cloudflare.com" || result.LatencyMS < 1 {
+		t.Fatalf("unexpected node probe result: %#v", result)
+	}
+}
+
+func TestProbeConfigInboundRejectsMissingEndpoint(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "nodes.json")
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProbeConfigInbound(t.Context(), "/unused", configPath, "tuic", 45116); err == nil {
+		t.Fatal("missing inbound was accepted")
 	}
 }
 

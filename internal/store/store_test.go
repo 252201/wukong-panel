@@ -148,6 +148,33 @@ func TestUpdateNodeConfigVersionsTracksRuntimeVersion(t *testing.T) {
 	}
 }
 
+func TestNodeProbeResultRoundTrip(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "probe-me", Name: "Probe", Protocol: "tuic", Mode: "prefer_v6", ListenPort: 45116, ServiceName: "sing-box-probe", ServiceManager: "systemd", ConfigPath: "/etc/s-box/probe.json", ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err = s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	checkedAt := time.Unix(1_789_000_000, 0)
+	if err = s.SetNodeProbeResult(node.ID, "success", 87, "2001:db8::8", "www.cloudflare.com", "", checkedAt); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Node(t.Context(), node.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ProbeStatus != "success" || stored.ProbeLatencyMS != 87 || stored.ProbeExitIP != "2001:db8::8" || stored.ProbeTarget != "www.cloudflare.com" || !stored.ProbeCheckedAt.Equal(checkedAt) {
+		t.Fatalf("unexpected probe result: %#v", stored)
+	}
+	items, err := s.Nodes(t.Context())
+	if err != nil || len(items) != 1 || items[0].ProbeStatus != "success" {
+		t.Fatalf("probe fields missing from node list: %#v err=%v", items, err)
+	}
+}
+
 func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

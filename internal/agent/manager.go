@@ -433,7 +433,7 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 			return err
 		}
 	}
-	allowed := map[string]bool{"start": true, "stop": true, "restart": true, "check": true, "delete": true}
+	allowed := map[string]bool{"start": true, "stop": true, "restart": true, "check": true, "probe": true, "delete": true}
 	if !allowed[action] {
 		return errors.New("unsupported node action")
 	}
@@ -444,6 +444,9 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		if action == "delete" {
 			return m.store.DeleteNode(id)
 		}
+		if action == "probe" {
+			return m.store.SetNodeProbeResult(id, "success", 42, "203.0.113.18", "www.cloudflare.com", "", time.Now())
+		}
 		status := "active"
 		if action == "stop" {
 			status = "inactive"
@@ -452,6 +455,9 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 	}
 	if action == "check" {
 		return command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath)
+	}
+	if action == "probe" {
+		return m.probeNode(ctx, node)
 	}
 	if action == "delete" {
 		if err = m.backup(node); err != nil {
@@ -480,6 +486,44 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		_ = m.store.Audit("admin", "node_"+action, node.ID, node.Name)
 	}
 	return err
+}
+
+func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
+	if err := m.store.SetNodeProbeResult(node.ID, "running", 0, "", "", "", time.Time{}); err != nil {
+		return err
+	}
+	fail := func(result singboxconfig.ProbeResult, err error) error {
+		message := compactProbeError(err)
+		_ = m.store.SetNodeProbeResult(node.ID, "failed", result.LatencyMS, result.ExitIP, result.Target, message, time.Now())
+		_ = m.store.Audit("admin", "node_probe_failed", node.ID, message)
+		return err
+	}
+	if m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) != "active" {
+		return fail(singboxconfig.ProbeResult{}, errors.New("node service is not active"))
+	}
+	if err := command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath); err != nil {
+		return fail(singboxconfig.ProbeResult{}, fmt.Errorf("configuration check failed: %w", err))
+	}
+	result, err := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, node.ConfigPath, node.Protocol, node.ListenPort)
+	if err != nil {
+		return fail(result, fmt.Errorf("full proxy round trip failed: %w", err))
+	}
+	if err = m.store.SetNodeProbeResult(node.ID, "success", result.LatencyMS, result.ExitIP, result.Target, "", time.Now()); err != nil {
+		return err
+	}
+	_ = m.store.Audit("admin", "node_probe", node.ID, fmt.Sprintf("latency_ms=%d exit_ip=%s target=%s", result.LatencyMS, result.ExitIP, result.Target))
+	return nil
+}
+
+func compactProbeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 600 {
+		message = message[len(message)-600:]
+	}
+	return message
 }
 
 func (m *Manager) Rename(ctx context.Context, id string, request model.NodeRenameRequest) error {

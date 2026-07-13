@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,12 +16,15 @@ import (
 )
 
 type ProbeResult struct {
-	Config   string `json:"config"`
-	Inbound  string `json:"inbound"`
-	Protocol string `json:"protocol"`
-	Port     int    `json:"port"`
-	OK       bool   `json:"ok"`
-	Error    string `json:"error,omitempty"`
+	Config    string `json:"config"`
+	Inbound   string `json:"inbound"`
+	Protocol  string `json:"protocol"`
+	Port      int    `json:"port"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+	LatencyMS int64  `json:"latencyMs,omitempty"`
+	Target    string `json:"target,omitempty"`
+	ExitIP    string `json:"exitIp,omitempty"`
 }
 
 var probeableProtocols = map[string]bool{
@@ -64,26 +69,7 @@ func ProbeDirectory(ctx context.Context, binary, configDir, serverOverride, serv
 				results = append(results, result)
 				continue
 			}
-			probePath := filepath.Join(tempDir, fmt.Sprintf("probe-%d.json", len(results)))
-			if err = os.WriteFile(probePath, probe, 0o600); err != nil {
-				return results, err
-			}
-			for _, target := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://www.google.com/generate_204", "https://api64.ipify.org/"} {
-				attemptCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
-				command := exec.CommandContext(attemptCtx, binary, "tools", "fetch", "-c", probePath, target)
-				output, runErr := command.CombinedOutput()
-				cancel()
-				if runErr == nil {
-					result.OK = true
-					result.Error = ""
-					break
-				}
-				message := strings.TrimSpace(string(output))
-				if len(message) > 800 {
-					message = message[len(message)-800:]
-				}
-				result.Error = fmt.Sprintf("%s probe via %s failed: %v: %s", protocol, target, runErr, message)
-			}
+			result = executeProtocolProbe(ctx, binary, filepath.Join(tempDir, fmt.Sprintf("probe-%d.json", len(results))), probe, result)
 			results = append(results, result)
 		}
 	}
@@ -93,6 +79,102 @@ func ProbeDirectory(ctx context.Context, binary, configDir, serverOverride, serv
 		}
 	}
 	return results, nil
+}
+
+// ProbeConfigInbound performs a full local client round trip through one inbound.
+// It validates authentication, TLS/REALITY negotiation and the node's outbound
+// internet access without exposing credentials outside the root-only process.
+func ProbeConfigInbound(ctx context.Context, binary, configPath, protocol string, port int) (ProbeResult, error) {
+	result := ProbeResult{Config: configPath, Protocol: strings.ToLower(strings.TrimSpace(protocol)), Port: port}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return result, err
+	}
+	var root map[string]any
+	if err = json.Unmarshal(data, &root); err != nil {
+		return result, err
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	var selected map[string]any
+	for _, item := range inbounds {
+		inbound, _ := item.(map[string]any)
+		inboundProtocol := strings.ToLower(stringValue(inbound["type"]))
+		if intNumber(inbound["listen_port"]) == port && (result.Protocol == "" || inboundProtocol == result.Protocol) {
+			selected = inbound
+			result.Protocol = inboundProtocol
+			result.Inbound = stringValue(inbound["tag"])
+			break
+		}
+	}
+	if selected == nil {
+		return result, fmt.Errorf("%s inbound on port %d was not found", result.Protocol, port)
+	}
+	if !probeableProtocols[result.Protocol] {
+		return result, fmt.Errorf("unsupported probe protocol %q", result.Protocol)
+	}
+	probe, err := buildProtocolProbe(selected, "", "")
+	if err != nil {
+		return result, err
+	}
+	tempDir, err := os.MkdirTemp("", "wukong-node-probe-")
+	if err != nil {
+		return result, err
+	}
+	defer os.RemoveAll(tempDir)
+	result = executeProtocolProbe(ctx, binary, filepath.Join(tempDir, "probe.json"), probe, result)
+	if !result.OK {
+		return result, errorsText(result.Error)
+	}
+	return result, nil
+}
+
+func executeProtocolProbe(ctx context.Context, binary, probePath string, probe []byte, result ProbeResult) ProbeResult {
+	if err := os.WriteFile(probePath, probe, 0o600); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	for _, target := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://www.google.com/generate_204", "https://api64.ipify.org/"} {
+		started := time.Now()
+		attemptCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		command := exec.CommandContext(attemptCtx, binary, "tools", "fetch", "-c", probePath, target)
+		output, runErr := command.CombinedOutput()
+		cancel()
+		result.LatencyMS = max(int64(1), time.Since(started).Milliseconds())
+		result.Target = probeTargetName(target)
+		if runErr == nil {
+			result.OK = true
+			result.Error = ""
+			result.ExitIP = extractProbeIP(string(output))
+			return result
+		}
+		message := strings.TrimSpace(string(output))
+		if len(message) > 800 {
+			message = message[len(message)-800:]
+		}
+		result.Error = fmt.Sprintf("%s probe via %s failed: %v: %s", result.Protocol, result.Target, runErr, message)
+	}
+	return result
+}
+
+func probeTargetName(value string) string {
+	parsed, err := url.Parse(value)
+	if err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	return value
+}
+
+func extractProbeIP(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		value := strings.TrimSpace(line)
+		if strings.HasPrefix(value, "ip=") {
+			value = strings.TrimSpace(strings.TrimPrefix(value, "ip="))
+		}
+		if ip := net.ParseIP(value); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 func buildProtocolProbe(inbound map[string]any, serverOverride, serverName string) ([]byte, error) {

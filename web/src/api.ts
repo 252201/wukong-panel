@@ -18,6 +18,12 @@ export interface NodeItem {
   ownership: string
   sharedGroup?: string
   status: NodeStatus
+  probeStatus?: 'running' | 'success' | 'failed'
+  probeLatencyMs?: number
+  probeExitIp?: string
+  probeTarget?: string
+  probeError?: string
+  probeCheckedAt?: string
 }
 
 export interface Metric {
@@ -165,6 +171,7 @@ export const api = {
   scan: () => request<Candidate[]>('imports/scan'),
   importNodes: (fingerprints: string[]) => request<{jobId: string}>('imports/confirm', { method: 'POST', body: JSON.stringify({ fingerprints }) }),
   jobs: () => request<Job[]>('jobs'),
+  job: (id: string) => request<Job>(`jobs/${id}`),
   settings: () => request<Settings>('settings'),
   saveSettings: (data: Settings) => request<{ok: boolean}>('settings', { method: 'PUT', body: JSON.stringify(data) }),
   rotateSubscription: () => request<{token: string}>('settings/subscription-token', { method: 'POST', body: '{}' }),

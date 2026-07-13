@@ -14,6 +14,7 @@
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
+- 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按 UDP 节点展示 Hysteria2、TUIC、Shadowsocks 最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
@@ -143,6 +144,7 @@ wukongctl node create --protocol tuic --name "AC-TUIC" \
 wukongctl node create --protocol trojan --name "AC-Trojan" \
   --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node action --id NODE_ID --action restart
+wukongctl node action --id NODE_ID --action probe
 wukong-panel singbox plan --target 1.13.14 --config-dir /etc/s-box
 wukong-panel singbox migrate --target 1.13.14 \
   --config-dir /etc/s-box --output-dir /tmp/s-box-1.13

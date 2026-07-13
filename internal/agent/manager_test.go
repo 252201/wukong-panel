@@ -120,6 +120,26 @@ func TestRenameUpdatesOnlyNodeMetadata(t *testing.T) {
 	}
 }
 
+func TestDemoProbeActionStoresSuccessfulRoundTrip(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	node := model.Node{ID: "probe-demo", Name: "检测节点", Protocol: "vless", Mode: "v6only", ListenPort: 28441, ServiceName: "sing-box-probe", ServiceManager: "openrc", ConfigPath: "/etc/s-box/probe.json", ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{cfg: config.Config{Demo: true}, store: database}
+	if err = manager.Action(t.Context(), node.ID, "probe", ""); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.Node(t.Context(), node.ID, false)
+	if err != nil || stored.ProbeStatus != "success" || stored.ProbeLatencyMS != 42 || stored.ProbeExitIP == "" {
+		t.Fatalf("unexpected demo probe result: %#v err=%v", stored, err)
+	}
+}
+
 func TestBuildRuleActionConfig(t *testing.T) {
 	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.11.15")
 	if err != nil {
