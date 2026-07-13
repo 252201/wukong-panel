@@ -259,6 +259,7 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 }
 
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	request = normalizeModeBindings(request)
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
 	}
@@ -325,6 +326,16 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
 	return node, nil
+}
+
+func normalizeModeBindings(request model.NodeCreateRequest) model.NodeCreateRequest {
+	switch request.Mode {
+	case "v4only":
+		request.IPv6Bind = ""
+	case "v6only":
+		request.IPv4Bind = ""
+	}
+	return request
 }
 
 func (m *Manager) certificatePaths(request model.NodeCreateRequest, id string) (certPath, keyPath string, generate bool, err error) {

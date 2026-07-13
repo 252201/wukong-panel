@@ -68,6 +68,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .form-error { color: #ef7667; font-size: 12px; }
 .modal-card label > small, .form-hint { color: var(--muted-2); font: 500 8px/1.5 "IBM Plex Mono", monospace; letter-spacing: 0; }
 .loading-hint { margin: 12px 0 -8px; color: var(--gold) !important; }
+.disabled-field { color: var(--muted-2) !important; }
+.disabled-field input:disabled { color: #7d8077; border-style: dashed; background: rgba(255,255,255,.018); cursor: not-allowed; }
 .login-panel .wide { margin-top: 30px; }
 .login-panel > small { display: block; margin-top: 22px; text-align: center; font-size: 10px; letter-spacing: .08em; }
 

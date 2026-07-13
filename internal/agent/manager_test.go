@@ -117,6 +117,21 @@ func TestValidateCreateRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeModeBindingsDropsUnusedAddressFamily(t *testing.T) {
+	v6 := baseRequest()
+	v6.Mode = "v6only"
+	v6 = normalizeModeBindings(v6)
+	if v6.IPv4Bind != "" || v6.IPv6Bind == "" {
+		t.Fatalf("IPv6-only bindings were not normalized: %#v", v6)
+	}
+	v4 := baseRequest()
+	v4.Mode = "v4only"
+	v4 = normalizeModeBindings(v4)
+	if v4.IPv6Bind != "" || v4.IPv4Bind == "" {
+		t.Fatalf("IPv4-only bindings were not normalized: %#v", v4)
+	}
+}
+
 func TestCertificatePathsReuseTrustedPanelCertificate(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "panel.cer")
