@@ -22,6 +22,12 @@ type Node struct {
 	Ownership      string    `json:"ownership"`
 	SharedGroup    string    `json:"sharedGroup,omitempty"`
 	Status         string    `json:"status"`
+	ProbeStatus    string    `json:"probeStatus,omitempty"`
+	ProbeLatencyMS int64     `json:"probeLatencyMs,omitempty"`
+	ProbeExitIP    string    `json:"probeExitIp,omitempty"`
+	ProbeTarget    string    `json:"probeTarget,omitempty"`
+	ProbeError     string    `json:"probeError,omitempty"`
+	ProbeCheckedAt time.Time `json:"probeCheckedAt,omitempty"`
 	Secret         string    `json:"-"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`

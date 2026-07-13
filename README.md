@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.5.0-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.5.1-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -14,6 +14,7 @@
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
+- 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按 UDP 节点展示 Hysteria2、TUIC、Shadowsocks 最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
@@ -71,7 +72,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.5.0 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.5.1 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -143,6 +144,7 @@ wukongctl node create --protocol tuic --name "AC-TUIC" \
 wukongctl node create --protocol trojan --name "AC-Trojan" \
   --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node action --id NODE_ID --action restart
+wukongctl node action --id NODE_ID --action probe
 wukong-panel singbox plan --target 1.13.14 --config-dir /etc/s-box
 wukong-panel singbox migrate --target 1.13.14 \
   --config-dir /etc/s-box --output-dir /tmp/s-box-1.13

@@ -39,6 +39,7 @@ const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6'
 const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [] })
 const bindChoice = reactive({ ipv4: '', ipv6: '' })
 const defaultsLoading = ref(false)
+const probeJobs = reactive<Record<string, string>>({})
 
 const words = {
   'zh-CN': { overview: '总览', nodes: '节点', traffic: '流量', system: '系统', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
@@ -125,8 +126,21 @@ function axisRate(value = 0) {
 }
 function uptime(value = 0) { const days = Math.floor(value / 86400); const hours = Math.floor(value % 86400 / 3600); return days ? `${days}天 ${hours}时` : `${hours}时` }
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
-function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
+function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.probe': '连通性检测', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
 function notify(message: string) { toast.value = message; window.setTimeout(() => { if (toast.value === message) toast.value = '' }, 3200) }
+function probeState(node: NodeItem) { return probeJobs[node.id] ? 'running' : node.probeStatus || 'idle' }
+function probeTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString(language.value, { hour: '2-digit', minute: '2-digit' })
+}
+function probeDetail(node: NodeItem) {
+  const state = probeState(node)
+  if (state === 'running') return '正在验证握手、认证与代理出站'
+  if (state === 'success') return `${node.probeLatencyMs || 0} ms${node.probeExitIp ? ` · ${node.probeExitIp}` : ''}${probeTime(node.probeCheckedAt) ? ` · ${probeTime(node.probeCheckedAt)}` : ''}`
+  if (state === 'failed') return node.probeError || '完整代理请求未通过'
+  return '握手 · 认证 · 出站'
+}
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
   activeTimelineBucket.value = null
@@ -213,6 +227,32 @@ async function nodeAction(node: NodeItem, action: string) {
   if (action === 'delete') { selectedNode.value = node; deleteConfirm.value = ''; modal.value = 'delete'; return }
   try { await api.nodeAction(node.id, action); notify(`${jobLabel(`node.${action}`)}任务已创建`); await refreshAll() }
   catch (error) { notify(error instanceof Error ? error.message : '操作失败') }
+}
+async function probeNode(node: NodeItem) {
+  if (node.status !== 'active' || probeJobs[node.id]) return
+  try {
+    const result = await api.nodeAction(node.id, 'probe')
+    probeJobs[node.id] = result.jobId
+    notify(`正在检测 ${node.name} 的完整代理链路`)
+    void watchProbeJob(node.id, result.jobId)
+  } catch (error) { notify(error instanceof Error ? error.message : '无法创建检测任务') }
+}
+async function watchProbeJob(nodeId: string, jobId: string) {
+  try {
+    for (let attempt = 0; attempt < 65; attempt++) {
+      await new Promise(resolve => window.setTimeout(resolve, 1000))
+      const job = await api.job(jobId)
+      if (job.status !== 'success' && job.status !== 'failed') continue
+      const [nodeData, jobData] = await Promise.all([api.nodes(), api.jobs()])
+      nodes.value = nodeData; jobs.value = jobData
+      const node = nodeData.find(item => item.id === nodeId)
+      if (job.status === 'success') notify(`${node?.name || '节点'}闭环检测通过${node?.probeLatencyMs ? ` · ${node.probeLatencyMs} ms` : ''}`)
+      else notify(`${node?.name || '节点'}检测失败，请查看卡片或任务日志`)
+      return
+    }
+    notify('检测仍在运行，可在任务日志查看进度')
+  } catch (error) { notify(error instanceof Error ? error.message : '无法读取检测结果') }
+  finally { if (probeJobs[nodeId] === jobId) delete probeJobs[nodeId] }
 }
 function openRename(node: NodeItem) {
   selectedNode.value = node
@@ -335,8 +375,8 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       </div>
 
       <div v-else-if="page === 'nodes'" class="page-content">
-        <div class="page-intro"><div><p>NODE ARSENAL</p><h2>管理所有代理入站</h2></div><div class="summary-pills"><span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span><span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span></div></div>
-        <section class="node-grid"><article v-for="node in nodes" :key="node.id" class="node-card" :class="node.status"><div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div><div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div><p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ node.listenPort }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p><div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div><p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p><div class="node-actions"><button @click="revealShare(node)">分享</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div></article><button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>五协议 · 自动生成安全凭据</small></button></section>
+        <div class="page-intro"><div><p>NODE ARSENAL</p><h2>管理所有代理入站</h2><small class="page-caption">“检测”执行本机完整代理闭环；公网防火墙与 NAT 可达性仍需异地验证。</small></div><div class="summary-pills"><span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span><span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span></div></div>
+        <section class="node-grid"><article v-for="node in nodes" :key="node.id" class="node-card" :class="node.status"><div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div><div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div><p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ node.listenPort }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p><div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div><p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p><div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div><div class="node-actions"><button @click="revealShare(node)">分享</button><button class="probe-button" :disabled="node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div></article><button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>五协议 · 自动生成安全凭据</small></button></section>
       </div>
 
       <div v-else-if="page === 'traffic'" class="page-content">

@@ -313,7 +313,7 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 	case "action":
 		flags := flag.NewFlagSet("node action", flag.ExitOnError)
 		id := flags.String("id", "", "node ID")
-		action := flags.String("action", "", "start, stop, restart, check or delete")
+		action := flags.String("action", "", "start, stop, restart, check, probe or delete")
 		confirm := flags.String("confirm-name", "", "required for delete")
 		_ = flags.Parse(args[1:])
 		if *id == "" || *action == "" {

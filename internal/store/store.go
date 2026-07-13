@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS nodes (
   service_name TEXT NOT NULL, service_manager TEXT NOT NULL, config_path TEXT NOT NULL,
   config_version TEXT NOT NULL, ownership TEXT NOT NULL, shared_group TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'unknown', secret_cipher TEXT NOT NULL,
+  probe_status TEXT NOT NULL DEFAULT '', probe_latency_ms INTEGER NOT NULL DEFAULT 0,
+  probe_exit_ip TEXT NOT NULL DEFAULT '', probe_target TEXT NOT NULL DEFAULT '',
+  probe_error TEXT NOT NULL DEFAULT '', probe_checked_at INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_config_port ON nodes(config_path, listen_port);
@@ -112,6 +115,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 		"disk_total_bytes":   "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if err := s.ensureColumn("metrics", name, definition); err != nil {
+			return err
+		}
+	}
+	for name, definition := range map[string]string{
+		"probe_status":     "TEXT NOT NULL DEFAULT ''",
+		"probe_latency_ms": "INTEGER NOT NULL DEFAULT 0",
+		"probe_exit_ip":    "TEXT NOT NULL DEFAULT ''",
+		"probe_target":     "TEXT NOT NULL DEFAULT ''",
+		"probe_error":      "TEXT NOT NULL DEFAULT ''",
+		"probe_checked_at": "INTEGER NOT NULL DEFAULT 0",
+	} {
+		if err := s.ensureColumn("nodes", name, definition); err != nil {
 			return err
 		}
 	}
@@ -258,7 +273,8 @@ func (s *Store) ChangePassword(userID int64, password string) error {
 
 func (s *Store) Nodes(ctx context.Context) ([]model.Node, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,protocol,mode,listen_port,server,domain,ipv4_bind,ipv6_bind,auto_bind,
-service_name,service_manager,config_path,config_version,ownership,shared_group,status,created_at,updated_at FROM nodes ORDER BY created_at`)
+service_name,service_manager,config_path,config_version,ownership,shared_group,status,probe_status,probe_latency_ms,
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -267,13 +283,16 @@ service_name,service_manager,config_path,config_version,ownership,shared_group,s
 	for rows.Next() {
 		var n model.Node
 		var auto int
-		var created, updated int64
-		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.ListenPort, &n.Server, &n.Domain, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &created, &updated); err != nil {
+		var probeChecked, created, updated int64
+		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.ListenPort, &n.Server, &n.Domain, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated); err != nil {
 			return nil, err
 		}
 		n.AutoBind = auto == 1
 		n.CreatedAt = time.Unix(created, 0)
 		n.UpdatedAt = time.Unix(updated, 0)
+		if probeChecked > 0 {
+			n.ProbeCheckedAt = time.Unix(probeChecked, 0)
+		}
 		result = append(result, n)
 	}
 	return result, rows.Err()
@@ -282,16 +301,20 @@ service_name,service_manager,config_path,config_version,ownership,shared_group,s
 func (s *Store) Node(ctx context.Context, id string, includeSecret bool) (model.Node, error) {
 	var n model.Node
 	var auto int
-	var created, updated int64
+	var probeChecked, created, updated int64
 	var cipher string
 	err := s.DB.QueryRowContext(ctx, `SELECT id,name,protocol,mode,listen_port,server,domain,ipv4_bind,ipv6_bind,auto_bind,
-service_name,service_manager,config_path,config_version,ownership,shared_group,status,secret_cipher,created_at,updated_at FROM nodes WHERE id=?`, id).Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.ListenPort, &n.Server, &n.Domain, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &cipher, &created, &updated)
+service_name,service_manager,config_path,config_version,ownership,shared_group,status,secret_cipher,probe_status,probe_latency_ms,
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes WHERE id=?`, id).Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.ListenPort, &n.Server, &n.Domain, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &cipher, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated)
 	if err != nil {
 		return n, err
 	}
 	n.AutoBind = auto == 1
 	n.CreatedAt = time.Unix(created, 0)
 	n.UpdatedAt = time.Unix(updated, 0)
+	if probeChecked > 0 {
+		n.ProbeCheckedAt = time.Unix(probeChecked, 0)
+	}
 	if includeSecret {
 		n.Secret = cipher
 	}
@@ -310,6 +333,14 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET na
 
 func (s *Store) SetNodeStatus(id, status string) error {
 	_, err := s.DB.Exec("UPDATE nodes SET status=?,updated_at=? WHERE id=?", status, time.Now().Unix(), id)
+	return err
+}
+func (s *Store) SetNodeProbeResult(id, status string, latencyMS int64, exitIP, target, probeError string, checkedAt time.Time) error {
+	checked := checkedAt.Unix()
+	if checkedAt.IsZero() {
+		checked = 0
+	}
+	_, err := s.DB.Exec(`UPDATE nodes SET probe_status=?,probe_latency_ms=?,probe_exit_ip=?,probe_target=?,probe_error=?,probe_checked_at=? WHERE id=?`, status, latencyMS, exitIP, target, probeError, checked, id)
 	return err
 }
 func (s *Store) UpdateNodeBinds(id, ipv4, ipv6 string) error {
