@@ -100,7 +100,7 @@ func TestBuildProbeForEverySupportedProtocol(t *testing.T) {
 		want     string
 	}{
 		{"hysteria2", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
-		{"vless", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "flow": "xtls-rprx-vision"}}, "tls": map[string]any{"reality": map[string]any{"private_key": privateValue, "short_id": []any{"0123456789abcdef"}, "handshake": map[string]any{"server": "www.microsoft.com"}}}}, "tls"},
+		{"vless", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "flow": "xtls-rprx-vision"}}, "tls": map[string]any{"server_name": "www.google.com", "reality": map[string]any{"private_key": privateValue, "short_id": []any{"0123456789abcdef"}, "handshake": map[string]any{"server": "www.google.com"}}}}, "tls"},
 		{"shadowsocks", map[string]any{"method": "2022-blake3-aes-128-gcm", "password": "QUJDREVGR0hJSktMTU5PUA=="}, "method"},
 		{"tuic", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "password": "secret"}}}, "congestion_control"},
 		{"trojan", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
@@ -137,7 +137,7 @@ func TestGeneratedProbesPassRealSingBoxCheck(t *testing.T) {
 	}
 	inbounds := []map[string]any{
 		{"type": "hysteria2", "listen": "::", "listen_port": float64(48000), "users": []any{map[string]any{"password": "secret"}}},
-		{"type": "vless", "listen": "::", "listen_port": float64(48001), "users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "flow": "xtls-rprx-vision"}}, "tls": map[string]any{"reality": map[string]any{"private_key": base64.RawURLEncoding.EncodeToString(privateKey.Bytes()), "short_id": []any{"0123456789abcdef"}, "handshake": map[string]any{"server": "www.microsoft.com"}}}},
+		{"type": "vless", "listen": "::", "listen_port": float64(48001), "users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "flow": "xtls-rprx-vision"}}, "tls": map[string]any{"server_name": "www.google.com", "reality": map[string]any{"private_key": base64.RawURLEncoding.EncodeToString(privateKey.Bytes()), "short_id": []any{"0123456789abcdef"}, "handshake": map[string]any{"server": "www.google.com"}}}},
 		{"type": "shadowsocks", "listen": "::", "listen_port": float64(48002), "method": "2022-blake3-aes-128-gcm", "password": "QUJDREVGR0hJSktMTU5PUA=="},
 		{"type": "tuic", "listen": "::", "listen_port": float64(48003), "users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "password": "secret"}}},
 		{"type": "trojan", "listen": "::", "listen_port": float64(48004), "users": []any{map[string]any{"password": "secret"}}},
