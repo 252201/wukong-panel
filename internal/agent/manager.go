@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
@@ -473,6 +474,25 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 	return err
 }
 
+func (m *Manager) Rename(ctx context.Context, id string, request model.NodeRenameRequest) error {
+	name := strings.TrimSpace(request.Name)
+	if name == "" || utf8.RuneCountInString(name) > 80 {
+		return errors.New("node name is required and must be at most 80 characters")
+	}
+	node, err := m.store.Node(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	if name == node.Name {
+		return nil
+	}
+	if err = m.store.RenameNode(ctx, id, name); err != nil {
+		return err
+	}
+	_ = m.store.Audit("admin", "node_rename", id, fmt.Sprintf("%s -> %s", node.Name, name))
+	return nil
+}
+
 func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 	node, err := m.store.Node(ctx, id, true)
 	if err != nil {
@@ -698,7 +718,7 @@ func (m *Manager) backup(node model.Node) error {
 }
 
 func validateCreate(r model.NodeCreateRequest) error {
-	if strings.TrimSpace(r.Name) == "" || len(r.Name) > 80 {
+	if strings.TrimSpace(r.Name) == "" || utf8.RuneCountInString(r.Name) > 80 {
 		return errors.New("node name is required and must be at most 80 characters")
 	}
 	if r.Mode != "prefer_v6" && r.Mode != "v4only" && r.Mode != "v6only" {

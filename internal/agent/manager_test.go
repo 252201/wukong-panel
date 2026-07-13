@@ -9,6 +9,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/store"
 )
 
 func baseRequest() model.NodeCreateRequest {
@@ -90,6 +91,32 @@ func TestDeploymentDefaultsUsesPanelDomain(t *testing.T) {
 	}
 	if defaults.PanelDomain != "panel.example.com" || defaults.IPv4 == nil || defaults.IPv6 == nil {
 		t.Fatalf("unexpected deployment defaults: %#v", defaults)
+	}
+}
+
+func TestRenameUpdatesOnlyNodeMetadata(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	node := model.Node{ID: "node-1", Name: "旧名称", Protocol: "hysteria2", Mode: "v6only", ListenPort: 45119, ServiceName: "sing-box-node-1", ServiceManager: "openrc", ConfigPath: "/etc/s-box/node-1.json", ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err := database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{store: database}
+	if err := manager.Rename(t.Context(), node.ID, model.NodeRenameRequest{Name: "  新名称  "}); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := database.Node(t.Context(), node.ID, false)
+	if err != nil || renamed.Name != "新名称" || renamed.ConfigPath != node.ConfigPath || renamed.ServiceName != node.ServiceName {
+		t.Fatalf("unexpected renamed node: %#v, %v", renamed, err)
+	}
+	if err := manager.Rename(t.Context(), node.ID, model.NodeRenameRequest{Name: "   "}); err == nil {
+		t.Fatal("blank node name accepted")
+	}
+	if err := manager.Rename(t.Context(), node.ID, model.NodeRenameRequest{Name: strings.Repeat("名", 81)}); err == nil {
+		t.Fatal("overlong Unicode node name accepted")
 	}
 }
 

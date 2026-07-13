@@ -27,12 +27,13 @@ const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
 const language = ref<'zh-CN' | 'en-US'>('zh-CN')
-const modal = ref<'create' | 'import' | 'share' | 'delete' | null>(null)
+const modal = ref<'create' | 'import' | 'share' | 'rename' | 'delete' | null>(null)
 const candidates = ref<Candidate[]>([])
 const selectedCandidates = ref<string[]>([])
 const selectedNode = ref<NodeItem | null>(null)
 const shareURI = ref('')
 const shareQR = ref('')
+const renameName = ref('')
 const deleteConfirm = ref('')
 const createForm = reactive({ name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [] })
@@ -115,7 +116,7 @@ function axisRate(value = 0) {
 }
 function uptime(value = 0) { const days = Math.floor(value / 86400); const hours = Math.floor(value % 86400 / 3600); return days ? `${days}天 ${hours}时` : `${hours}时` }
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
-function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
+function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
 function notify(message: string) { toast.value = message; window.setTimeout(() => { if (toast.value === message) toast.value = '' }, 3200) }
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
@@ -197,6 +198,22 @@ async function nodeAction(node: NodeItem, action: string) {
   if (action === 'delete') { selectedNode.value = node; deleteConfirm.value = ''; modal.value = 'delete'; return }
   try { await api.nodeAction(node.id, action); notify(`${jobLabel(`node.${action}`)}任务已创建`); await refreshAll() }
   catch (error) { notify(error instanceof Error ? error.message : '操作失败') }
+}
+function openRename(node: NodeItem) {
+  selectedNode.value = node
+  renameName.value = node.name
+  modal.value = 'rename'
+}
+async function renameNode() {
+  if (!selectedNode.value) return
+  const name = renameName.value.trim()
+  if (!name || name === selectedNode.value.name) return
+  busy.value = true
+  try {
+    await api.renameNode(selectedNode.value.id, name)
+    modal.value = null; notify('重命名任务已创建'); page.value = 'jobs'; await refreshAll()
+  } catch (error) { notify(error instanceof Error ? error.message : '重命名失败') }
+  finally { busy.value = false }
 }
 async function deleteNode() {
   if (!selectedNode.value) return
@@ -304,7 +321,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 
       <div v-else-if="page === 'nodes'" class="page-content">
         <div class="page-intro"><div><p>NODE ARSENAL</p><h2>管理所有 Hysteria2 入站</h2></div><div class="summary-pills"><span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span><span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span></div></div>
-        <section class="node-grid"><article v-for="node in nodes" :key="node.id" class="node-card" :class="node.status"><div class="node-top"><span class="protocol-badge">HY2</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div><h3>{{ node.name }}</h3><p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ node.listenPort }}</b></p><div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div><p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p><div class="node-actions"><button @click="revealShare(node)">分享</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div></article><button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>自动生成端口、密码与服务</small></button></section>
+        <section class="node-grid"><article v-for="node in nodes" :key="node.id" class="node-card" :class="node.status"><div class="node-top"><span class="protocol-badge">HY2</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div><div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div><p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ node.listenPort }}</b></p><div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div><p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p><div class="node-actions"><button @click="revealShare(node)">分享</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div></article><button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>自动生成端口、密码与服务</small></button></section>
       </div>
 
       <div v-else-if="page === 'traffic'" class="page-content">
@@ -363,6 +380,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
     <form v-if="modal === 'create'" class="modal-card node-form" @submit.prevent="createNode"><button type="button" class="modal-close" @click="modal = null">×</button><p class="eyebrow">DEPLOY HY2 NODE</p><h2>部署一座新节点</h2><p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p><div class="form-grid"><label class="span-2">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label><label>出站策略<select v-model="createForm.mode"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label><label>UDP 端口<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label>公网域名 / IP<input v-model="createForm.server" placeholder="node.example.com"><small v-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label><label>TLS 域名<input v-model="createForm.domain" placeholder="node.example.com"><small v-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label><label :class="{ 'disabled-field': createForm.mode === 'v6only' }">IPv4 出站绑定<input v-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label><label :class="{ 'disabled-field': createForm.mode === 'v4only' }">IPv6 出站绑定<input v-if="createForm.mode === 'v4only'" value="纯 IPv4 模式不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label><label class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label></div><label class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : '确认部署' }}</button></div></form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。</p><div class="candidate-list"><label v-for="item in candidates" :key="item.fingerprint"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/UDP</em></label><p v-if="!candidates.length" class="empty">{{ candidates.length === 0 ? '未发现可接管的 Hysteria2 节点' : '扫描中…' }}</p></div><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
+    <form v-else-if="modal === 'rename'" class="modal-card compact rename-modal" @submit.prevent="renameNode"><button type="button" class="modal-close" @click="modal = null">×</button><span class="modal-seal">名</span><p class="eyebrow">RENAME NODE</p><h2>重命名 {{ selectedNode?.name }}</h2><p>只修改面板显示名称、分享链接标题与扫描识别名称；不会改变端口、密码、服务或节点配置。</p><label>新节点名称<input v-model="renameName" maxlength="80" autocomplete="off" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !renameName.trim() || renameName.trim() === selectedNode?.name">{{ busy ? '正在创建任务…' : '确认重命名' }}</button></div></form>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>系统将先创建带 SHA-256 的配置快照，再停止服务。请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></transition>

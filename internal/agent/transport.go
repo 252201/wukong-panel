@@ -52,6 +52,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
 	mux.HandleFunc("POST /import", s.authorize(s.importNodes))
 	mux.HandleFunc("POST /nodes", s.authorize(s.create))
+	mux.HandleFunc("PATCH /nodes/{id}", s.authorize(s.rename))
 	mux.HandleFunc("POST /nodes/{id}/action", s.authorize(s.action))
 	mux.HandleFunc("GET /nodes/{id}/share", s.authorize(s.share))
 	mux.HandleFunc("GET /sing-box/migration-plan", s.authorize(s.migrationPlan))
@@ -125,6 +126,17 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.manager.Action(r.Context(), r.PathValue("id"), request.Action, request.ConfirmName); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
+	var request model.NodeRenameRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	if err := s.manager.Rename(r.Context(), r.PathValue("id"), request); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -218,6 +230,9 @@ func (c *Client) Create(ctx context.Context, request model.NodeCreateRequest) (m
 }
 func (c *Client) Action(ctx context.Context, id string, request model.NodeActionRequest) error {
 	return c.request(ctx, "POST", "/nodes/"+id+"/action", request, nil)
+}
+func (c *Client) Rename(ctx context.Context, id string, request model.NodeRenameRequest) error {
+	return c.request(ctx, "PATCH", "/nodes/"+id, request, nil)
 }
 func (c *Client) Share(ctx context.Context, id string) (model.Share, error) {
 	var share model.Share

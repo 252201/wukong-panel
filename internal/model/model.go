@@ -75,6 +75,10 @@ type NodeActionRequest struct {
 	ConfirmName string `json:"confirmName,omitempty"`
 }
 
+type NodeRenameRequest struct {
+	Name string `json:"name"`
+}
+
 type Share struct {
 	URI       string `json:"uri"`
 	ExpiresAt string `json:"expiresAt"`

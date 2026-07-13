@@ -320,6 +320,31 @@ func (s *Store) UpdateNodeConfigVersions(version string) error {
 	_, err := s.DB.Exec("UPDATE nodes SET config_version=?,updated_at=? WHERE config_version<>?", version, time.Now().Unix(), version)
 	return err
 }
+func (s *Store) RenameNode(ctx context.Context, id, name string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,updated_at=? WHERE id=?", name, time.Now().Unix(), id)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE endpoint_recent SET node_name=? WHERE node_id=?", name, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE endpoint_daily SET node_name=? WHERE node_id=?", name, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 func (s *Store) DeleteNode(id string) error {
 	_, err := s.DB.Exec("DELETE FROM nodes WHERE id=?", id)
 	return err

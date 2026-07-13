@@ -98,6 +98,37 @@ func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 	}
 }
 
+func TestRenameNodeSynchronizesTrafficNames(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "rename-me", Name: "旧名称", Protocol: "hysteria2", Mode: "prefer_v6", ListenPort: 45116, ServiceName: "sing-box-rename", ServiceManager: "systemd", ConfigPath: "/etc/s-box/rename.json", ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err := s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if err := s.ReplaceEndpointWindow(now, 10*time.Second, []EndpointWindowSample{{NodeID: node.ID, NodeName: node.Name, Endpoint: "192.0.2.1:443", Bytes: 1_000}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameNode(t.Context(), node.ID, "新名称"); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := s.Node(t.Context(), node.ID, false)
+	if err != nil || renamed.Name != "新名称" {
+		t.Fatalf("node name not updated: %#v, %v", renamed, err)
+	}
+	devices, err := s.ActiveDevices(30*time.Second, 10)
+	if err != nil || len(devices) != 1 || devices[0].NodeName != "新名称" {
+		t.Fatalf("recent endpoint name not updated: %#v, %v", devices, err)
+	}
+	var dailyName string
+	if err := s.DB.QueryRow("SELECT node_name FROM endpoint_daily WHERE node_id=?", node.ID).Scan(&dailyName); err != nil || dailyName != "新名称" {
+		t.Fatalf("daily endpoint name not updated: %q, %v", dailyName, err)
+	}
+}
+
 func TestUpdateNodeConfigVersionsTracksRuntimeVersion(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
