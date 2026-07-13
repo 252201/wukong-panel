@@ -49,6 +49,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.manager.Version(r.Context())})
 	}))
 	mux.HandleFunc("GET /scan", s.authorize(s.scan))
+	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
 	mux.HandleFunc("POST /import", s.authorize(s.importNodes))
 	mux.HandleFunc("POST /nodes", s.authorize(s.create))
 	mux.HandleFunc("POST /nodes/{id}/action", s.authorize(s.action))
@@ -72,6 +73,14 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+func (s *Server) deploymentDefaults(w http.ResponseWriter, r *http.Request) {
+	defaults, err := s.manager.DeploymentDefaults(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, defaults)
 }
 func (s *Server) scan(w http.ResponseWriter, r *http.Request) {
 	items, err := s.manager.Scan(r.Context())
@@ -192,6 +201,11 @@ func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 func (c *Client) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 	var result []model.NodeCandidate
 	err := c.request(ctx, "GET", "/scan", nil, &result)
+	return result, err
+}
+func (c *Client) DeploymentDefaults(ctx context.Context) (model.NodeDeploymentDefaults, error) {
+	var result model.NodeDeploymentDefaults
+	err := c.request(ctx, "GET", "/nodes/deployment-defaults", nil, &result)
 	return result, err
 }
 func (c *Client) Import(ctx context.Context, ids []string) error {

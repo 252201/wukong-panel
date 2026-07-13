@@ -30,6 +30,7 @@ var staticFiles embed.FS
 
 type AgentAPI interface {
 	Scan(context.Context) ([]model.NodeCandidate, error)
+	DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error)
 	Import(context.Context, []string) error
 	Create(context.Context, model.NodeCreateRequest) (model.Node, error)
 	Action(context.Context, string, model.NodeActionRequest) error
@@ -61,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/metrics/endpoints", s.auth(s.endpoints, false))
 	mux.HandleFunc("GET /api/v1/metrics/timeline", s.auth(s.timeline, false))
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
+	mux.HandleFunc("GET /api/v1/nodes/deployment-defaults", s.auth(s.nodeDeploymentDefaults, false))
 	mux.HandleFunc("POST /api/v1/nodes", s.auth(s.createNode, true))
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
@@ -281,6 +283,15 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request, session store.Ses
 		return
 	}
 	writeJSON(w, 200, items)
+}
+
+func (s *Server) nodeDeploymentDefaults(w http.ResponseWriter, r *http.Request, session store.Session) {
+	defaults, err := s.agent.DeploymentDefaults(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, defaults)
 }
 
 func (s *Server) createNode(w http.ResponseWriter, r *http.Request, session store.Session) {

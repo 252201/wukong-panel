@@ -69,6 +69,30 @@ func TestPreferredCandidateName(t *testing.T) {
 	}
 }
 
+func TestVirtualBindInterfaceFiltering(t *testing.T) {
+	for _, name := range []string{"tun0", "utun4", "wg0", "docker0", "br-abcd", "veth123", "tailscale0"} {
+		if !virtualBindInterface(name) {
+			t.Fatalf("virtual interface %q was not filtered", name)
+		}
+	}
+	for _, name := range []string{"eth0", "ens3", "enp1s0"} {
+		if virtualBindInterface(name) {
+			t.Fatalf("host interface %q was filtered", name)
+		}
+	}
+}
+
+func TestDeploymentDefaultsUsesPanelDomain(t *testing.T) {
+	manager := &Manager{cfg: config.Config{PanelDomain: " panel.example.com "}}
+	defaults, err := manager.DeploymentDefaults(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.PanelDomain != "panel.example.com" || defaults.IPv4 == nil || defaults.IPv6 == nil {
+		t.Fatalf("unexpected deployment defaults: %#v", defaults)
+	}
+}
+
 func TestBuildRuleActionConfig(t *testing.T) {
 	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.11.15")
 	if err != nil {

@@ -65,6 +65,11 @@ func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
 	return m.store.UpdateNodeConfigVersions(version)
 }
 
+func (m *Manager) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
+	v4, v6 := bindAddressOptions()
+	return model.NodeDeploymentDefaults{PanelDomain: strings.TrimSpace(m.cfg.PanelDomain), IPv4: v4, IPv6: v6}, nil
+}
+
 func (m *Manager) ReconcileBindings(ctx context.Context) error {
 	if m.cfg.Demo {
 		return nil
@@ -849,6 +854,78 @@ func globalAddresses() (v4s, v6s []string) {
 	sort.Strings(v4s)
 	sort.Strings(v6s)
 	return unique(v4s), unique(v6s)
+}
+
+func bindAddressOptions() (v4, v6 []model.BindAddress) {
+	v4 = make([]model.BindAddress, 0)
+	v6 = make([]model.BindAddress, 0)
+	interfaces, _ := net.Interfaces()
+	var fallback4, fallback6 []model.BindAddress
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, address := range addresses {
+			ip := net.ParseIP(strings.Split(address.String(), "/")[0])
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || !ip.IsGlobalUnicast() {
+				continue
+			}
+			option := model.BindAddress{Address: ip.String(), Interface: iface.Name}
+			if ip.To4() != nil {
+				fallback4 = append(fallback4, option)
+				if !virtualBindInterface(iface.Name) {
+					v4 = append(v4, option)
+				}
+			} else {
+				fallback6 = append(fallback6, option)
+				if !virtualBindInterface(iface.Name) {
+					v6 = append(v6, option)
+				}
+			}
+		}
+	}
+	if len(v4) == 0 {
+		v4 = fallback4
+	}
+	if len(v6) == 0 {
+		v6 = fallback6
+	}
+	sortBindAddresses(v4)
+	sortBindAddresses(v6)
+	return uniqueBindAddresses(v4), uniqueBindAddresses(v6)
+}
+
+func virtualBindInterface(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{"br-", "docker", "veth", "virbr", "tun", "utun", "tap", "wg", "tailscale", "zt"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortBindAddresses(addresses []model.BindAddress) {
+	sort.Slice(addresses, func(i, j int) bool {
+		if addresses[i].Interface == addresses[j].Interface {
+			return addresses[i].Address < addresses[j].Address
+		}
+		return addresses[i].Interface < addresses[j].Interface
+	})
+}
+
+func uniqueBindAddresses(addresses []model.BindAddress) []model.BindAddress {
+	result := make([]model.BindAddress, 0, len(addresses))
+	seen := make(map[string]bool, len(addresses))
+	for _, address := range addresses {
+		if seen[address.Address] {
+			continue
+		}
+		seen[address.Address] = true
+		result = append(result, address)
+	}
+	return result
 }
 
 func unique(values []string) []string {

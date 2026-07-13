@@ -173,7 +173,22 @@ wait_for_web() {
   return 1
 }
 
+backfill_panel_domain() {
+  env_file=/etc/wukong-panel/env
+  [ -r "$env_file" ] || return 0
+  grep -q '^WUKONG_PANEL_DOMAIN=' "$env_file" && return 0
+  panel_domain=""
+  for nginx_config in /etc/nginx/conf.d/wukong-panel.conf /etc/nginx/http.d/wukong-panel.conf; do
+    [ -r "$nginx_config" ] || continue
+    panel_domain=$(awk '$1 == "server_name" { value=$2; sub(/;$/, "", value); if (value != "_") { print value; exit } }' "$nginx_config")
+    [ -z "$panel_domain" ] || break
+  done
+  printf '\nWUKONG_PANEL_DOMAIN=%s\n' "$panel_domain" >> "$env_file"
+  info "已记录面板域名：${panel_domain:-未配置域名}"
+}
+
 update_panel() {
+  backfill_panel_domain
   download_panel_binary
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_dir="/var/lib/wukong-panel/backups/update-$timestamp"
@@ -794,6 +809,7 @@ WUKONG_SINGBOX_CONFIG_DIR=/etc/s-box
 WUKONG_SINGBOX_BIN=/etc/s-box/sing-box
 WUKONG_TLS_CERT=$TLS_CERT
 WUKONG_TLS_KEY=$TLS_KEY
+WUKONG_PANEL_DOMAIN=$DOMAIN
 WUKONG_LISTEN=127.0.0.1:8788
 WUKONG_BASE_PATH=$BASE_PATH
 WUKONG_SECURE_COOKIE=true

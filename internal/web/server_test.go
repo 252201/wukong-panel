@@ -19,7 +19,10 @@ import (
 type fakeAgent struct{}
 
 func (fakeAgent) Scan(context.Context) ([]model.NodeCandidate, error) { return nil, nil }
-func (fakeAgent) Import(context.Context, []string) error              { return nil }
+func (fakeAgent) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
+	return model.NodeDeploymentDefaults{PanelDomain: "panel.example.com"}, nil
+}
+func (fakeAgent) Import(context.Context, []string) error { return nil }
 func (fakeAgent) Create(context.Context, model.NodeCreateRequest) (model.Node, error) {
 	return model.Node{}, nil
 }

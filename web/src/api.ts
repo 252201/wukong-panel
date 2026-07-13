@@ -96,6 +96,9 @@ export interface Candidate {
   sharedGroup?: string
 }
 
+export interface BindAddress { address: string; interface: string }
+export interface NodeDeploymentDefaults { panelDomain: string; ipv4: BindAddress[]; ipv6: BindAddress[] }
+
 export interface Settings {
   language: string
   timezone: string
@@ -154,6 +157,7 @@ export const api = {
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
   singBoxMigration: async (target = '1.13.14') => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
   nodes: () => request<NodeItem[]>('nodes'),
+  nodeDeploymentDefaults: () => request<NodeDeploymentDefaults>('nodes/deployment-defaults'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),
   share: (id: string) => request<{uri: string; expiresAt: string}>(`nodes/${id}/share`),

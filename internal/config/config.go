@@ -20,6 +20,7 @@ type Config struct {
 	SingBoxBin     string
 	TLSCertFile    string
 	TLSKeyFile     string
+	PanelDomain    string
 	BasePath       string
 	SecureCookie   bool
 	Demo           bool
@@ -51,6 +52,7 @@ func Parse(version string) Config {
 	flag.StringVar(&cfg.SingBoxBin, "sing-box", env("WUKONG_SINGBOX_BIN", "/etc/s-box/sing-box"), "sing-box binary")
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert", env("WUKONG_TLS_CERT", "/etc/wukong-panel/tls/fullchain.cer"), "trusted panel certificate available to managed nodes")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key", env("WUKONG_TLS_KEY", "/etc/wukong-panel/tls/private.key"), "private key for the trusted panel certificate")
+	flag.StringVar(&cfg.PanelDomain, "panel-domain", env("WUKONG_PANEL_DOMAIN", ""), "public panel domain used as the default node endpoint")
 	flag.StringVar(&cfg.BasePath, "base-path", env("WUKONG_BASE_PATH", "/wukong/"), "public base path")
 	flag.BoolVar(&cfg.SecureCookie, "secure-cookie", envBool("WUKONG_SECURE_COOKIE", true), "set secure cookies")
 	flag.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
