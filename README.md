@@ -1,22 +1,23 @@
 # 悟空面板
 
-悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2 部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
+悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.4.4-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.5.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- Hysteria2：IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。
+- 五协议驱动：完整管理 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。
+- 安全凭据：自动生成 UUID、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码，私钥不进入分享链接或公开 API。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
-- 多设备显示：流量脉络按节点展示 HY2 采集器最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
-- 分享订阅：短时显示节点密钥，提供二维码及带流量响应头的 Clash/Mihomo 订阅。
+- 多设备显示：流量脉络按 UDP 节点展示 Hysteria2、TUIC、Shadowsocks 最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
+- 分享订阅：五种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
 - 东方科幻界面：桌面、平板和移动端响应式布局。
 
 ## 一键安装
@@ -70,7 +71,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.4.4 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.5.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -99,7 +100,7 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 3. 检查配置引用的 `bind_interface` 是否存在，再用新二进制逐一检查迁移后的 JSON。
 4. 保存旧二进制、版本号、校验和、服务文件、活动服务清单和全部 JSON 配置快照。
 5. 仅停止当前正在运行且确实使用目标二进制的 sing-box 服务，并在停机窗口内安装配套二进制和配置。
-6. 恢复服务后使用节点真实密码通过本机 HY2 入口访问 Cloudflare 双栈探测地址；配置、服务或协议探测任一失败都会恢复旧二进制和旧配置。
+6. 恢复服务后按各 inbound 的真实协议和凭据，通过本机入口访问多组双栈探测地址；配置、服务或协议探测任一失败都会恢复旧二进制和旧配置。
 
 备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退会恢复同一快照中的旧二进制和配套配置，而不是只替换二进制；刚才运行的新版本也会形成反向快照，因此可以再次切回。
 
@@ -131,8 +132,16 @@ flowchart LR
 ```bash
 wukongctl doctor
 wukongctl scan
-wukongctl node create --name "AC-HY2" --domain node.example.com \
+wukongctl node create --name "AC-HY2" --server node.example.com --domain node.example.com \
   --mode prefer_v6 --ipv4-bind 192.0.2.10 --ipv6 2001:db8::10
+wukongctl node create --protocol vless --name "AC-Reality" \
+  --server node.example.com --domain www.microsoft.com --mode prefer_v6
+wukongctl node create --protocol shadowsocks --name "AC-SS2022" \
+  --server node.example.com --mode prefer_v6
+wukongctl node create --protocol tuic --name "AC-TUIC" \
+  --server node.example.com --domain node.example.com --mode prefer_v6
+wukongctl node create --protocol trojan --name "AC-Trojan" \
+  --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node action --id NODE_ID --action restart
 wukong-panel singbox plan --target 1.13.14 --config-dir /etc/s-box
 wukong-panel singbox migrate --target 1.13.14 \
@@ -140,7 +149,7 @@ wukong-panel singbox migrate --target 1.13.14 \
 wukong-panel singbox check-interfaces --target 1.13.14 --config-dir /tmp/s-box-1.13
 wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
 
-# 从另一台主机验证公网 UDP、域名证书与真实 HY2 链路；纯 IPv6 节点可直接填写真实 IPv6
+# 从另一台主机按配置中的实际协议验证公网入口；纯 IPv6 节点可直接填写真实 IPv6
 wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/probe-config \
   --server 2001:db8::10 --server-name node.example.com
 ```

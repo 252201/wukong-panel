@@ -13,11 +13,11 @@ import (
 )
 
 func baseRequest() model.NodeCreateRequest {
-	return model.NodeCreateRequest{Name: "Test", Mode: "prefer_v6", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", V6OnlyDomains: []string{"chatgpt.com"}}
+	return model.NodeCreateRequest{Protocol: protocolHysteria2, Name: "Test", Mode: "prefer_v6", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", V6OnlyDomains: []string{"chatgpt.com"}}
 }
 
 func TestBuildLegacyConfig(t *testing.T) {
-	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.10.7")
+	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.10.7")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestBuildLegacyConfig(t *testing.T) {
 }
 
 func TestBuildModernConfig(t *testing.T) {
-	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.13.14")
+	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.13.14")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,16 +56,16 @@ func TestBuildModernConfig(t *testing.T) {
 }
 
 func TestPreferredCandidateName(t *testing.T) {
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, "测试001"); got != "测试001" {
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2, "测试001"); got != "测试001" {
 		t.Fatalf("known node name ignored: %q", got)
 	}
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, ""); got != "悟空节点 · 59904" {
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2, ""); got != "悟空节点 · 59904" {
 		t.Fatalf("generic inbound tag not replaced: %q", got)
 	}
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 1958, "in"); got != "悟空节点 · 1958" {
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 1958, protocolHysteria2, "in"); got != "悟空节点 · 1958" {
 		t.Fatalf("generic stored name not replaced: %q", got)
 	}
-	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, ""); got != "Mac mini" {
+	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, protocolHysteria2, ""); got != "Mac mini" {
 		t.Fatalf("descriptive inbound tag changed: %q", got)
 	}
 }
@@ -121,7 +121,7 @@ func TestRenameUpdatesOnlyNodeMetadata(t *testing.T) {
 }
 
 func TestBuildRuleActionConfig(t *testing.T) {
-	payload, err := buildConfig(baseRequest(), 45080, "secret", "/tmp/cert", "/tmp/key", "1.11.15")
+	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.11.15")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestSelfSignedNodeConfigIsDetectedForShareLink(t *testing.T) {
 	if err := generateSelfSigned(keyPath, certPath, "node.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := buildConfig(baseRequest(), 45080, "secret", certPath, keyPath, "1.10.7")
+	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, certPath, keyPath, "1.10.7")
 	if err != nil {
 		t.Fatal(err)
 	}

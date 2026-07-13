@@ -12,7 +12,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -484,25 +483,22 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Profile-Update-Interval", "10")
 	w.Header().Set("Profile-Title", "Wukong Panel")
 	fmt.Fprintln(w, "proxies:")
+	proxyNames := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		share, err := s.agent.Share(r.Context(), node.ID)
 		if err != nil {
 			continue
 		}
-		parsed, _ := url.Parse(share.URI)
-		password := ""
-		if parsed != nil && parsed.User != nil {
-			password, _ = url.QueryUnescape(parsed.User.Username())
+		entry, err := clashProxyYAML(node, share.URI)
+		if err != nil {
+			continue
 		}
-		server := node.Server
-		if server == "" {
-			server = node.Domain
-		}
-		fmt.Fprintf(w, "  - name: %q\n    type: hysteria2\n    server: %q\n    port: %d\n    password: %q\n    sni: %q\n    alpn: [h3]\n", node.Name, server, node.ListenPort, password, node.Domain)
+		fmt.Fprint(w, entry)
+		proxyNames = append(proxyNames, node.Name)
 	}
 	fmt.Fprintln(w, "proxy-groups:\n  - name: Wukong\n    type: select\n    proxies:")
-	for _, node := range nodes {
-		fmt.Fprintf(w, "      - %q\n", node.Name)
+	for _, name := range proxyNames {
+		fmt.Fprintf(w, "      - %q\n", name)
 	}
 	fmt.Fprintln(w, "rules:\n  - MATCH,Wukong")
 }
@@ -579,7 +575,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }

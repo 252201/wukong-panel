@@ -106,3 +106,16 @@ func TestProcessSnapshotOnLinux(t *testing.T) {
 		t.Fatal("current process missing from Linux process snapshot")
 	}
 }
+
+func TestUDPEndpointProtocolFilter(t *testing.T) {
+	for _, protocol := range []string{"hysteria2", "tuic", "shadowsocks"} {
+		if !udpEndpointProtocol(protocol) {
+			t.Fatalf("UDP endpoint protocol %s was excluded", protocol)
+		}
+	}
+	for _, protocol := range []string{"vless", "trojan", "unknown"} {
+		if udpEndpointProtocol(protocol) {
+			t.Fatalf("TCP-only protocol %s was included in UDP capture", protocol)
+		}
+	}
+}

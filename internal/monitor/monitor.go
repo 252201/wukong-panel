@@ -105,7 +105,7 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 	byPort := map[int]model.Node{}
 	filters := []string{}
 	for _, node := range nodes {
-		if node.Status != "active" {
+		if node.Status != "active" || !udpEndpointProtocol(node.Protocol) {
 			continue
 		}
 		byPort[node.ListenPort] = node
@@ -166,6 +166,15 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 		window = append(window, sample)
 	}
 	_ = c.store.ReplaceEndpointWindow(now, duration, window)
+}
+
+func udpEndpointProtocol(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "hysteria2", "tuic", "shadowsocks":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Collector) sample() {
