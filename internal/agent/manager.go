@@ -167,6 +167,12 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 		return nil, err
 	}
 	version := m.Version(ctx)
+	knownNames := map[string]string{}
+	if knownNodes, knownErr := m.store.Nodes(ctx); knownErr == nil {
+		for _, node := range knownNodes {
+			knownNames[candidateKey(node.ConfigPath, node.ListenPort)] = node.Name
+		}
+	}
 	result := []model.NodeCandidate{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -210,7 +216,8 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if len(inbounds) > 1 {
 				shared = path
 			}
-			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: displayName(name, index), Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
+			candidateName := preferredCandidateName(name, path, index, port, knownNames[candidateKey(path, port)])
+			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: candidateName, Protocol: "hysteria2", Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ListenPort < result[j].ListenPort })
@@ -520,7 +527,7 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 }
 
 func buildConfig(request model.NodeCreateRequest, port int, secret, certPath, keyPath, version string) ([]byte, error) {
-	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
+	inbound := map[string]any{"type": "hysteria2", "tag": "hy2-" + strings.TrimSpace(request.Name) + "-in", "listen": "::", "listen_port": port, "users": []any{map[string]any{"name": "wukong", "password": secret}}, "ignore_client_bandwidth": true, "tls": map[string]any{"enabled": true, "alpn": []string{"h3"}, "certificate_path": certPath, "key_path": keyPath}}
 	capabilities := singboxconfig.CapabilitiesFor(version)
 	outbounds := []any{}
 	rules := []any{}
@@ -764,6 +771,31 @@ func displayName(tag string, index int) string {
 	tag = strings.TrimPrefix(tag, "hy2-")
 	tag = strings.TrimSuffix(tag, "-in")
 	return tag
+}
+func candidateKey(path string, port int) string {
+	return filepath.Clean(path) + "\x00" + strconv.Itoa(port)
+}
+func preferredCandidateName(tag, path string, index, port int, known string) string {
+	if strings.TrimSpace(known) != "" && !genericNodeName(known) {
+		return known
+	}
+	name := displayName(tag, index)
+	if genericNodeName(name) {
+		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		if strings.HasPrefix(base, "wukong-") {
+			return fmt.Sprintf("悟空节点 · %d", port)
+		}
+		return base
+	}
+	return name
+}
+func genericNodeName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in":
+		return true
+	default:
+		return false
+	}
 }
 func stringValue(v any) string {
 	if value, ok := v.(string); ok {

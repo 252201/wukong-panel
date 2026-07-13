@@ -118,6 +118,19 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
+function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPlan {
+  return {
+    ...plan,
+    files: (plan.files || []).map(file => ({
+      ...file,
+      changes: file.changes || [],
+      warnings: file.warnings || [],
+      errors: file.errors || [],
+      interfaces: file.interfaces || [],
+    })),
+  }
+}
+
 let csrf = ''
 export function setCSRF(value: string) { csrf = value }
 
@@ -139,7 +152,7 @@ export const api = {
   overview: () => request<Overview>('overview'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
-  singBoxMigration: (target = '1.13.14') => request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`),
+  singBoxMigration: async (target = '1.13.14') => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
   nodes: () => request<NodeItem[]>('nodes'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),

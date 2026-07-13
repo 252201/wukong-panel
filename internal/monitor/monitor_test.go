@@ -33,6 +33,24 @@ func TestEndpointPacketRejectsLineWithoutLengthMetadata(t *testing.T) {
 	}
 }
 
+func TestEndpointPacketParsesAlpineSingleLineIPv6(t *testing.T) {
+	var pending int64
+	line := "1783909462.501781 eth0 Out IP6 (flowlabel 0x92a6f, hlim 64, next-header UDP (17) payload length: 1288) 2a01:db8::1.55119 > 2602:db8::2.56681: UDP, length 1280"
+	port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || port != 55119 || host != "2602:db8::2" || clientPort != "56681" || size != 1328 {
+		t.Fatalf("unexpected Alpine IPv6 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	}
+}
+
+func TestEndpointPacketParsesAlpineSingleLineIPv4(t *testing.T) {
+	var pending int64
+	line := "1783909462.501781 eth0 Out IP (tos 0x0, ttl 64, id 1, offset 0, flags [DF], proto UDP (17), length 1280) 192.0.2.10.45115 > 198.51.100.20.56681: UDP, length 1252"
+	port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || port != 45115 || host != "198.51.100.20" || clientPort != "56681" || size != 1280 {
+		t.Fatalf("unexpected Alpine IPv4 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	}
+}
+
 func TestParseProcessStatHandlesNamesWithSpaces(t *testing.T) {
 	name, ticks, ok := parseProcessStat("123 (worker process) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15")
 	if !ok || name != "worker process" || ticks != 23 {
@@ -57,6 +75,8 @@ func TestProcessDisplayNameOnlyClassifiesWukongSubcommands(t *testing.T) {
 		{"wukong-panel", "/usr/local/bin/wukong-panel\x00agent\x00", "悟空 Agent"},
 		{"wukong-panel", "/usr/local/bin/wukong-panel\x00serve\x00", "悟空单体服务"},
 		{"wukong-panel", "/usr/local/bin/wukong-panel\x00doctor\x00", "wukong-panel"},
+		{"ld-musl-x86_64.", "ld-linux-x86-64.so.2\x00--argv0\x00/etc/s-box/sing-box\x00--preload\x00/lib/libgcompat.so.0\x00--\x00/etc/s-box/sing-box\x00run\x00-c\x00/etc/s-box/hy2-v6.json\x00", "sing-box"},
+		{"ld-musl-x86_64.", "ld-linux-x86-64.so.2\x00--argv0\x00/usr/bin/other\x00", "ld-musl-x86_64."},
 		{"python3", "python3\x00script.py\x00--token\x00secret\x00", "python3"},
 	}
 	for _, test := range tests {

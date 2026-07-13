@@ -66,7 +66,7 @@ func (c *Collector) RunEndpoints(ctx context.Context) {
 }
 
 var (
-	endpointLine = regexp.MustCompile(`^\s*(?:\d+(?:\.\d+)?\s+)?([^\s]+)\.(\d+) > ([^\s]+)\.(\d+):`)
+	endpointLine = regexp.MustCompile(`(?:^|\s)([^\s]+)\.(\d+) > ([^\s]+)\.(\d+):`)
 	ipv4Length   = regexp.MustCompile(`proto UDP \(\d+\), length (\d+)\)`)
 	ipv6Payload  = regexp.MustCompile(`payload length: (\d+)`)
 )
@@ -77,13 +77,11 @@ func endpointPacket(line string, pendingBytes *int64) (sourcePort int, host, por
 			payload, _ := strconv.ParseInt(match[1], 10, 64)
 			*pendingBytes = payload + 40
 		}
-		return 0, "", "", 0, false
 	}
 	if strings.Contains(line, " IP ") {
 		if match := ipv4Length.FindStringSubmatch(line); len(match) == 2 {
 			*pendingBytes, _ = strconv.ParseInt(match[1], 10, 64)
 		}
-		return 0, "", "", 0, false
 	}
 	match := endpointLine.FindStringSubmatch(line)
 	if len(match) != 5 || *pendingBytes <= 0 {
@@ -430,11 +428,16 @@ func processStatus(data string) (string, int64) {
 }
 
 func processDisplayName(name string, cmdline []byte) string {
-	if name != "wukong-panel" {
+	fields := strings.FieldsFunc(string(cmdline), func(r rune) bool { return r == 0 })
+	if strings.HasPrefix(name, "ld-musl-") {
+		for _, field := range fields {
+			if filepath.Base(field) == "sing-box" {
+				return "sing-box"
+			}
+		}
 		return name
 	}
-	fields := strings.FieldsFunc(string(cmdline), func(r rune) bool { return r == 0 })
-	if len(fields) < 2 || filepath.Base(fields[0]) != "wukong-panel" {
+	if name != "wukong-panel" || len(fields) < 2 || filepath.Base(fields[0]) != "wukong-panel" {
 		return name
 	}
 	switch fields[1] {
@@ -481,7 +484,7 @@ func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int
 		if statusName != "" {
 			name = statusName
 		}
-		if name == "wukong-panel" {
+		if name == "wukong-panel" || strings.HasPrefix(name, "ld-musl-") {
 			cmdline, _ := os.ReadFile("/proc/" + entry.Name() + "/cmdline")
 			name = processDisplayName(name, cmdline)
 		}
