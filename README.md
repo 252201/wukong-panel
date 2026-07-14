@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.5.3-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.5.5-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -72,7 +72,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.5.3 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.5.5 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -121,7 +121,8 @@ flowchart LR
 ```
 
 - 管理账号默认为 `admin`；初始密码只在首次安装时打印，首次登录强制改密。
-- 密码使用 Argon2id，节点密钥使用 AES-256-GCM，机器密钥权限为 `0600`。
+- 新密码使用 Argon2id（19 MiB、t=2、p=1），并兼容验证旧版 64 MiB 哈希；低内存主机会在认证后主动归还临时堆。节点密钥使用 AES-256-GCM，机器密钥权限为 `0600`。
+- 首次登录强制改密完成前，后端拒绝面板数据接口，前端不会预加载总览、节点、任务、设置、端点或时间轴。
 - 会话 Cookie 使用 `Secure`、`HttpOnly`、`SameSite=Strict`，所有变更 API 校验 CSRF。
 - 登录按来源 IP 限速；所有节点变更、密钥显示与设置修改写入审计日志。
 - Agent 不接收任意命令字符串，只执行固定类型操作。

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,62 @@ func TestAuthCookieAndCSRF(t *testing.T) {
 	server.Handler().ServeHTTP(allowed, request)
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("valid CSRF status = %d", allowed.Code)
+	}
+}
+
+func TestForcedPasswordChangeBlocksPanelData(t *testing.T) {
+	dir := t.TempDir()
+	database, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	password, _, err := database.EnsureAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(config.Config{BasePath: "/", SecureCookie: false}, database, fakeAgent{}, "test")
+	loginBody, _ := json.Marshal(map[string]string{"username": "admin", "password": password})
+	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
+	login.RemoteAddr = "192.0.2.2:1234"
+	loginRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(loginRecorder, login)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("login status %d: %s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(loginRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	cookies := loginRecorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatal("session cookie missing")
+	}
+
+	me := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	me.AddCookie(cookies[0])
+	meRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(meRecorder, me)
+	if meRecorder.Code != http.StatusOK || !strings.Contains(meRecorder.Body.String(), `"mustChange":true`) {
+		t.Fatalf("forced-change session cannot read auth state: %d %s", meRecorder.Code, meRecorder.Body.String())
+	}
+
+	overview := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	overview.AddCookie(cookies[0])
+	overviewRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(overviewRecorder, overview)
+	if overviewRecorder.Code != http.StatusPreconditionRequired {
+		t.Fatalf("panel data status = %d, want %d", overviewRecorder.Code, http.StatusPreconditionRequired)
+	}
+
+	changeBody, _ := json.Marshal(map[string]string{"password": "new-password-2026"})
+	change := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", bytes.NewReader(changeBody))
+	change.AddCookie(cookies[0])
+	change.Header.Set("X-CSRF-Token", payload["csrf"].(string))
+	changeRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(changeRecorder, change)
+	if changeRecorder.Code != http.StatusOK {
+		t.Fatalf("password change status %d: %s", changeRecorder.Code, changeRecorder.Body.String())
 	}
 }
 
