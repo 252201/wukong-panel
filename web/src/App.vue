@@ -161,13 +161,13 @@ async function bootstrap() {
   loading.value = true
   try {
     const me = await api.me(); setCSRF(me.csrf); authenticated.value = true; username.value = me.username; mustChange.value = me.mustChange
-    await refreshAll()
+    if (!me.mustChange) await refreshAll()
   } catch { authenticated.value = false }
   finally { loading.value = false }
 }
 async function login() {
   busy.value = true; loginError.value = ''
-  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; await refreshAll() }
+  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; if (!result.mustChange) await refreshAll() }
   catch (error) { loginError.value = error instanceof Error ? error.message : '登录失败' }
   finally { busy.value = false }
 }

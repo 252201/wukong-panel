@@ -533,7 +533,7 @@ func (s *Server) auth(next authHandler, csrf bool) http.HandlerFunc {
 			writeError(w, 403, "CSRF 校验失败")
 			return
 		}
-		if session.MustChange && r.URL.Path != "/api/v1/auth/password" && r.URL.Path != "/api/v1/auth/logout" {
+		if session.MustChange && r.URL.Path != "/api/v1/auth/me" && r.URL.Path != "/api/v1/auth/password" && r.URL.Path != "/api/v1/auth/logout" {
 			writeError(w, 428, "首次登录必须修改密码")
 			return
 		}
