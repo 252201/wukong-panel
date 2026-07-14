@@ -2,14 +2,14 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.5.2-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.5.3-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- 五协议驱动：完整管理 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。
+- 五协议驱动：完整管理 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码，私钥不进入分享链接或公开 API。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
@@ -72,7 +72,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.5.2 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.5.3 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -136,7 +136,7 @@ wukongctl scan
 wukongctl node create --name "AC-HY2" --server node.example.com --domain node.example.com \
   --mode prefer_v6 --ipv4-bind 192.0.2.10 --ipv6 2001:db8::10
 wukongctl node create --protocol vless --name "AC-Reality" \
-  --server node.example.com --domain www.google.com --mode prefer_v6
+  --server node.example.com --domain www.cloudflare.com --mode prefer_v6
 wukongctl node create --protocol shadowsocks --name "AC-SS2022" \
   --server node.example.com --mode prefer_v6
 wukongctl node create --protocol tuic --name "AC-TUIC" \

@@ -23,7 +23,7 @@ const (
 	protocolTUIC        = "tuic"
 	protocolTrojan      = "trojan"
 	shadowsocks2022     = "2022-blake3-aes-128-gcm"
-	realityDefaultSNI   = "www.google.com"
+	realityDefaultSNI   = "www.cloudflare.com"
 )
 
 var supportedProtocols = map[string]bool{
