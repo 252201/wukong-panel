@@ -62,6 +62,12 @@ func TestCredentialEnvelopeNeverStoresRealityPrivateKey(t *testing.T) {
 	}
 }
 
+func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
+	if realityDefaultSNI != "www.cloudflare.com" {
+		t.Fatalf("unexpected REALITY default SNI: %s", realityDefaultSNI)
+	}
+}
+
 func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
 		t.Run(protocol, func(t *testing.T) {
