@@ -286,7 +286,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 	prepared := make([]model.NodeCreateRequest, 0, len(request.Nodes))
 	names := map[string]bool{}
 	ports := map[int]bool{}
-	hostnames := map[string]bool{}
+	tunnelRoutes := map[string]bool{}
 	tunnelToken := ""
 	protocol := ""
 	for index, item := range request.Nodes {
@@ -311,10 +311,11 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 			ports[value.ListenPort] = true
 		}
 		if value.Protocol == protocolVLESSWSTunnel {
-			if hostnames[value.Server] {
-				return nil, fmt.Errorf("device %d: duplicate Cloudflare hostname %q", index+1, value.Server)
+			routeKey := strings.ToLower(strings.TrimSpace(value.Server)) + "\x00" + value.WebSocketPath
+			if tunnelRoutes[routeKey] {
+				return nil, fmt.Errorf("device %d: duplicate Cloudflare hostname and WebSocket path %q %q", index+1, value.Server, value.WebSocketPath)
 			}
-			hostnames[value.Server] = true
+			tunnelRoutes[routeKey] = true
 			if tunnelToken == "" {
 				tunnelToken = value.TunnelToken
 			} else if value.TunnelToken != tunnelToken {
@@ -484,7 +485,7 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 	if m.cfg.Demo {
 		version = "1.14-demo"
 	}
-	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
+	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 		if !m.cfg.Demo {
 			_ = m.cleanupFailedCreate(ctx, node, request.Protocol == protocolVLESSWSTunnel && installTunnelConnector)

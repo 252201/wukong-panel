@@ -98,6 +98,26 @@ func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 	}
 }
 
+func TestNodePersistsWebSocketPath(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "tunnel-route", Name: "iPhone", Protocol: "vless-ws-tunnel", Mode: "prefer_v6", ListenPort: 45116, Server: "shared.example.com", WebSocketPath: "/wukong-iphone", ServiceName: "sing-box-tunnel", ServiceManager: "systemd", ConfigPath: "/etc/s-box/tunnel.json", ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err := s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Node(t.Context(), node.ID, false)
+	if err != nil || stored.WebSocketPath != node.WebSocketPath {
+		t.Fatalf("WebSocket path not persisted: %#v, %v", stored, err)
+	}
+	items, err := s.Nodes(t.Context())
+	if err != nil || len(items) != 1 || items[0].WebSocketPath != node.WebSocketPath {
+		t.Fatalf("WebSocket path not listed: %#v, %v", items, err)
+	}
+}
+
 func TestRenameNodeSynchronizesTrafficNames(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

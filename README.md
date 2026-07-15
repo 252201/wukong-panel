@@ -2,14 +2,14 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.6.1-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.6.2-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。设备专用模式可一次创建 2–20 台设备，每台设备使用独立端口、凭据、服务与分享配置。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
+- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立端口、凭据、服务与分享配置。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
@@ -73,7 +73,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.6.1 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.6.2 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -98,11 +98,12 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 这个节点类型需要 Cloudflare 账户和一个已接入 Cloudflare 的域名，但不要求用户把 Cloudflare API Key 交给面板。面板只接收单个 Tunnel 的运行 Token：
 
 1. 在 Cloudflare Zero Trust 的 Networks → Tunnels 创建 remotely-managed Tunnel，选择 `cloudflared`，只复制运行命令中的 Token。
-2. 在悟空面板选择“VLESS + WebSocket + Cloudflare Tunnel”，填写准备使用的公开主机名并粘贴 Token；本地 Origin 端口和 VLESS UUID 会自动生成，WebSocket 路径可留空随机生成。若开启“设备专用节点”，整组设备只需粘贴一次 Token，但每台设备必须填写不同的公开主机名。
-3. 部署完成后，从每张节点卡片复制各自的 `http://127.0.0.1:<端口>`。
-4. 回到同一个 Tunnel，为每台设备分别添加一条 Published application：公开主机名与面板填写值一致，Service URL 使用对应节点卡片的本地地址。
+2. 普通单节点使用“部署节点”；多设备从右上角独立的“设备专用节点”入口进入。选择 VLESS + WebSocket + Cloudflare Tunnel 后填写公开主机名并粘贴 Token；本地 Origin 端口和 VLESS UUID 会自动生成，WebSocket 路径可留空随机生成。设备编队整组只需粘贴一次 Token。
+3. 设备编队可为每台设备填写不同公开主机名，也可开启“共用 Cloudflare 主机名”。共用时只填写一个主机名，面板为每台设备生成独立 WebSocket 路径，并在节点卡片保留可复制的 Cloudflare Path 正则。
+4. 部署完成后，从每张节点卡片复制 Path 正则和对应的 `http://127.0.0.1:<端口>`。
+5. 回到同一个 Tunnel，为每台设备分别添加一条 Published application。使用不同主机名时分别填写主机名；共用主机名时所有路由使用同一个主机名，并为每条路由填写对应的 Path 正则。Service URL 始终使用对应节点卡片的本地地址。
 
-客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组则有意共享一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过多条 Published application 将不同公开主机名路由到各自的本地 Origin。
+客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组则有意共享一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过多条 Published application 按“主机名 + Path”将请求路由到各自的本地 Origin。同一组可以共用主机名，但同一主机名下的 Path 不得重复。
 
 如果已经测得更适合当前网络的 Cloudflare 优选域名或 IP，可在部署表单填写“优选连接域名 / IP”。面板只会把它写入分享链接和 Clash/Mihomo 订阅的 `server`；TLS `servername`、SNI、WebSocket `Host` 和 Tunnel Published application 路由仍使用上面的 Cloudflare 节点域名。该字段不能包含 `http://`、`https://`、路径或端口，留空即使用 Cloudflare 标准 Anycast。优选地址的可用性会随运营商、地区和时间变化，需要用户自行测试并维护。
 
