@@ -250,14 +250,16 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 	case "create":
 		flags := flag.NewFlagSet("node create", flag.ExitOnError)
 		var request model.NodeCreateRequest
-		var domains, deviceNames, instance, publicIPv4 string
+		var domains, deviceNames, instance, publicIPv4, tunnelTokenFile string
 		flags.StringVar(&request.Name, "name", "Wukong-Node", "node display name")
-		flags.StringVar(&request.Protocol, "protocol", "hysteria2", "hysteria2, vless, shadowsocks, tuic or trojan")
+		flags.StringVar(&request.Protocol, "protocol", "hysteria2", "hysteria2, vless, vless-ws-tunnel, shadowsocks, tuic or trojan")
 		flags.StringVar(&request.Mode, "mode", "prefer_v6", "prefer_v6, v4only or v6only")
 		flags.IntVar(&request.ListenPort, "port", 0, "listen port, zero selects a free protocol-compatible port")
 		flags.StringVar(&request.Server, "server", "", "advertised server domain or IP")
 		flags.StringVar(&publicIPv4, "ipv4", "", "compatibility advertised IPv4")
 		flags.StringVar(&request.Domain, "domain", "", "TLS server name or VLESS REALITY handshake server")
+		flags.StringVar(&request.WebSocketPath, "ws-path", "", "VLESS WebSocket path; empty generates a random path")
+		flags.StringVar(&tunnelTokenFile, "tunnel-token-file", "", "file containing a Cloudflare Tunnel token")
 		flags.StringVar(&request.IPv4Bind, "ipv4-bind", "", "local IPv4 bind address")
 		flags.StringVar(&request.IPv6Bind, "ipv6", "", "local IPv6 bind address")
 		flags.StringVar(&request.Password, "password", "", "explicit password or VLESS UUID")
@@ -276,6 +278,16 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 		_ = flags.Bool("skip-http-precheck", false, "compatibility flag")
 		if err := flags.Parse(args[1:]); err != nil {
 			log.Fatal(err)
+		}
+		if tunnelTokenFile != "" {
+			data, err := os.ReadFile(tunnelTokenFile)
+			if err != nil {
+				log.Fatalf("read Cloudflare Tunnel token file: %v", err)
+			}
+			request.TunnelToken = strings.TrimSpace(string(data))
+		}
+		if agentProtocol := strings.ToLower(strings.TrimSpace(request.Protocol)); (agentProtocol == "vless-ws-tunnel" || agentProtocol == "vless-ws" || agentProtocol == "cloudflare-tunnel" || agentProtocol == "argo") && strings.TrimSpace(deviceNames) != "" {
+			log.Fatal("--device-nodes cannot share one Cloudflare Tunnel token; create each Tunnel node separately")
 		}
 		request.AutoBind = true
 		for _, domain := range strings.Split(domains, ",") {

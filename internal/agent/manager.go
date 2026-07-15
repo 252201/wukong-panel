@@ -198,6 +198,16 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if !supportedProtocols[protocol] {
 				continue
 			}
+			// A managed VLESS + WebSocket node also needs its Cloudflare Tunnel
+			// token and companion service metadata. Neither exists in sing-box's
+			// inbound, so importing an arbitrary WS inbound would create a node
+			// that cannot be operated safely.
+			if protocol == protocolVLESS {
+				transport, _ := inbound["transport"].(map[string]any)
+				if strings.EqualFold(stringValue(transport["type"]), "ws") {
+					continue
+				}
+			}
 			port := int(numberValue(inbound["listen_port"]))
 			if port < 1 {
 				continue
@@ -267,6 +277,19 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if request.Protocol == protocolVLESS && strings.TrimSpace(request.Domain) == "" {
 		request.Domain = realityDefaultSNI
 	}
+	if request.Protocol == protocolVLESSWSTunnel {
+		request.Server = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(request.Server)), ".")
+		request.Domain = request.Server
+		request.TunnelToken = strings.TrimSpace(request.TunnelToken)
+		request.WebSocketPath = strings.TrimSpace(request.WebSocketPath)
+		if request.WebSocketPath == "" {
+			randomPath, randomErr := security.RandomToken(12)
+			if randomErr != nil {
+				return model.Node{}, randomErr
+			}
+			request.WebSocketPath = "/wukong-" + strings.ToLower(randomPath)
+		}
+	}
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
 	}
@@ -287,9 +310,20 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if err != nil {
 		return model.Node{}, err
 	}
+	if request.Protocol == protocolVLESSWSTunnel {
+		credentials.WebSocketPath = request.WebSocketPath
+		credentials.TunnelToken = request.TunnelToken
+	}
 	service := "sing-box-wukong-" + id
 	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".json")
 	manager := detectServiceManager()
+	cloudflaredBinary := ""
+	if request.Protocol == protocolVLESSWSTunnel && !m.cfg.Demo {
+		cloudflaredBinary, err = m.ensureCloudflared(ctx)
+		if err != nil {
+			return model.Node{}, err
+		}
+	}
 	certPath, keyPath, generateCertificate := "", "", false
 	if protocolUsesCertificate(request.Protocol) {
 		certPath, keyPath, generateCertificate, err = m.certificatePaths(request, id)
@@ -320,11 +354,27 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		}
 		if request.Protocol == protocolVLESS {
 			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
-				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
 				if cleanupErr != nil {
 					return model.Node{}, fmt.Errorf("VLESS REALITY preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
 				}
 				return model.Node{}, fmt.Errorf("VLESS REALITY preflight failed; choose another handshake server: %w", probeErr)
+			}
+		}
+		if request.Protocol == protocolVLESSWSTunnel {
+			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
+				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				if cleanupErr != nil {
+					return model.Node{}, fmt.Errorf("VLESS WebSocket local preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
+				}
+				return model.Node{}, fmt.Errorf("VLESS WebSocket local preflight failed: %w", probeErr)
+			}
+			if err = m.installCloudflaredService(ctx, id, manager, cloudflaredBinary, credentials.TunnelToken); err != nil {
+				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				if cleanupErr != nil {
+					return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w (cleanup failed: %v)", err, cleanupErr)
+				}
+				return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w", err)
 			}
 		}
 	}
@@ -342,6 +392,9 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	}
 	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
+		if request.Protocol == protocolVLESSWSTunnel && !m.cfg.Demo {
+			_ = m.cleanupFailedCreate(ctx, node)
+		}
 		return model.Node{}, err
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
@@ -466,7 +519,13 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		return m.store.SetNodeStatus(id, status)
 	}
 	if action == "check" {
-		return command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath)
+		if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath); err != nil {
+			return err
+		}
+		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+			return m.checkCloudflaredNode(ctx, node)
+		}
+		return nil
 	}
 	if action == "probe" {
 		return m.probeNode(ctx, node)
@@ -474,6 +533,13 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 	if action == "delete" {
 		if err = m.backup(node); err != nil {
 			return err
+		}
+		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+			tunnelNode := node
+			tunnelNode.ServiceName = cloudflaredServiceName(node.ID)
+			if err = m.serviceCommand(ctx, tunnelNode.ServiceManager, "stop", tunnelNode.ServiceName); err != nil {
+				return err
+			}
 		}
 		if err = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName); err != nil {
 			return err
@@ -483,9 +549,14 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 			_ = os.Remove(node.ConfigPath)
 			_ = m.removeService(node)
 		}
+		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+			if err = m.removeCloudflaredService(ctx, node); err != nil {
+				return err
+			}
+		}
 		err = m.store.DeleteNode(id)
 	} else {
-		err = m.serviceCommand(ctx, node.ServiceManager, action, node.ServiceName)
+		err = m.actionNodeServices(ctx, node, action)
 		if err == nil {
 			status := "active"
 			if action == "stop" {
@@ -513,10 +584,27 @@ func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
 	if m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) != "active" {
 		return fail(singboxconfig.ProbeResult{}, errors.New("node service is not active"))
 	}
+	if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel && m.cloudflaredStatus(ctx, node) != "active" {
+		return fail(singboxconfig.ProbeResult{}, errors.New("Cloudflare Tunnel service is not active"))
+	}
 	if err := command(ctx, m.cfg.SingBoxBin, "check", "-c", node.ConfigPath); err != nil {
 		return fail(singboxconfig.ProbeResult{}, fmt.Errorf("configuration check failed: %w", err))
 	}
-	result, err := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, node.ConfigPath, node.Protocol, node.ListenPort)
+	var result singboxconfig.ProbeResult
+	var err error
+	if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+		secret, decryptErr := m.vault.Decrypt(node.Secret)
+		if decryptErr != nil {
+			return fail(result, decryptErr)
+		}
+		credentials, decodeErr := decodeProtocolCredentials(node.Protocol, secret)
+		if decodeErr != nil {
+			return fail(result, decodeErr)
+		}
+		result, err = singboxconfig.ProbeVLESSWebSocketEndpoint(ctx, m.cfg.SingBoxBin, node.Server, credentials.UUID, credentials.WebSocketPath)
+	} else {
+		result, err = singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, node.ConfigPath, node.Protocol, node.ListenPort)
+	}
 	if err != nil {
 		return fail(result, fmt.Errorf("full proxy round trip failed: %w", err))
 	}
@@ -580,7 +668,11 @@ func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 func (m *Manager) RefreshStatuses(ctx context.Context) {
 	nodes, _ := m.store.Nodes(ctx)
 	for _, node := range nodes {
-		_ = m.store.SetNodeStatus(node.ID, m.serviceStatus(ctx, node.ServiceManager, node.ServiceName))
+		status := m.serviceStatus(ctx, node.ServiceManager, node.ServiceName)
+		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel && m.cloudflaredStatus(ctx, node) != "active" {
+			status = "inactive"
+		}
+		_ = m.store.SetNodeStatus(node.ID, status)
 	}
 }
 
@@ -619,6 +711,9 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 }
 
 func (m *Manager) cleanupFailedCreate(ctx context.Context, node model.Node) error {
+	if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel && node.ID != "" {
+		_ = m.removeCloudflaredService(ctx, node)
+	}
 	_ = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
 	_ = m.disableService(ctx, node)
 	serviceErr := m.removeService(node)
@@ -825,7 +920,96 @@ func validateCreate(r model.NodeCreateRequest) error {
 	if protocolUsesCertificate(protocol) && strings.TrimSpace(r.Domain) == "" {
 		return errors.New("TLS domain is required for this protocol")
 	}
+	if protocol == protocolVLESSWSTunnel {
+		if !validTunnelHostname(r.Server) {
+			return errors.New("Cloudflare Tunnel hostname must be a valid DNS hostname")
+		}
+		if !validWebSocketPath(r.WebSocketPath) {
+			return errors.New("WebSocket path must start with /, contain no whitespace, ? or #, and be at most 128 characters")
+		}
+		if !validTunnelToken(r.TunnelToken) {
+			return errors.New("a valid Cloudflare Tunnel token is required")
+		}
+	}
 	return nil
+}
+
+func (m *Manager) actionNodeServices(ctx context.Context, node model.Node, action string) error {
+	if normalizeProtocol(node.Protocol) != protocolVLESSWSTunnel {
+		return m.serviceCommand(ctx, node.ServiceManager, action, node.ServiceName)
+	}
+	tunnelNode := node
+	tunnelNode.ServiceName = cloudflaredServiceName(node.ID)
+	switch action {
+	case "start":
+		if err := m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName); err != nil {
+			return err
+		}
+		if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "start", tunnelNode.ServiceName); err != nil {
+			_ = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
+			return err
+		}
+		return nil
+	case "stop":
+		if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "stop", tunnelNode.ServiceName); err != nil {
+			return err
+		}
+		return m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
+	case "restart":
+		if err := m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err != nil {
+			return err
+		}
+		return m.serviceCommand(ctx, tunnelNode.ServiceManager, "restart", tunnelNode.ServiceName)
+	default:
+		return errors.New("unsupported service action")
+	}
+}
+
+func validTunnelHostname(value string) bool {
+	value = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
+	if value == "" || len(value) > 253 || net.ParseIP(value) != nil || !strings.Contains(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validWebSocketPath(value string) bool {
+	if len(value) < 2 || len(value) > 128 || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, "?#") {
+		return false
+	}
+	for _, char := range value {
+		if char <= ' ' || char == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func validTunnelToken(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 80 || len(value) > 4096 {
+		return false
+	}
+	withoutPadding := strings.TrimRight(value, "=")
+	if len(value)-len(withoutPadding) > 2 || strings.ContainsRune(withoutPadding, '=') {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (char < '0' || char > '9') && !strings.ContainsRune("-_.=+/", char) {
+			return false
+		}
+	}
+	return strings.Contains(value, ".") || strings.HasPrefix(value, "eyJ")
 }
 func generateSelfSigned(keyPath, certPath, domain string) error {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

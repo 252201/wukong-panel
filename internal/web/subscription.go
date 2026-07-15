@@ -21,13 +21,19 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	}
 	query := parsed.Query()
 	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1" || query.Get("allowInsecure") == "1"
+	port := node.ListenPort
+	if strings.EqualFold(node.Protocol, "vless-ws-tunnel") {
+		port = 443
+	}
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "  - name: %q\n    server: %q\n    port: %d\n", node.Name, server, node.ListenPort)
+	fmt.Fprintf(&builder, "  - name: %q\n    server: %q\n    port: %d\n", node.Name, server, port)
 	switch strings.ToLower(node.Protocol) {
 	case "hysteria2":
 		fmt.Fprintf(&builder, "    type: hysteria2\n    password: %q\n    sni: %q\n    alpn: [h3]\n    skip-cert-verify: %t\n", parsed.User.Username(), node.Domain, insecure)
 	case "vless":
 		fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    servername: %q\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: %q\n      short-id: %q\n", parsed.User.Username(), node.Domain, query.Get("pbk"), query.Get("sid"))
+	case "vless-ws-tunnel":
+		fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: true\n    udp: true\n    servername: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), node.Server, query.Get("path"), node.Server)
 	case "shadowsocks":
 		decoded, decodeErr := base64.RawURLEncoding.DecodeString(parsed.User.Username())
 		if decodeErr != nil {

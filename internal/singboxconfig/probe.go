@@ -99,9 +99,16 @@ func ProbeConfigInbound(ctx context.Context, binary, configPath, protocol string
 	for _, item := range inbounds {
 		inbound, _ := item.(map[string]any)
 		inboundProtocol := strings.ToLower(stringValue(inbound["type"]))
-		if intNumber(inbound["listen_port"]) == port && (result.Protocol == "" || inboundProtocol == result.Protocol) {
+		protocolMatches := result.Protocol == "" || inboundProtocol == result.Protocol
+		if result.Protocol == "vless-ws-tunnel" && inboundProtocol == "vless" {
+			transport, _ := inbound["transport"].(map[string]any)
+			protocolMatches = stringValue(transport["type"]) == "ws"
+		}
+		if intNumber(inbound["listen_port"]) == port && protocolMatches {
 			selected = inbound
-			result.Protocol = inboundProtocol
+			if result.Protocol == "" {
+				result.Protocol = inboundProtocol
+			}
 			result.Inbound = stringValue(inbound["tag"])
 			break
 		}
@@ -109,7 +116,7 @@ func ProbeConfigInbound(ctx context.Context, binary, configPath, protocol string
 	if selected == nil {
 		return result, fmt.Errorf("%s inbound on port %d was not found", result.Protocol, port)
 	}
-	if !probeableProtocols[result.Protocol] {
+	if !probeableProtocols[result.Protocol] && result.Protocol != "vless-ws-tunnel" {
 		return result, fmt.Errorf("unsupported probe protocol %q", result.Protocol)
 	}
 	probe, err := buildProtocolProbe(selected, "", "")
@@ -214,6 +221,11 @@ func buildProtocolProbe(inbound map[string]any, serverOverride, serverName strin
 		if flow := stringValue(user["flow"]); flow != "" {
 			outbound["flow"] = flow
 		}
+		transport, _ := inbound["transport"].(map[string]any)
+		if stringValue(transport["type"]) == "ws" {
+			outbound["transport"] = transport
+			break
+		}
 		tlsInbound, _ := inbound["tls"].(map[string]any)
 		realityInbound, _ := tlsInbound["reality"].(map[string]any)
 		privateKey := stringValue(realityInbound["private_key"])
@@ -259,6 +271,51 @@ func buildProtocolProbe(inbound map[string]any, serverOverride, serverName strin
 	}
 	root := map[string]any{"log": map[string]any{"level": "error"}, "outbounds": []any{outbound}, "route": map[string]any{"final": "probe-out"}}
 	return json.MarshalIndent(root, "", "  ")
+}
+
+// ProbeVLESSWebSocketEndpoint validates the complete public Cloudflare path,
+// including edge TLS, WebSocket upgrade, VLESS authentication and proxy egress.
+func ProbeVLESSWebSocketEndpoint(ctx context.Context, binary, server, uuid, path string) (ProbeResult, error) {
+	result := ProbeResult{Protocol: "vless-ws-tunnel", Inbound: server, Port: 443}
+	server = strings.TrimSpace(server)
+	uuid = strings.TrimSpace(uuid)
+	path = strings.TrimSpace(path)
+	if server == "" || uuid == "" || !strings.HasPrefix(path, "/") {
+		return result, errorsText("VLESS WebSocket endpoint parameters are incomplete")
+	}
+	outbound := map[string]any{
+		"type":        "vless",
+		"tag":         "probe-out",
+		"server":      server,
+		"server_port": 443,
+		"uuid":        uuid,
+		"tls": map[string]any{
+			"enabled":     true,
+			"server_name": server,
+			"utls":        map[string]any{"enabled": true, "fingerprint": "chrome"},
+		},
+		"transport": map[string]any{
+			"type":    "ws",
+			"path":    path,
+			"headers": map[string]any{"Host": server},
+		},
+	}
+	root := map[string]any{"log": map[string]any{"level": "error"}, "outbounds": []any{outbound}, "route": map[string]any{"final": "probe-out"}}
+	probe, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return result, err
+	}
+	tempDir, err := os.MkdirTemp("", "wukong-tunnel-probe-")
+	if err != nil {
+		return result, err
+	}
+	defer os.RemoveAll(tempDir)
+	result.Config = filepath.Join(tempDir, "probe.json")
+	result = executeProtocolProbe(ctx, binary, result.Config, probe, result)
+	if !result.OK {
+		return result, errorsText(result.Error)
+	}
+	return result, nil
 }
 
 func buildHY2Probe(inbound map[string]any, serverOverride, serverName string) ([]byte, error) {

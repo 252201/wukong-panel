@@ -16,7 +16,7 @@ import (
 )
 
 func TestGenerateProtocolCredentials(t *testing.T) {
-	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
 		t.Run(protocol, func(t *testing.T) {
 			credentials, err := generateProtocolCredentials(protocol, "")
 			if err != nil {
@@ -29,6 +29,10 @@ func TestGenerateProtocolCredentials(t *testing.T) {
 				}
 				if realityPublicKey(credentials.RealityPrivateKey) != credentials.RealityPublicKey {
 					t.Fatal("REALITY public key does not match generated private key")
+				}
+			case protocolVLESSWSTunnel:
+				if !validUUID(credentials.UUID) || credentials.RealityPrivateKey != "" || credentials.Password != "" {
+					t.Fatalf("invalid VLESS WebSocket credentials: %#v", credentials)
 				}
 			case protocolShadowsocks:
 				key, decodeErr := base64.StdEncoding.DecodeString(credentials.Password)
@@ -69,7 +73,7 @@ func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
 }
 
 func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
-	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
 		t.Run(protocol, func(t *testing.T) {
 			request := baseRequest()
 			request.Protocol = protocol
@@ -81,6 +85,9 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if protocol == protocolVLESSWSTunnel {
+				credentials.WebSocketPath = "/wukong-test"
+			}
 			payload, err := buildConfig(request, 44321, credentials, "/tmp/node.cer", "/tmp/node.key", "1.13.14")
 			if err != nil {
 				t.Fatal(err)
@@ -90,7 +97,11 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 				t.Fatal(err)
 			}
 			inbound := root["inbounds"].([]any)[0].(map[string]any)
-			if inbound["type"] != protocol || int(inbound["listen_port"].(float64)) != 44321 {
+			wantType := protocol
+			if protocol == protocolVLESSWSTunnel {
+				wantType = protocolVLESS
+			}
+			if inbound["type"] != wantType || int(inbound["listen_port"].(float64)) != 44321 {
 				t.Fatalf("wrong inbound: %#v", inbound)
 			}
 			switch protocol {
@@ -99,6 +110,11 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 				reality := tlsConfig["reality"].(map[string]any)
 				if tlsConfig["server_name"] != realityDefaultSNI || reality["private_key"] != credentials.RealityPrivateKey || inbound["users"].([]any)[0].(map[string]any)["flow"] != "xtls-rprx-vision" {
 					t.Fatal("VLESS REALITY fields missing")
+				}
+			case protocolVLESSWSTunnel:
+				transport := inbound["transport"].(map[string]any)
+				if inbound["listen"] != "127.0.0.1" || transport["type"] != "ws" || transport["path"] != "/wukong-test" || inbound["tls"] != nil {
+					t.Fatalf("VLESS WebSocket origin fields are incorrect: %#v", inbound)
 				}
 			case protocolShadowsocks:
 				if inbound["method"] != shadowsocks2022 || inbound["tls"] != nil {
@@ -118,11 +134,14 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 }
 
 func TestShareURIForEverySupportedProtocol(t *testing.T) {
-	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
 		node := model.Node{Name: "测试节点", Protocol: protocol, Server: "node.example.com", Domain: "node.example.com", ListenPort: 45080 + index}
 		credentials, err := generateProtocolCredentials(protocol, "")
 		if err != nil {
 			t.Fatal(err)
+		}
+		if protocol == protocolVLESSWSTunnel {
+			credentials.WebSocketPath = "/wukong-test"
 		}
 		share, err := buildShareURI(node, credentials, false)
 		if err != nil {
@@ -134,6 +153,9 @@ func TestShareURIForEverySupportedProtocol(t *testing.T) {
 		}
 		if protocol == protocolVLESS && (parsed.Query().Get("security") != "reality" || parsed.Query().Get("pbk") != credentials.RealityPublicKey) {
 			t.Fatalf("VLESS REALITY share fields missing: %s", share)
+		}
+		if protocol == protocolVLESSWSTunnel && (parsed.Port() != "443" || parsed.Query().Get("security") != "tls" || parsed.Query().Get("type") != "ws" || parsed.Query().Get("path") != "/wukong-test") {
+			t.Fatalf("VLESS WebSocket Tunnel share fields missing: %s", share)
 		}
 	}
 }
@@ -152,6 +174,40 @@ func TestValidateCreateRequiresProtocolAddressing(t *testing.T) {
 	}
 }
 
+func TestValidateCreateRequiresCloudflareTunnelInputs(t *testing.T) {
+	request := baseRequest()
+	request.Protocol = protocolVLESSWSTunnel
+	request.Server = "edge.example.com"
+	request.Domain = request.Server
+	request.WebSocketPath = "/wukong-test"
+	request.TunnelToken = "eyJ" + strings.Repeat("a", 90) + ".signature"
+	if err := validateCreate(request); err != nil {
+		t.Fatalf("valid Cloudflare Tunnel request rejected: %v", err)
+	}
+	request.TunnelToken = "short"
+	if validateCreate(request) == nil {
+		t.Fatal("short Tunnel token accepted")
+	}
+	request.TunnelToken = "eyJ" + strings.Repeat("a", 90) + "=="
+	if err := validateCreate(request); err != nil {
+		t.Fatalf("padded Tunnel token rejected: %v", err)
+	}
+	request.TunnelToken = "eyJ" + strings.Repeat("a+/", 30) + "=="
+	if err := validateCreate(request); err != nil {
+		t.Fatalf("standard Base64 Tunnel token rejected: %v", err)
+	}
+	request.TunnelToken = "eyJ" + strings.Repeat("a", 90) + ".signature"
+	request.WebSocketPath = "missing-leading-slash"
+	if validateCreate(request) == nil {
+		t.Fatal("invalid WebSocket path accepted")
+	}
+	request.WebSocketPath = "/valid"
+	request.Server = "https://edge.example.com"
+	if validateCreate(request) == nil {
+		t.Fatal("URL accepted as a Tunnel hostname")
+	}
+}
+
 func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 	binary := os.Getenv("SING_BOX_TEST_BIN")
 	if binary == "" {
@@ -162,7 +218,7 @@ func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 	if err := generateSelfSigned(keyPath, certPath, "node.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
 		t.Run(protocol, func(t *testing.T) {
 			request := baseRequest()
 			request.Protocol = protocol
@@ -173,6 +229,9 @@ func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 			credentials, err := generateProtocolCredentials(protocol, "")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if protocol == protocolVLESSWSTunnel {
+				credentials.WebSocketPath = "/wukong-test"
 			}
 			payload, err := buildConfig(request, 46000+index, credentials, certPath, keyPath, "1.13.14")
 			if err != nil {
@@ -189,7 +248,7 @@ func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 	}
 }
 
-func TestScanDiscoversEverySupportedProtocol(t *testing.T) {
+func TestScanDiscoversEveryImportableProtocolAndSkipsWebSocketTunnel(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := filepath.Join(dir, "node.cer"), filepath.Join(dir, "node.key")
 	if err := generateSelfSigned(keyPath, certPath, "node.example.com"); err != nil {
@@ -215,7 +274,7 @@ func TestScanDiscoversEverySupportedProtocol(t *testing.T) {
 		inbounds = append(inbounds, inbound)
 	}
 	payload, _ := json.Marshal(map[string]any{"inbounds": inbounds, "outbounds": []any{map[string]any{"type": "direct", "tag": "direct", "domain_resolver": map[string]any{"server": "local", "strategy": "prefer_ipv6"}}}})
-	if err := os.WriteFile(filepath.Join(dir, "five-protocols.json"), payload, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "importable-protocols.json"), payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	database, err := store.Open(filepath.Join(dir, "wukong.db"))
@@ -239,8 +298,33 @@ func TestScanDiscoversEverySupportedProtocol(t *testing.T) {
 		}
 	}
 	for protocol := range supportedProtocols {
+		if protocol == protocolVLESSWSTunnel {
+			continue
+		}
 		if !seen[protocol] {
 			t.Fatalf("scanner missed %s", protocol)
 		}
+	}
+	wsCredentials, err := generateProtocolCredentials(protocolVLESSWSTunnel, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsCredentials.WebSocketPath = "/wukong-test"
+	request := baseRequest()
+	request.Protocol = protocolVLESSWSTunnel
+	wsInbound, err := buildProtocolInbound(request, 47999, wsCredentials, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ = json.Marshal(map[string]any{"inbounds": []any{wsInbound}})
+	if err = os.WriteFile(filepath.Join(dir, "ws-without-tunnel-token.json"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = manager.Scan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 5 {
+		t.Fatalf("VLESS WebSocket inbound without Tunnel metadata was imported: %#v", candidates)
 	}
 }

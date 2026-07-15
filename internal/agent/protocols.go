@@ -17,17 +17,18 @@ import (
 )
 
 const (
-	protocolHysteria2   = "hysteria2"
-	protocolVLESS       = "vless"
-	protocolShadowsocks = "shadowsocks"
-	protocolTUIC        = "tuic"
-	protocolTrojan      = "trojan"
-	shadowsocks2022     = "2022-blake3-aes-128-gcm"
-	realityDefaultSNI   = "www.cloudflare.com"
+	protocolHysteria2     = "hysteria2"
+	protocolVLESS         = "vless"
+	protocolVLESSWSTunnel = "vless-ws-tunnel"
+	protocolShadowsocks   = "shadowsocks"
+	protocolTUIC          = "tuic"
+	protocolTrojan        = "trojan"
+	shadowsocks2022       = "2022-blake3-aes-128-gcm"
+	realityDefaultSNI     = "www.cloudflare.com"
 )
 
 var supportedProtocols = map[string]bool{
-	protocolHysteria2: true, protocolVLESS: true, protocolShadowsocks: true, protocolTUIC: true, protocolTrojan: true,
+	protocolHysteria2: true, protocolVLESS: true, protocolVLESSWSTunnel: true, protocolShadowsocks: true, protocolTUIC: true, protocolTrojan: true,
 }
 
 type protocolCredentials struct {
@@ -37,6 +38,8 @@ type protocolCredentials struct {
 	RealityPublicKey  string `json:"realityPublicKey,omitempty"`
 	RealityShortID    string `json:"realityShortId,omitempty"`
 	RealityPrivateKey string `json:"-"`
+	WebSocketPath     string `json:"webSocketPath,omitempty"`
+	TunnelToken       string `json:"tunnelToken,omitempty"`
 }
 
 func normalizeProtocol(value string) string {
@@ -45,6 +48,8 @@ func normalizeProtocol(value string) string {
 		return protocolHysteria2
 	case "vless-reality", "reality", protocolVLESS:
 		return protocolVLESS
+	case "vless-ws", "vless-websocket", "argo", "cloudflare-tunnel", protocolVLESSWSTunnel:
+		return protocolVLESSWSTunnel
 	case "ss", "ss2022", "shadowsocks-2022", protocolShadowsocks:
 		return protocolShadowsocks
 	case protocolTUIC:
@@ -76,7 +81,7 @@ func protocolUsesUDP(protocol string) bool {
 
 func protocolUsesTCP(protocol string) bool {
 	switch normalizeProtocol(protocol) {
-	case protocolVLESS, protocolShadowsocks, protocolTrojan:
+	case protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTrojan:
 		return true
 	default:
 		return false
@@ -157,6 +162,17 @@ func generateProtocolCredentials(protocol, explicit string) (protocolCredentials
 			return credentials, err
 		}
 		credentials.RealityShortID = hex.EncodeToString(shortID)
+	case protocolVLESSWSTunnel:
+		credentials.UUID = strings.TrimSpace(explicit)
+		if credentials.UUID == "" {
+			var err error
+			credentials.UUID, err = newUUID()
+			if err != nil {
+				return credentials, err
+			}
+		} else if !validUUID(credentials.UUID) {
+			return credentials, errors.New("VLESS credential must be a valid UUID")
+		}
 	default:
 		return credentials, fmt.Errorf("unsupported protocol %q", protocol)
 	}
@@ -217,6 +233,14 @@ func credentialsFromInbound(protocol string, inbound map[string]any) (protocolCr
 			credentials.RealityShortID = stringValue(ids[0])
 		}
 		credentials.RealityPublicKey = realityPublicKey(credentials.RealityPrivateKey)
+	case protocolVLESSWSTunnel:
+		user := firstUser()
+		credentials.UUID = stringValue(user["uuid"])
+		transport, _ := inbound["transport"].(map[string]any)
+		if stringValue(transport["type"]) != "ws" {
+			return credentials, errors.New("VLESS WebSocket inbound has no WebSocket transport")
+		}
+		credentials.WebSocketPath = stringValue(transport["path"])
 	default:
 		return credentials, fmt.Errorf("unsupported protocol %q", protocol)
 	}
@@ -229,7 +253,13 @@ func credentialsFromInbound(protocol string, inbound map[string]any) (protocolCr
 func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath string) (map[string]any, error) {
 	protocol := normalizeProtocol(request.Protocol)
 	tag := protocolTagPrefix(protocol) + "-" + strings.TrimSpace(request.Name) + "-in"
-	inbound := map[string]any{"type": protocol, "tag": tag, "listen": "::", "listen_port": port}
+	inboundType := protocol
+	listen := "::"
+	if protocol == protocolVLESSWSTunnel {
+		inboundType = protocolVLESS
+		listen = "127.0.0.1"
+	}
+	inbound := map[string]any{"type": inboundType, "tag": tag, "listen": listen, "listen_port": port}
 	switch protocol {
 	case protocolHysteria2:
 		inbound["users"] = []any{map[string]any{"name": "wukong", "password": credentials.Password}}
@@ -248,6 +278,9 @@ func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials
 				"max_time_difference": "1m",
 			},
 		}
+	case protocolVLESSWSTunnel:
+		inbound["users"] = []any{map[string]any{"name": "wukong", "uuid": credentials.UUID}}
+		inbound["transport"] = map[string]any{"type": "ws", "path": credentials.WebSocketPath}
 	case protocolShadowsocks:
 		inbound["method"] = credentials.Method
 		inbound["password"] = credentials.Password
@@ -324,6 +357,12 @@ func buildShareURI(node model.Node, credentials protocolCredentials, insecure bo
 		}
 		query := fmt.Sprintf("encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp", sni, urlEncode(credentials.RealityPublicKey), urlEncode(credentials.RealityShortID))
 		return fmt.Sprintf("vless://%s@%s:%d?%s#%s", urlEncode(credentials.UUID), host, node.ListenPort, query, name), nil
+	case protocolVLESSWSTunnel:
+		if credentials.UUID == "" || credentials.WebSocketPath == "" {
+			return "", errors.New("VLESS WebSocket Tunnel credentials are incomplete")
+		}
+		query := fmt.Sprintf("encryption=none&security=tls&sni=%s&fp=chrome&type=ws&host=%s&path=%s", sni, urlEncode(node.Server), urlEncode(credentials.WebSocketPath))
+		return fmt.Sprintf("vless://%s@%s:443?%s#%s", urlEncode(credentials.UUID), host, query, name), nil
 	case protocolShadowsocks:
 		userinfo := base64.RawURLEncoding.EncodeToString([]byte(credentials.Method + ":" + credentials.Password))
 		return fmt.Sprintf("ss://%s@%s:%d#%s", userinfo, host, node.ListenPort, name), nil
