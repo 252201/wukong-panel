@@ -38,7 +38,6 @@ const renameName = ref('')
 const deleteConfirm = ref('')
 const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deviceMode = computed(() => modal.value === 'device-create')
-const sharedTunnelHostname = ref(false)
 const deviceSequence = ref(0)
 const deviceNodes = reactive<DeviceDraft[]>([])
 const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [] })
@@ -203,8 +202,8 @@ async function createNode() {
         name: device.name.trim(),
         listenPort: device.listenPort,
         ...(isTunnelProtocol.value ? {
-          server: (sharedTunnelHostname.value ? createForm.server : device.server).trim(),
-          domain: (sharedTunnelHostname.value ? createForm.server : device.server).trim(),
+          server: device.server.trim(),
+          domain: device.server.trim(),
           preferredServer: device.preferredServer.trim(),
           webSocketPath: device.webSocketPath.trim(),
         } : {}),
@@ -219,11 +218,7 @@ async function createNode() {
 }
 function newDeviceDraft(index: number): DeviceDraft {
   deviceSequence.value += 1
-  return { key: deviceSequence.value, name: `设备 ${index + 1}`, listenPort: 0, server: '', preferredServer: '', webSocketPath: sharedTunnelHostname.value ? randomWebSocketPath() : '' }
-}
-function randomWebSocketPath() {
-  const bytes = crypto.getRandomValues(new Uint8Array(9))
-  return `/wukong-${Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')}`
+  return { key: deviceSequence.value, name: `设备 ${index + 1}`, listenPort: 0, server: '', preferredServer: '', webSocketPath: '' }
 }
 function cloudflarePathPattern(path: string) {
   return `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
@@ -259,15 +254,8 @@ watch(() => createForm.protocol, (protocol, previous) => {
   if (protocol !== 'vless-ws-tunnel' && !createForm.server) createForm.server = panelDomain
   if (protocol !== 'vless-ws-tunnel') createForm.preferredServer = ''
 })
-watch(sharedTunnelHostname, enabled => {
-  if (!enabled) return
-  for (const device of deviceNodes) {
-    if (!device.webSocketPath.trim()) device.webSocketPath = randomWebSocketPath()
-  }
-})
 async function openNodeForm(kind: 'create' | 'device-create') {
   Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
-  sharedTunnelHostname.value = false
   if (kind === 'device-create') resetDeviceDrafts()
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
   modal.value = kind; defaultsLoading.value = true
@@ -514,7 +502,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
       <div class="form-grid">
         <label v-if="!deviceMode">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
-        <div v-else class="device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据</small></div></div>
+        <div v-else class="span-2 device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据</small></div></div>
         <label class="protocol-choice">节点协议<select v-model="createForm.protocol"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option></select><small>{{ selectedProtocolInfo.note }}</small></label>
         <label>出站策略<select v-model="createForm.mode"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
         <label v-if="!deviceMode">{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
@@ -522,11 +510,9 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label>
         <label v-if="isTunnelProtocol && !deviceMode">WebSocket 路径<input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off"><small>自定义时必须以 / 开头</small></label>
         <label v-if="isTunnelProtocol && !deviceMode" class="span-2 preferred-endpoint-field"><span>优选连接域名 / IP <em>OPTIONAL</em></span><input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false"><small>只替换客户端 server；TLS SNI、WebSocket Host 与 Tunnel 路由仍使用上方 Cloudflare 节点域名。留空则保持标准 Anycast 接入。</small></label>
-        <label v-if="isTunnelProtocol && deviceMode" class="span-2 toggle-row shared-hostname-toggle"><span><b>共用 Cloudflare 主机名</b><small>所有设备共用一个公开域名，Cloudflare 按每台设备的 WebSocket 路径分流到不同 Origin</small></span><span class="switch"><input v-model="sharedTunnelHostname" type="checkbox"><i></i></span></label>
-        <label v-if="isTunnelProtocol && deviceMode && sharedTunnelHostname" class="span-2 shared-hostname-field">Cloudflare 公共主机名<input v-model="createForm.server" placeholder="ac-ws.example.com" autocomplete="off" spellcheck="false" required><small>所有设备的 TLS SNI 与 WebSocket Host 均使用此主机名</small></label>
-        <label v-if="isTunnelProtocol" class="span-2 tunnel-token-field">{{ deviceMode ? '共享 Tunnel Token' : 'Tunnel Token' }}<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>{{ deviceMode ? sharedTunnelHostname ? '整组设备共用一个 cloudflared 连接器和公开主机名；使用独立路径与 Origin 分流' : '整组设备共用一个 cloudflared 连接器；每台设备拥有独立主机名和 Origin 端口' : '仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key' }}</small></label>
-        <div v-if="isTunnelProtocol" class="span-2 tunnel-guide"><span>隧</span><div><b>{{ sharedTunnelHostname ? '一个主机名，按路径分流' : deviceMode ? '一个 Tunnel，多条设备路由' : 'Cloudflare 侧需要做两步' }}</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li v-if="deviceMode && sharedTunnelHostname">为每台设备添加一条 Published application：主机名保持相同，Path 使用设备卡片给出的正则，Service URL 指向对应的 <code>http://127.0.0.1:端口</code>。</li><li v-else-if="deviceMode">为下方每台设备添加一条 Published application，分别把主机名路由到部署后卡片显示的 <code>http://127.0.0.1:端口</code>。</li><li v-else>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>VPS 无需开放 Origin 端口；设备组只运行一个共享 cloudflared 服务。</p></div></div>
-        <section v-if="deviceMode" class="span-2 device-fleet"><div class="device-fleet-head"><div><span>DEVICE FLEET</span><b>设备清单</b><small>2–20 台；端口填 0 自动分配</small></div><button type="button" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button></div><article v-for="(device, index) in deviceNodes" :key="device.key" class="device-draft"><header><span>{{ String(index + 1).padStart(2, '0') }}</span><b>{{ device.name || `设备 ${index + 1}` }}</b><button type="button" :disabled="deviceNodes.length <= 2" title="移除设备" @click="removeDevice(index)">×</button></header><div class="device-draft-grid"><label>设备名称<input v-model="device.name" maxlength="80" placeholder="例如：iPhone" required></label><label>{{ isTunnelProtocol ? '本地 Origin 端口' : '监听端口' }}<input v-model.number="device.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label v-if="isTunnelProtocol && !sharedTunnelHostname">Cloudflare 公开主机名<input v-model="device.server" placeholder="iphone.example.com" required><small>Published application 使用此主机名</small></label><label v-if="isTunnelProtocol">优选连接域名 / IP <em>可选</em><input v-model="device.preferredServer" placeholder="cf-best.example.com"></label><label v-if="isTunnelProtocol" class="span-2">WebSocket 路径 <em>{{ sharedTunnelHostname ? '必填' : '可选' }}</em><input v-model="device.webSocketPath" :placeholder="sharedTunnelHostname ? '/wukong-device' : '留空自动生成随机路径'" maxlength="128" :required="sharedTunnelHostname"><small v-if="sharedTunnelHostname" class="route-pattern">Cloudflare Path：<code>{{ cloudflarePathPattern(device.webSocketPath) }}</code></small></label></div></article></section>
+        <label v-if="isTunnelProtocol" class="span-2 tunnel-token-field">{{ deviceMode ? '共享 Tunnel Token' : 'Tunnel Token' }}<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>{{ deviceMode ? '整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口' : '仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key' }}</small></label>
+        <div v-if="isTunnelProtocol" class="span-2 tunnel-guide"><span>隧</span><div><b>{{ deviceMode ? '一个 Tunnel，多条设备路由' : 'Cloudflare 侧需要做两步' }}</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li v-if="deviceMode">为下方每台设备添加一条 Published application，分别把独立主机名路由到部署后卡片显示的 <code>http://127.0.0.1:端口</code>。</li><li v-else>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>VPS 无需开放 Origin 端口；设备组只运行一个共享 cloudflared 服务。</p></div></div>
+        <section v-if="deviceMode" class="span-2 device-fleet"><div class="device-fleet-head"><div><span>DEVICE FLEET</span><b>设备清单</b><small>2–20 台；端口填 0 自动分配</small></div><button type="button" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button></div><article v-for="(device, index) in deviceNodes" :key="device.key" class="device-draft"><header><span>{{ String(index + 1).padStart(2, '0') }}</span><b>{{ device.name || `设备 ${index + 1}` }}</b><button type="button" :disabled="deviceNodes.length <= 2" title="移除设备" @click="removeDevice(index)">×</button></header><div class="device-draft-grid"><label>设备名称<input v-model="device.name" maxlength="80" placeholder="例如：iPhone" required></label><label>{{ isTunnelProtocol ? '本地 Origin 端口' : '监听端口' }}<input v-model.number="device.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label v-if="isTunnelProtocol">Cloudflare 公开主机名<input v-model="device.server" placeholder="iphone.example.com" required><small>Published application 使用此独立主机名</small></label><label v-if="isTunnelProtocol"><span class="device-field-title">优选连接域名 / IP <em>可选</em></span><input v-model="device.preferredServer" placeholder="cf-best.example.com"></label><label v-if="isTunnelProtocol" class="span-2"><span class="device-field-title">WebSocket 路径 <em>可选</em></span><input v-model="device.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128"></label></div></article></section>
         <label :class="{ 'disabled-field': createForm.mode === 'v6only' }">IPv4 出站绑定<input v-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>
         <label :class="{ 'disabled-field': createForm.mode === 'v4only' }">IPv6 出站绑定<input v-if="createForm.mode === 'v4only'" value="纯 IPv4 模式不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label>
         <label class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label>
