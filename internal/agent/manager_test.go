@@ -246,20 +246,25 @@ func TestCreateBatchRejectsInvalidWholeBatchBeforeCreatingNodes(t *testing.T) {
 	}
 }
 
-func TestTunnelBatchRequiresOneSharedTokenAndDistinctHostnames(t *testing.T) {
+func TestTunnelBatchRequiresOneSharedTokenAndDistinctRoutes(t *testing.T) {
 	manager, _ := newDemoManager(t)
-	base := model.NodeCreateRequest{Protocol: protocolVLESSWSTunnel, Name: "one", Mode: "prefer_v6", Server: "one.example.com", IPv6Bind: "2001:db8::5", TunnelToken: "eyJ" + strings.Repeat("a", 90) + ".signature"}
+	base := model.NodeCreateRequest{Protocol: protocolVLESSWSTunnel, Name: "one", Mode: "prefer_v6", Server: "shared.example.com", WebSocketPath: "/device-one", IPv6Bind: "2001:db8::5", TunnelToken: "eyJ" + strings.Repeat("a", 90) + ".signature"}
 	second := base
 	second.Name = "two"
-	second.Server = "two.example.com"
+	second.WebSocketPath = "/device-two"
 	second.TunnelToken = "eyJ" + strings.Repeat("b", 90) + ".signature"
 	if _, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err == nil || !strings.Contains(err.Error(), "same Tunnel token") {
 		t.Fatalf("different Tunnel tokens were not rejected: %v", err)
 	}
 	second.TunnelToken = base.TunnelToken
-	second.Server = base.Server
-	if _, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err == nil || !strings.Contains(err.Error(), "duplicate Cloudflare hostname") {
-		t.Fatalf("duplicate Tunnel hostnames were not rejected: %v", err)
+	if nodes, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err != nil || len(nodes) != 2 {
+		t.Fatalf("shared Tunnel hostname with distinct paths was rejected: nodes=%#v err=%v", nodes, err)
+	}
+
+	duplicateManager, _ := newDemoManager(t)
+	second.WebSocketPath = base.WebSocketPath
+	if _, err := duplicateManager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err == nil || !strings.Contains(err.Error(), "duplicate Cloudflare hostname and WebSocket path") {
+		t.Fatalf("duplicate Tunnel routes were not rejected: %v", err)
 	}
 }
 

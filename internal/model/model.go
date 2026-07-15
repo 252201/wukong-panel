@@ -13,6 +13,7 @@ type Node struct {
 	Server          string    `json:"server"`
 	Domain          string    `json:"domain"`
 	PreferredServer string    `json:"preferredServer,omitempty"`
+	WebSocketPath   string    `json:"webSocketPath,omitempty"`
 	IPv4Bind        string    `json:"ipv4Bind,omitempty"`
 	IPv6Bind        string    `json:"ipv6Bind,omitempty"`
 	AutoBind        bool      `json:"autoBind"`
