@@ -47,6 +47,9 @@ func (d directAgent) Import(ctx context.Context, ids []string) error {
 func (d directAgent) Create(ctx context.Context, r model.NodeCreateRequest) (model.Node, error) {
 	return d.manager.Create(ctx, r)
 }
+func (d directAgent) CreateBatch(ctx context.Context, r model.NodeBatchCreateRequest) ([]model.Node, error) {
+	return d.manager.CreateBatch(ctx, r)
+}
 func (d directAgent) Action(ctx context.Context, id string, r model.NodeActionRequest) error {
 	return d.manager.Action(ctx, id, r.Action, r.ConfirmName)
 }
@@ -269,7 +272,7 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 		flags.StringVar(&deviceNames, "device-nodes", "", "comma-separated device node names")
 		flags.StringVar(&instance, "instance", "", "compatibility instance label")
 		_ = flags.Bool("yes", false, "skip confirmation")
-		_ = flags.Int("device-start-port", 0, "first device port")
+		deviceStartPort := flags.Int("device-start-port", 0, "first device port; zero selects random ports")
 		_ = flags.String("acme-method", "", "managed by panel certificate settings")
 		_ = flags.String("acme-ip-version", "", "managed by panel certificate settings")
 		_ = flags.String("acme-server", "", "managed by panel certificate settings")
@@ -287,7 +290,7 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 			request.TunnelToken = strings.TrimSpace(string(data))
 		}
 		if agentProtocol := strings.ToLower(strings.TrimSpace(request.Protocol)); (agentProtocol == "vless-ws-tunnel" || agentProtocol == "vless-ws" || agentProtocol == "cloudflare-tunnel" || agentProtocol == "argo") && strings.TrimSpace(deviceNames) != "" {
-			log.Fatal("--device-nodes cannot share one Cloudflare Tunnel token; create each Tunnel node separately")
+			log.Fatal("Tunnel device batches require one distinct Cloudflare hostname per device; create the batch from the panel")
 		}
 		request.AutoBind = true
 		for _, domain := range strings.Split(domains, ",") {
@@ -308,6 +311,7 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 		node, err := manager.Create(ctx, request)
 		fatalIf(err)
 		created = append(created, node)
+		deviceIndex := 0
 		for _, name := range strings.Split(deviceNames, ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
@@ -316,10 +320,14 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 			device := request
 			device.Name = name
 			device.ListenPort = 0
+			if *deviceStartPort > 0 {
+				device.ListenPort = *deviceStartPort + deviceIndex
+			}
 			device.Password = ""
 			node, err = manager.Create(ctx, device)
 			fatalIf(err)
 			created = append(created, node)
+			deviceIndex++
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(created)
 	case "action":

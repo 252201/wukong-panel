@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/252201/wukong-panel/internal/model"
 )
 
 func TestCloudflaredPinnedAssets(t *testing.T) {
@@ -57,5 +59,20 @@ func TestTunnelCredentialEnvelopeIsPrivateButComplete(t *testing.T) {
 	}
 	if decoded.TunnelToken != token || decoded.WebSocketPath != "/wukong-test" || decoded.UUID == "" {
 		t.Fatalf("incomplete tunnel credential envelope: %#v", decoded)
+	}
+}
+
+func TestCloudflaredNodeKeySharesOnlyManagedDeviceGroups(t *testing.T) {
+	managed := model.Node{ID: "device-one", Ownership: "managed", SharedGroup: "devices-group"}
+	if got := cloudflaredNodeKey(managed); got != "devices-group" {
+		t.Fatalf("managed device group did not share connector key: %q", got)
+	}
+	imported := model.Node{ID: "imported-one", Ownership: "imported", SharedGroup: "shared-config"}
+	if got := cloudflaredNodeKey(imported); got != imported.ID {
+		t.Fatalf("imported shared config unexpectedly changed connector key: %q", got)
+	}
+	individual := model.Node{ID: "single", Ownership: "managed"}
+	if got := cloudflaredNodeKey(individual); got != individual.ID {
+		t.Fatalf("individual node connector key changed: %q", got)
 	}
 }

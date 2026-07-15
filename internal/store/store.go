@@ -383,6 +383,15 @@ func (s *Store) DeleteNode(id string) error {
 	return err
 }
 
+func (s *Store) NodeGroupCount(ctx context.Context, group string) (int, error) {
+	if strings.TrimSpace(group) == "" {
+		return 0, nil
+	}
+	var count int
+	err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE shared_group=?", group).Scan(&count)
+	return count, err
+}
+
 func (s *Store) AddMetric(m model.Metric) error {
 	_, err := s.DB.Exec(`INSERT OR REPLACE INTO metrics(ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,memory_used_bytes,memory_total_bytes,disk,disk_used_bytes,disk_total_bytes,load1,uptime) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, m.Timestamp, m.Interface, m.RXBytes, m.TXBytes, m.RXBPS, m.TXBPS, m.CPU, m.Memory, m.MemoryUsedBytes, m.MemoryTotalBytes, m.Disk, m.DiskUsedBytes, m.DiskTotalBytes, m.Load1, m.Uptime)
 	if err == nil {

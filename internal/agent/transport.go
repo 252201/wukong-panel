@@ -52,6 +52,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
 	mux.HandleFunc("POST /import", s.authorize(s.importNodes))
 	mux.HandleFunc("POST /nodes", s.authorize(s.create))
+	mux.HandleFunc("POST /nodes/batch", s.authorize(s.createBatch))
 	mux.HandleFunc("PATCH /nodes/{id}", s.authorize(s.rename))
 	mux.HandleFunc("POST /nodes/{id}/action", s.authorize(s.action))
 	mux.HandleFunc("GET /nodes/{id}/share", s.authorize(s.share))
@@ -119,6 +120,18 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, node)
+}
+func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
+	var request model.NodeBatchCreateRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	nodes, err := s.manager.CreateBatch(r.Context(), request)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 201, nodes)
 }
 func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	var request model.NodeActionRequest
@@ -227,6 +240,11 @@ func (c *Client) Create(ctx context.Context, request model.NodeCreateRequest) (m
 	var node model.Node
 	err := c.request(ctx, "POST", "/nodes", request, &node)
 	return node, err
+}
+func (c *Client) CreateBatch(ctx context.Context, request model.NodeBatchCreateRequest) ([]model.Node, error) {
+	var nodes []model.Node
+	err := c.request(ctx, "POST", "/nodes/batch", request, &nodes)
+	return nodes, err
 }
 func (c *Client) Action(ctx context.Context, id string, request model.NodeActionRequest) error {
 	return c.request(ctx, "POST", "/nodes/"+id+"/action", request, nil)

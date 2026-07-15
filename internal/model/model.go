@@ -70,6 +70,10 @@ type NodeCreateRequest struct {
 	TunnelToken     string   `json:"tunnelToken,omitempty"`
 }
 
+type NodeBatchCreateRequest struct {
+	Nodes []NodeCreateRequest `json:"nodes"`
+}
+
 type BindAddress struct {
 	Address   string `json:"address"`
 	Interface string `json:"interface"`
