@@ -286,7 +286,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 	prepared := make([]model.NodeCreateRequest, 0, len(request.Nodes))
 	names := map[string]bool{}
 	ports := map[int]bool{}
-	tunnelRoutes := map[string]bool{}
+	tunnelHostnames := map[string]bool{}
 	tunnelToken := ""
 	protocol := ""
 	for index, item := range request.Nodes {
@@ -311,11 +311,11 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 			ports[value.ListenPort] = true
 		}
 		if value.Protocol == protocolVLESSWSTunnel {
-			routeKey := strings.ToLower(strings.TrimSpace(value.Server)) + "\x00" + value.WebSocketPath
-			if tunnelRoutes[routeKey] {
-				return nil, fmt.Errorf("device %d: duplicate Cloudflare hostname and WebSocket path %q %q", index+1, value.Server, value.WebSocketPath)
+			hostnameKey := strings.ToLower(strings.TrimSpace(value.Server))
+			if tunnelHostnames[hostnameKey] {
+				return nil, fmt.Errorf("device %d: duplicate Cloudflare hostname %q", index+1, value.Server)
 			}
-			tunnelRoutes[routeKey] = true
+			tunnelHostnames[hostnameKey] = true
 			if tunnelToken == "" {
 				tunnelToken = value.TunnelToken
 			} else if value.TunnelToken != tunnelToken {

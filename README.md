@@ -99,11 +99,11 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 
 1. 在 Cloudflare Zero Trust 的 Networks → Tunnels 创建 remotely-managed Tunnel，选择 `cloudflared`，只复制运行命令中的 Token。
 2. 普通单节点使用“部署节点”；多设备从右上角独立的“设备专用节点”入口进入。选择 VLESS + WebSocket + Cloudflare Tunnel 后填写公开主机名并粘贴 Token；本地 Origin 端口和 VLESS UUID 会自动生成，WebSocket 路径可留空随机生成。设备编队整组只需粘贴一次 Token。
-3. 设备编队可为每台设备填写不同公开主机名，也可开启“共用 Cloudflare 主机名”。共用时只填写一个主机名，面板为每台设备生成独立 WebSocket 路径，并在节点卡片保留可复制的 Cloudflare Path 正则。
+3. 设备编队中的每台设备必须填写不同的 Cloudflare 公开主机名；WebSocket 路径可留空随机生成。
 4. 部署完成后，从每张节点卡片复制 Path 正则和对应的 `http://127.0.0.1:<端口>`。
-5. 回到同一个 Tunnel，为每台设备分别添加一条 Published application。使用不同主机名时分别填写主机名；共用主机名时所有路由使用同一个主机名，并为每条路由填写对应的 Path 正则。Service URL 始终使用对应节点卡片的本地地址。
+5. 回到同一个 Tunnel，为每台设备分别添加一条 Published application，填写对应的独立主机名和节点卡片所示 Path 正则；Service URL 使用对应节点卡片的本地地址。
 
-客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组则有意共享一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过多条 Published application 按“主机名 + Path”将请求路由到各自的本地 Origin。同一组可以共用主机名，但同一主机名下的 Path 不得重复。
+客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组共享一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过不同公开主机名的多条 Published application 路由到各自的本地 Origin。同一设备组不允许重复使用 Cloudflare 公开主机名。
 
 如果已经测得更适合当前网络的 Cloudflare 优选域名或 IP，可在部署表单填写“优选连接域名 / IP”。面板只会把它写入分享链接和 Clash/Mihomo 订阅的 `server`；TLS `servername`、SNI、WebSocket `Host` 和 Tunnel Published application 路由仍使用上面的 Cloudflare 节点域名。该字段不能包含 `http://`、`https://`、路径或端口，留空即使用 Cloudflare 标准 Anycast。优选地址的可用性会随运营商、地区和时间变化，需要用户自行测试并维护。
 
