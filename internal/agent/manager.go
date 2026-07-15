@@ -280,6 +280,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if request.Protocol == protocolVLESSWSTunnel {
 		request.Server = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(request.Server)), ".")
 		request.Domain = request.Server
+		request.PreferredServer = normalizePreferredServer(request.PreferredServer)
 		request.TunnelToken = strings.TrimSpace(request.TunnelToken)
 		request.WebSocketPath = strings.TrimSpace(request.WebSocketPath)
 		if request.WebSocketPath == "" {
@@ -289,6 +290,8 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 			}
 			request.WebSocketPath = "/wukong-" + strings.ToLower(randomPath)
 		}
+	} else {
+		request.PreferredServer = ""
 	}
 	if err := validateCreate(request); err != nil {
 		return model.Node{}, err
@@ -390,7 +393,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if m.cfg.Demo {
 		version = "1.14-demo"
 	}
-	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
+	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 		if request.Protocol == protocolVLESSWSTunnel && !m.cfg.Demo {
 			_ = m.cleanupFailedCreate(ctx, node)
@@ -601,7 +604,7 @@ func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
 		if decodeErr != nil {
 			return fail(result, decodeErr)
 		}
-		result, err = singboxconfig.ProbeVLESSWebSocketEndpoint(ctx, m.cfg.SingBoxBin, node.Server, credentials.UUID, credentials.WebSocketPath)
+		result, err = singboxconfig.ProbeVLESSWebSocketEndpoint(ctx, m.cfg.SingBoxBin, node.PreferredServer, node.Server, credentials.UUID, credentials.WebSocketPath)
 	} else {
 		result, err = singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, node.ConfigPath, node.Protocol, node.ListenPort)
 	}
@@ -924,6 +927,9 @@ func validateCreate(r model.NodeCreateRequest) error {
 		if !validTunnelHostname(r.Server) {
 			return errors.New("Cloudflare Tunnel hostname must be a valid DNS hostname")
 		}
+		if !validPreferredServer(r.PreferredServer) {
+			return errors.New("Cloudflare preferred endpoint must be a DNS hostname or IP address without a scheme or port")
+		}
 		if !validWebSocketPath(r.WebSocketPath) {
 			return errors.New("WebSocket path must start with /, contain no whitespace, ? or #, and be at most 128 characters")
 		}
@@ -981,6 +987,22 @@ func validTunnelHostname(value string) bool {
 		}
 	}
 	return true
+}
+
+func normalizePreferredServer(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(strings.ToLower(value), ".")
+}
+
+func validPreferredServer(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || net.ParseIP(value) != nil || validTunnelHostname(value)
 }
 
 func validWebSocketPath(value string) bool {

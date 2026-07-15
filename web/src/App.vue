@@ -35,7 +35,7 @@ const shareURI = ref('')
 const shareQR = ref('')
 const renameName = ref('')
 const deleteConfirm = ref('')
-const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [] })
 const bindChoice = reactive({ ipv4: '', ipv6: '' })
 const defaultsLoading = ref(false)
@@ -145,6 +145,7 @@ function probeDetail(node: NodeItem) {
 }
 function nodePublicPort(node: NodeItem) { return node.protocol === 'vless-ws-tunnel' ? 443 : node.listenPort }
 function tunnelOrigin(node: NodeItem) { return `http://127.0.0.1:${node.listenPort}` }
+function nodeDialServer(node: NodeItem) { return node.protocol === 'vless-ws-tunnel' && node.preferredServer ? node.preferredServer : node.server || node.domain }
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
   activeTimelineBucket.value = null
@@ -214,9 +215,10 @@ watch(() => createForm.protocol, (protocol, previous) => {
   else if (protocol === 'shadowsocks') createForm.domain = ''
   else if (previous === 'vless' || previous === 'vless-ws-tunnel' || !createForm.domain) createForm.domain = panelDomain
   if (protocol !== 'vless-ws-tunnel' && !createForm.server) createForm.server = panelDomain
+  if (protocol !== 'vless-ws-tunnel') createForm.preferredServer = ''
 })
 async function openCreate() {
-  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
   modal.value = 'create'; defaultsLoading.value = true
   try {
@@ -385,10 +387,11 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <div v-else-if="page === 'nodes'" class="page-content">
         <div class="page-intro"><div><p>NODE ARSENAL</p><h2>管理所有代理入站</h2><small class="page-caption">“检测”执行本机完整代理闭环；公网防火墙与 NAT 可达性仍需异地验证。</small></div><div class="summary-pills"><span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span><span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span></div></div>
         <section class="node-grid">
-          <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel' }]">
+          <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel', preferred: !!node.preferredServer }]">
             <div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div>
             <div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div>
-            <p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
+            <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
+            <div v-if="node.protocol === 'vless-ws-tunnel' && node.preferredServer" class="preferred-route"><span><small>优选接入</small><code>{{ node.preferredServer }}</code></span><i>→</i><span><small>SNI · WS HOST</small><code>{{ node.server }}</code></span></div>
             <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-origin"><span><small>Cloudflare Service</small><code>{{ tunnelOrigin(node) }}</code></span><button type="button" title="复制 Cloudflare Service URL" @click="copy(tunnelOrigin(node))">复制</button></div>
             <div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p>
@@ -464,6 +467,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <label>{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
         <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label>
         <label v-if="isTunnelProtocol">WebSocket 路径<input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off"><small>自定义时必须以 / 开头</small></label>
+        <label v-if="isTunnelProtocol" class="span-2 preferred-endpoint-field"><span>优选连接域名 / IP <em>OPTIONAL</em></span><input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false"><small>只替换客户端 server；TLS SNI、WebSocket Host 与 Tunnel 路由仍使用上方 Cloudflare 节点域名。留空则保持标准 Anycast 接入。</small></label>
         <label v-if="isTunnelProtocol" class="span-2 tunnel-token-field">Tunnel Token<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key</small></label>
         <div v-if="isTunnelProtocol" class="span-2 tunnel-guide"><span>隧</span><div><b>Cloudflare 侧需要做两步</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>需要 Cloudflare 账户和已接入 Cloudflare 的域名；VPS 无需开放该 Origin 端口。</p></div></div>
         <label :class="{ 'disabled-field': createForm.mode === 'v6only' }">IPv4 出站绑定<input v-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>

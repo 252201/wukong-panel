@@ -35,3 +35,24 @@ func TestClashProxyYAMLForEveryProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestClashTunnelKeepsPublishedHostnameWithPreferredEndpoint(t *testing.T) {
+	node := model.Node{
+		Name:            "node",
+		Protocol:        "vless-ws-tunnel",
+		Server:          "origin.example.com",
+		Domain:          "origin.example.com",
+		PreferredServer: "preferred.example.com",
+		ListenPort:      45119,
+	}
+	share := "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@preferred.example.com:443?security=tls&type=ws&sni=origin.example.com&host=origin.example.com&path=%2Fwukong-test"
+	value, err := clashProxyYAML(node, share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`server: "preferred.example.com"`, `servername: "origin.example.com"`, `Host: "origin.example.com"`} {
+		if !strings.Contains(value, want) {
+			t.Fatalf("%q missing from YAML:\n%s", want, value)
+		}
+	}
+}

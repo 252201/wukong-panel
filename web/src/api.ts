@@ -8,6 +8,7 @@ export interface NodeItem {
   listenPort: number
   server: string
   domain: string
+  preferredServer?: string
   ipv4Bind?: string
   ipv6Bind?: string
   autoBind: boolean

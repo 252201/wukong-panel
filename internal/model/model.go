@@ -5,32 +5,33 @@ import "time"
 const APIVersion = "v1"
 
 type Node struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Protocol       string    `json:"protocol"`
-	Mode           string    `json:"mode"`
-	ListenPort     int       `json:"listenPort"`
-	Server         string    `json:"server"`
-	Domain         string    `json:"domain"`
-	IPv4Bind       string    `json:"ipv4Bind,omitempty"`
-	IPv6Bind       string    `json:"ipv6Bind,omitempty"`
-	AutoBind       bool      `json:"autoBind"`
-	ServiceName    string    `json:"serviceName"`
-	ServiceManager string    `json:"serviceManager"`
-	ConfigPath     string    `json:"configPath"`
-	ConfigVersion  string    `json:"configVersion"`
-	Ownership      string    `json:"ownership"`
-	SharedGroup    string    `json:"sharedGroup,omitempty"`
-	Status         string    `json:"status"`
-	ProbeStatus    string    `json:"probeStatus,omitempty"`
-	ProbeLatencyMS int64     `json:"probeLatencyMs,omitempty"`
-	ProbeExitIP    string    `json:"probeExitIp,omitempty"`
-	ProbeTarget    string    `json:"probeTarget,omitempty"`
-	ProbeError     string    `json:"probeError,omitempty"`
-	ProbeCheckedAt time.Time `json:"probeCheckedAt,omitempty"`
-	Secret         string    `json:"-"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Protocol        string    `json:"protocol"`
+	Mode            string    `json:"mode"`
+	ListenPort      int       `json:"listenPort"`
+	Server          string    `json:"server"`
+	Domain          string    `json:"domain"`
+	PreferredServer string    `json:"preferredServer,omitempty"`
+	IPv4Bind        string    `json:"ipv4Bind,omitempty"`
+	IPv6Bind        string    `json:"ipv6Bind,omitempty"`
+	AutoBind        bool      `json:"autoBind"`
+	ServiceName     string    `json:"serviceName"`
+	ServiceManager  string    `json:"serviceManager"`
+	ConfigPath      string    `json:"configPath"`
+	ConfigVersion   string    `json:"configVersion"`
+	Ownership       string    `json:"ownership"`
+	SharedGroup     string    `json:"sharedGroup,omitempty"`
+	Status          string    `json:"status"`
+	ProbeStatus     string    `json:"probeStatus,omitempty"`
+	ProbeLatencyMS  int64     `json:"probeLatencyMs,omitempty"`
+	ProbeExitIP     string    `json:"probeExitIp,omitempty"`
+	ProbeTarget     string    `json:"probeTarget,omitempty"`
+	ProbeError      string    `json:"probeError,omitempty"`
+	ProbeCheckedAt  time.Time `json:"probeCheckedAt,omitempty"`
+	Secret          string    `json:"-"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 type NodeCandidate struct {
@@ -57,6 +58,7 @@ type NodeCreateRequest struct {
 	ListenPort      int      `json:"listenPort"`
 	Server          string   `json:"server"`
 	Domain          string   `json:"domain"`
+	PreferredServer string   `json:"preferredServer,omitempty"`
 	IPv4Bind        string   `json:"ipv4Bind"`
 	IPv6Bind        string   `json:"ipv6Bind"`
 	AutoBind        bool     `json:"autoBind"`
