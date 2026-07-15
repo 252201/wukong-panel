@@ -67,11 +67,12 @@ func (c *Collector) RunEndpoints(ctx context.Context) {
 
 var (
 	endpointLine = regexp.MustCompile(`(?:^|\s)([^\s]+)\.(\d+) > ([^\s]+)\.(\d+):`)
-	ipv4Length   = regexp.MustCompile(`proto UDP \(\d+\), length (\d+)\)`)
+	ipv4Length   = regexp.MustCompile(`proto (?:UDP|TCP) \(\d+\), length (\d+)\)`)
 	ipv6Payload  = regexp.MustCompile(`payload length: (\d+)`)
+	tcpPayload   = regexp.MustCompile(`length (\d+)$`)
 )
 
-func endpointPacket(line string, pendingBytes *int64) (sourcePort int, host, port string, packetBytes int64, ok bool) {
+func endpointPacket(line string, pendingBytes *int64) (transport string, sourcePort int, host, port string, packetBytes int64, ok bool) {
 	if strings.Contains(line, " IP6 ") {
 		if match := ipv6Payload.FindStringSubmatch(line); len(match) == 2 {
 			payload, _ := strconv.ParseInt(match[1], 10, 64)
@@ -85,12 +86,32 @@ func endpointPacket(line string, pendingBytes *int64) (sourcePort int, host, por
 	}
 	match := endpointLine.FindStringSubmatch(line)
 	if len(match) != 5 || *pendingBytes <= 0 {
-		return 0, "", "", 0, false
+		return "", 0, "", "", 0, false
+	}
+	switch {
+	case strings.Contains(line, ": UDP,"):
+		transport = "udp"
+	case strings.Contains(line, ": Flags ["):
+		transport = "tcp"
+	default:
+		*pendingBytes = 0
+		return "", 0, "", "", 0, false
 	}
 	sourcePort, _ = strconv.Atoi(match[2])
-	host, port, packetBytes = strings.TrimSpace(match[3]), match[4], *pendingBytes
+	host, port = strings.TrimSpace(match[3]), match[4]
+	packetBytes = *pendingBytes
 	*pendingBytes = 0
-	return sourcePort, host, port, packetBytes, true
+	if transport == "tcp" {
+		payload := tcpPayload.FindStringSubmatch(line)
+		if len(payload) != 2 {
+			return "", 0, "", "", 0, false
+		}
+		packetBytes, _ = strconv.ParseInt(payload[1], 10, 64)
+		if packetBytes <= 0 {
+			return "", 0, "", "", 0, false
+		}
+	}
+	return transport, sourcePort, host, port, packetBytes, true
 }
 
 func (c *Collector) sampleEndpoints(parent context.Context) {
@@ -102,25 +123,37 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 	if err != nil {
 		return
 	}
-	byPort := map[int]model.Node{}
-	filters := []string{}
+	byPort := map[string]model.Node{}
+	ports := map[string]map[int]struct{}{"udp": {}, "tcp": {}}
+	hasTunnel := false
 	for _, node := range nodes {
-		if node.Status != "active" || !udpEndpointProtocol(node.Protocol) {
+		if node.Status != "active" {
 			continue
 		}
-		byPort[node.ListenPort] = node
-		filters = append(filters, fmt.Sprintf("src port %d", node.ListenPort))
+		for _, transport := range endpointTransports(node.Protocol) {
+			byPort[endpointPortKey(transport, node.ListenPort)] = node
+			ports[transport][node.ListenPort] = struct{}{}
+		}
+		if strings.EqualFold(strings.TrimSpace(node.Protocol), "vless-ws-tunnel") {
+			hasTunnel = true
+		}
 	}
-	if len(filters) == 0 {
+	filter := endpointCaptureFilter(ports)
+	if filter == "" {
 		return
 	}
 	iface := settings.Interface
 	if iface == "" || iface == "auto" {
 		iface = defaultInterface()
 	}
+	if hasTunnel {
+		// Tunnel Origins listen on loopback while direct nodes use the public
+		// interface. Linux's pseudo-interface "any" covers both in one capture.
+		iface = "any"
+	}
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	args := []string{"-i", iface, "-nn", "-tt", "-v", "-l", "udp and (" + strings.Join(filters, " or ") + ")"}
+	args := []string{"-i", iface, "-nn", "-tt", "-v", "-l", filter}
 	command := exec.CommandContext(ctx, "tcpdump", args...)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -135,16 +168,18 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 	var pendingBytes int64
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		sourcePort, host, port, packetBytes, ok := endpointPacket(scanner.Text(), &pendingBytes)
+		transport, sourcePort, host, port, packetBytes, ok := endpointPacket(scanner.Text(), &pendingBytes)
 		if !ok {
 			continue
 		}
-		node, ok := byPort[sourcePort]
+		node, ok := byPort[endpointPortKey(transport, sourcePort)]
 		if !ok {
 			continue
 		}
 		endpoint := host + ":" + port
-		if strings.Contains(host, ":") {
+		if strings.EqualFold(strings.TrimSpace(node.Protocol), "vless-ws-tunnel") {
+			endpoint = "cloudflare-tunnel"
+		} else if strings.Contains(host, ":") {
 			endpoint = "[" + host + "]:" + port
 		}
 		key := node.ID + "\x00" + endpoint
@@ -168,13 +203,40 @@ func (c *Collector) sampleEndpoints(parent context.Context) {
 	_ = c.store.ReplaceEndpointWindow(now, duration, window)
 }
 
-func udpEndpointProtocol(protocol string) bool {
+func endpointTransports(protocol string) []string {
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
-	case "hysteria2", "tuic", "shadowsocks":
-		return true
+	case "hysteria2", "tuic":
+		return []string{"udp"}
+	case "shadowsocks":
+		return []string{"udp", "tcp"}
+	case "vless", "vless-ws-tunnel", "trojan":
+		return []string{"tcp"}
 	default:
-		return false
+		return nil
 	}
+}
+
+func endpointPortKey(transport string, port int) string {
+	return transport + ":" + strconv.Itoa(port)
+}
+
+func endpointCaptureFilter(ports map[string]map[int]struct{}) string {
+	filters := []string{}
+	for _, transport := range []string{"udp", "tcp"} {
+		values := make([]int, 0, len(ports[transport]))
+		for port := range ports[transport] {
+			values = append(values, port)
+		}
+		sort.Ints(values)
+		portFilters := make([]string, 0, len(values))
+		for _, port := range values {
+			portFilters = append(portFilters, fmt.Sprintf("src port %d", port))
+		}
+		if len(portFilters) > 0 {
+			filters = append(filters, fmt.Sprintf("(%s and (%s))", transport, strings.Join(portFilters, " or ")))
+		}
+	}
+	return strings.Join(filters, " or ")
 }
 
 func (c *Collector) sample() {

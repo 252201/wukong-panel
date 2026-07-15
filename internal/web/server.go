@@ -646,6 +646,9 @@ func maskToken(token string) string {
 	return token[:4] + "••••" + token[len(token)-4:]
 }
 func maskEndpoint(value string) string {
+	if value == "cloudflare-tunnel" {
+		return "Cloudflare Tunnel"
+	}
 	if strings.HasPrefix(value, "[") {
 		if index := strings.LastIndex(value, "]:"); index >= 0 {
 			return "[****:****]" + value[index+1:]

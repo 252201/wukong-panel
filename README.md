@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.6.3-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.6.4-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -18,7 +18,7 @@
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
-- 多设备显示：流量脉络按 UDP 节点展示 Hysteria2、TUIC、Shadowsocks 最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
+- 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：六种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
 - 东方科幻界面：桌面、平板和移动端响应式布局。
 
@@ -73,7 +73,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.6.3 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.6.4 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \

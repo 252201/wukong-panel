@@ -57,6 +57,12 @@ func TestMaskToken(t *testing.T) {
 	}
 }
 
+func TestMaskEndpointNamesCloudflareTunnel(t *testing.T) {
+	if got := maskEndpoint("cloudflare-tunnel"); got != "Cloudflare Tunnel" {
+		t.Fatalf("unexpected Tunnel endpoint label %q", got)
+	}
+}
+
 func TestAuthCookieAndCSRF(t *testing.T) {
 	dir := t.TempDir()
 	database, err := store.Open(filepath.Join(dir, "test.db"))
