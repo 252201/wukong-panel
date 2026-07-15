@@ -101,13 +101,16 @@ func TestBuildProbeForEverySupportedProtocol(t *testing.T) {
 	}{
 		{"hysteria2", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
 		{"vless", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "flow": "xtls-rprx-vision"}}, "tls": map[string]any{"server_name": "www.google.com", "reality": map[string]any{"private_key": privateValue, "short_id": []any{"0123456789abcdef"}, "handshake": map[string]any{"server": "www.google.com"}}}}, "tls"},
+		{"vless-ws", map[string]any{"type": "vless", "users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4"}}, "transport": map[string]any{"type": "ws", "path": "/wukong-test"}}, "transport"},
 		{"shadowsocks", map[string]any{"method": "2022-blake3-aes-128-gcm", "password": "QUJDREVGR0hJSktMTU5PUA=="}, "method"},
 		{"tuic", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "password": "secret"}}}, "congestion_control"},
 		{"trojan", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
 	}
 	for _, test := range tests {
 		t.Run(test.protocol, func(t *testing.T) {
-			test.inbound["type"] = test.protocol
+			if test.inbound["type"] == nil {
+				test.inbound["type"] = test.protocol
+			}
 			test.inbound["listen"] = "::"
 			test.inbound["listen_port"] = float64(443)
 			data, buildErr := buildProtocolProbe(test.inbound, "", "")
@@ -119,8 +122,15 @@ func TestBuildProbeForEverySupportedProtocol(t *testing.T) {
 				t.Fatal(err)
 			}
 			outbound := root["outbounds"].([]any)[0].(map[string]any)
-			if outbound["type"] != test.protocol || outbound[test.want] == nil {
+			wantType := test.protocol
+			if test.protocol == "vless-ws" {
+				wantType = "vless"
+			}
+			if outbound["type"] != wantType || outbound[test.want] == nil {
 				t.Fatalf("incomplete %s probe outbound: %#v", test.protocol, outbound)
+			}
+			if test.protocol == "vless-ws" && outbound["tls"] != nil {
+				t.Fatalf("local VLESS WebSocket probe unexpectedly enabled TLS: %#v", outbound)
 			}
 		})
 	}

@@ -18,6 +18,7 @@ type Config struct {
 	SecretDir      string
 	ConfigDir      string
 	SingBoxBin     string
+	CloudflaredBin string
 	TLSCertFile    string
 	TLSKeyFile     string
 	PanelDomain    string
@@ -50,6 +51,7 @@ func Parse(version string) Config {
 	flag.StringVar(&cfg.SecretDir, "secret-dir", env("WUKONG_SECRET_DIR", ""), "root-only secret directory")
 	flag.StringVar(&cfg.ConfigDir, "config-dir", env("WUKONG_SINGBOX_CONFIG_DIR", "/etc/s-box"), "sing-box config directory")
 	flag.StringVar(&cfg.SingBoxBin, "sing-box", env("WUKONG_SINGBOX_BIN", "/etc/s-box/sing-box"), "sing-box binary")
+	flag.StringVar(&cfg.CloudflaredBin, "cloudflared", env("WUKONG_CLOUDFLARED_BIN", "/usr/local/bin/cloudflared"), "cloudflared binary")
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert", env("WUKONG_TLS_CERT", "/etc/wukong-panel/tls/fullchain.cer"), "trusted panel certificate available to managed nodes")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key", env("WUKONG_TLS_KEY", "/etc/wukong-panel/tls/private.key"), "private key for the trusted panel certificate")
 	flag.StringVar(&cfg.PanelDomain, "panel-domain", env("WUKONG_PANEL_DOMAIN", ""), "public panel domain used as the default node endpoint")

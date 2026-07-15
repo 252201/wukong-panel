@@ -35,7 +35,7 @@ const shareURI = ref('')
 const shareQR = ref('')
 const renameName = ref('')
 const deleteConfirm = ref('')
-const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [] })
 const bindChoice = reactive({ ipv4: '', ipv6: '' })
 const defaultsLoading = ref(false)
@@ -101,12 +101,14 @@ const activeJobs = computed(() => jobs.value.filter(job => job.status === 'runni
 const protocolCatalog = {
   hysteria2: { badge: 'HY2', label: 'Hysteria2', transport: 'UDP', domainLabel: 'TLS 域名', note: 'QUIC 高速节点，适合弱网与高延迟链路。' },
   vless: { badge: 'VLESS', label: 'VLESS + REALITY', transport: 'TCP', domainLabel: 'REALITY 伪装域名', note: 'TCP 备用线路；域名必须是本机可访问的真实 TLS 站点。' },
+  'vless-ws-tunnel': { badge: 'VLESS · CF', label: 'VLESS + WebSocket + Cloudflare Tunnel', transport: 'WS · CF', domainLabel: 'Cloudflare 节点域名', note: 'Cloudflare 边缘 443 入站；VPS 仅监听本机 Origin，不开放代理端口。' },
   shadowsocks: { badge: 'SS2022', label: 'Shadowsocks 2022', transport: 'TCP + UDP', domainLabel: '', note: '轻量双栈节点，使用 2022 AES-128-GCM。' },
   tuic: { badge: 'TUIC', label: 'TUIC v5', transport: 'UDP', domainLabel: 'TLS 域名', note: 'QUIC 低延迟节点，使用 BBR 拥塞控制。' },
   trojan: { badge: 'TROJAN', label: 'Trojan TLS', transport: 'TCP', domainLabel: 'TLS 域名', note: '基于标准 TLS 的 TCP 兼容节点。' },
 } as const
 function protocolInfo(protocol: string) { return protocolCatalog[protocol as keyof typeof protocolCatalog] || protocolCatalog.hysteria2 }
 const selectedProtocolInfo = computed(() => protocolInfo(createForm.protocol))
+const isTunnelProtocol = computed(() => createForm.protocol === 'vless-ws-tunnel')
 
 function bytes(value = 0) {
   if (!Number.isFinite(value)) return '—'
@@ -136,11 +138,13 @@ function probeTime(value?: string) {
 }
 function probeDetail(node: NodeItem) {
   const state = probeState(node)
-  if (state === 'running') return '正在验证握手、认证与代理出站'
+  if (state === 'running') return node.protocol === 'vless-ws-tunnel' ? '正在验证 Cloudflare TLS、WebSocket、认证与代理出站' : '正在验证握手、认证与代理出站'
   if (state === 'success') return `${node.probeLatencyMs || 0} ms${node.probeExitIp ? ` · ${node.probeExitIp}` : ''}${probeTime(node.probeCheckedAt) ? ` · ${probeTime(node.probeCheckedAt)}` : ''}`
   if (state === 'failed') return node.probeError || '完整代理请求未通过'
-  return '握手 · 认证 · 出站'
+  return node.protocol === 'vless-ws-tunnel' ? 'CF TLS · WebSocket · 认证 · 出站' : '握手 · 认证 · 出站'
 }
+function nodePublicPort(node: NodeItem) { return node.protocol === 'vless-ws-tunnel' ? 443 : node.listenPort }
+function tunnelOrigin(node: NodeItem) { return `http://127.0.0.1:${node.listenPort}` }
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
   activeTimelineBucket.value = null
@@ -203,12 +207,16 @@ function syncBindingsToMode() {
 watch(() => createForm.mode, syncBindingsToMode)
 watch(() => createForm.protocol, (protocol, previous) => {
   const panelDomain = deploymentDefaults.value.panelDomain
-  if (protocol === 'vless' && (createForm.domain === panelDomain || !createForm.domain)) createForm.domain = 'www.cloudflare.com'
+  if (protocol === 'vless-ws-tunnel') {
+    if (createForm.server === panelDomain) createForm.server = ''
+    createForm.domain = ''
+  } else if (protocol === 'vless' && (createForm.domain === panelDomain || !createForm.domain)) createForm.domain = 'www.cloudflare.com'
   else if (protocol === 'shadowsocks') createForm.domain = ''
-  else if (previous === 'vless' || !createForm.domain) createForm.domain = panelDomain
+  else if (previous === 'vless' || previous === 'vless-ws-tunnel' || !createForm.domain) createForm.domain = panelDomain
+  if (protocol !== 'vless-ws-tunnel' && !createForm.server) createForm.server = panelDomain
 })
 async function openCreate() {
-  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', listenPort: 0, server: '', domain: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
   modal.value = 'create'; defaultsLoading.value = true
   try {
@@ -323,7 +331,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <div class="brand-kicker">WUKONG CONTROL PLANE · 01</div>
       <h1>驭云端<br><em>定乾坤</em></h1>
       <p>从一束流量，到一方节点。部署、管理与观测，在同一座控制台完成。</p>
-      <div class="brand-stats"><span><b>5</b> 种协议驱动</span><span><b>10s</b> 实时采样</span><span><b>1</b> 单机自治</span></div>
+      <div class="brand-stats"><span><b>6</b> 种协议驱动</span><span><b>10s</b> 实时采样</span><span><b>1</b> 单机自治</span></div>
     </section>
     <form class="login-panel" @submit.prevent="login">
       <div class="panel-seal">悟</div><p class="eyebrow">悟空面板</p><h2>进入控制台</h2><p class="subtle">使用安装时生成的管理员凭据</p>
@@ -369,14 +377,26 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         </section>
 
         <section class="overview-lower">
-          <article class="panel-card node-preview"><div class="card-head"><div><span class="section-mark red">阵</span><div><h3>节点兵器谱</h3><p>按服务状态实时排列</p></div></div><button class="text-button" @click="page = 'nodes'">查看全部 →</button></div><div class="compact-nodes"><div v-for="node in nodes.slice(0, 4)" :key="node.id"><i :class="node.status"></i><span><b>{{ node.name }}</b><small>{{ protocolInfo(node.protocol).badge }} · {{ node.listenPort }}/{{ protocolInfo(node.protocol).transport }}</small></span><em>{{ node.status === 'active' ? t('online') : t('offline') }}</em></div><p v-if="!nodes.length" class="empty">尚无节点，点击右上角部署第一座节点。</p></div></article>
+          <article class="panel-card node-preview"><div class="card-head"><div><span class="section-mark red">阵</span><div><h3>节点兵器谱</h3><p>按服务状态实时排列</p></div></div><button class="text-button" @click="page = 'nodes'">查看全部 →</button></div><div class="compact-nodes"><div v-for="node in nodes.slice(0, 4)" :key="node.id"><i :class="node.status"></i><span><b>{{ node.name }}</b><small>{{ protocolInfo(node.protocol).badge }} · {{ nodePublicPort(node) }}/{{ protocolInfo(node.protocol).transport }}</small></span><em>{{ node.status === 'active' ? t('online') : t('offline') }}</em></div><p v-if="!nodes.length" class="empty">尚无节点，点击右上角部署第一座节点。</p></div></article>
           <article class="panel-card system-glance"><div class="card-head"><div><span class="section-mark jade">脉</span><div><h3>主机气脉</h3><p>资源水位</p></div></div><span class="uptime">运行 {{ uptime(overview?.now.uptime) }}</span></div><div class="resource-row"><span>CPU</span><div><i :style="{ width: `${overview?.now.cpu || 0}%` }"></i></div><b>{{ overview?.now.cpu.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>内存</span><div><i :style="{ width: `${overview?.now.memory || 0}%` }"></i></div><b>{{ overview?.now.memory.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>磁盘</span><div><i :style="{ width: `${overview?.now.disk || 0}%` }"></i></div><b>{{ overview?.now.disk.toFixed(1) || 0 }}%</b></div><div class="version-strip"><span>Panel {{ overview?.panelVersion }}</span><span>sing-box {{ overview?.singBoxVersion }}</span></div></article>
         </section>
       </div>
 
       <div v-else-if="page === 'nodes'" class="page-content">
         <div class="page-intro"><div><p>NODE ARSENAL</p><h2>管理所有代理入站</h2><small class="page-caption">“检测”执行本机完整代理闭环；公网防火墙与 NAT 可达性仍需异地验证。</small></div><div class="summary-pills"><span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span><span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span></div></div>
-        <section class="node-grid"><article v-for="node in nodes" :key="node.id" class="node-card" :class="node.status"><div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div><div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div><p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ node.listenPort }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p><div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div><p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p><div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div><div class="node-actions"><button @click="revealShare(node)">分享</button><button class="probe-button" :disabled="node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div></article><button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>五协议 · 自动生成安全凭据</small></button></section>
+        <section class="node-grid">
+          <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel' }]">
+            <div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div>
+            <div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div>
+            <p class="endpoint">{{ node.server || node.domain || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
+            <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-origin"><span><small>Cloudflare Service</small><code>{{ tunnelOrigin(node) }}</code></span><button type="button" title="复制 Cloudflare Service URL" @click="copy(tunnelOrigin(node))">复制</button></div>
+            <div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
+            <p v-if="node.sharedGroup" class="shared-note">⌁ 与同配置内其他端点共享生命周期</p>
+            <div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div>
+            <div class="node-actions"><button @click="revealShare(node)">分享</button><button class="probe-button" :disabled="node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div>
+          </article>
+          <button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>六协议 · 自动生成安全凭据</small></button>
+        </section>
       </div>
 
       <div v-else-if="page === 'traffic'" class="page-content">
@@ -432,7 +452,27 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
   <div v-if="mustChange && authenticated" class="modal-backdrop locked"><form class="modal-card compact" @submit.prevent="changePassword"><span class="modal-seal">钥</span><p class="eyebrow">首次登录安全检查</p><h2>设置新的管理员密码</h2><p>密码至少 12 位。提交后所有会话将失效，需要重新登录。</p><label>新密码<input v-model="newPassword" type="password" minlength="12" autocomplete="new-password" required></label><button class="primary wide" :disabled="busy">保存并重新登录</button></form></div>
 
   <div v-if="modal" class="modal-backdrop" @click.self="modal = null">
-    <form v-if="modal === 'create'" class="modal-card node-form" @submit.prevent="createNode"><button type="button" class="modal-close" @click="modal = null">×</button><p class="eyebrow">DEPLOY PROXY NODE</p><h2>部署一座新节点</h2><p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p><div class="form-grid"><label>节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label><label class="protocol-choice">节点协议<select v-model="createForm.protocol"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option></select><small>{{ selectedProtocolInfo.note }}</small></label><label>出站策略<select v-model="createForm.mode"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label><label>监听端口（{{ selectedProtocolInfo.transport }}）<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label>公网域名 / IP<input v-model="createForm.server" placeholder="node.example.com"><small v-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label><label v-if="createForm.protocol !== 'shadowsocks'">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label><label :class="{ 'disabled-field': createForm.mode === 'v6only' }">IPv4 出站绑定<input v-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label><label :class="{ 'disabled-field': createForm.mode === 'v4only' }">IPv6 出站绑定<input v-if="createForm.mode === 'v4only'" value="纯 IPv4 模式不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label><label class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label></div><label class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : '确认部署' }}</button></div></form>
+    <form v-if="modal === 'create'" class="modal-card node-form" @submit.prevent="createNode">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <p class="eyebrow">DEPLOY PROXY NODE</p><h2>部署一座新节点</h2>
+      <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
+      <div class="form-grid">
+        <label>节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
+        <label class="protocol-choice">节点协议<select v-model="createForm.protocol"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option></select><small>{{ selectedProtocolInfo.note }}</small></label>
+        <label>出站策略<select v-model="createForm.mode"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
+        <label>{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
+        <label>{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
+        <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label>
+        <label v-if="isTunnelProtocol">WebSocket 路径<input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off"><small>自定义时必须以 / 开头</small></label>
+        <label v-if="isTunnelProtocol" class="span-2 tunnel-token-field">Tunnel Token<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key</small></label>
+        <div v-if="isTunnelProtocol" class="span-2 tunnel-guide"><span>隧</span><div><b>Cloudflare 侧需要做两步</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>需要 Cloudflare 账户和已接入 Cloudflare 的域名；VPS 无需开放该 Origin 端口。</p></div></div>
+        <label :class="{ 'disabled-field': createForm.mode === 'v6only' }">IPv4 出站绑定<input v-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>
+        <label :class="{ 'disabled-field': createForm.mode === 'v4only' }">IPv6 出站绑定<input v-if="createForm.mode === 'v4only'" value="纯 IPv4 模式不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label>
+        <label class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label>
+      </div>
+      <label class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label>
+      <div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : '确认部署' }}</button></div>
+    </form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。</p><div class="candidate-list"><label v-for="item in candidates" :key="item.fingerprint"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
     <form v-else-if="modal === 'rename'" class="modal-card compact rename-modal" @submit.prevent="renameNode"><button type="button" class="modal-close" @click="modal = null">×</button><span class="modal-seal">名</span><p class="eyebrow">RENAME NODE</p><h2>重命名 {{ selectedNode?.name }}</h2><p>只修改面板显示名称、分享链接标题与扫描识别名称；不会改变端口、密码、服务或节点配置。</p><label>新节点名称<input v-model="renameName" maxlength="80" autocomplete="off" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !renameName.trim() || renameName.trim() === selectedNode?.name">{{ busy ? '正在创建任务…' : '确认重命名' }}</button></div></form>

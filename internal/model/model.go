@@ -64,6 +64,8 @@ type NodeCreateRequest struct {
 	CertificatePath string   `json:"certificatePath"`
 	KeyPath         string   `json:"keyPath"`
 	Password        string   `json:"password,omitempty"`
+	WebSocketPath   string   `json:"webSocketPath,omitempty"`
+	TunnelToken     string   `json:"tunnelToken,omitempty"`
 }
 
 type BindAddress struct {

@@ -15,6 +15,7 @@ func TestClashProxyYAMLForEveryProtocol(t *testing.T) {
 	}{
 		{"hysteria2", "hysteria2://secret@node.example.com:443/?sni=node.example.com", []string{"type: hysteria2", `password: "secret"`}},
 		{"vless", "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@node.example.com:443?security=reality&pbk=public&sid=0123456789abcdef", []string{"type: vless", "reality-opts:", `public-key: "public"`}},
+		{"vless-ws-tunnel", "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@edge.example.com:443?security=tls&type=ws&path=%2Fwukong-test", []string{"port: 443", "type: vless", "network: ws", `path: "/wukong-test"`, `Host: "node.example.com"`}},
 		{"shadowsocks", "ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206QUJDREVGR0hJSktMTU5PUA@node.example.com:443", []string{"type: ss", `cipher: "2022-blake3-aes-128-gcm"`, `password: "ABCDEFGHIJKLMNOP"`}},
 		{"tuic", "tuic://d342d11e-d424-4583-b36e-524ab1f0afa4:secret@node.example.com:443?sni=node.example.com", []string{"type: tuic", "congestion-controller: bbr"}},
 		{"trojan", "trojan://secret@node.example.com:443?security=tls&sni=node.example.com", []string{"type: trojan", `password: "secret"`}},

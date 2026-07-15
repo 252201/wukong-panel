@@ -1,16 +1,16 @@
 # 悟空面板
 
-悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
+悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.5.5-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.6.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- 五协议驱动：完整管理 Hysteria2、VLESS + REALITY、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
-- 安全凭据：自动生成 UUID、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码，私钥不进入分享链接或公开 API。
+- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
+- 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
@@ -18,7 +18,7 @@
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按 UDP 节点展示 Hysteria2、TUIC、Shadowsocks 最近完成窗口的客户端下行速率，并在窄屏自动折叠为 `+N`。
-- 分享订阅：五种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
+- 分享订阅：六种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
 - 东方科幻界面：桌面、平板和移动端响应式布局。
 
 ## 一键安装
@@ -72,7 +72,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.5.5 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.6.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -91,6 +91,19 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 ```
 
 无域名时默认监听 HTTPS `9443` 并生成自签名证书。安装器不会修改 SSH、防火墙或云安全组，只会提示需要开放的端口。
+
+### VLESS + WebSocket + Cloudflare Tunnel
+
+这个节点类型需要 Cloudflare 账户和一个已接入 Cloudflare 的域名，但不要求用户把 Cloudflare API Key 交给面板。面板只接收单个 Tunnel 的运行 Token：
+
+1. 在 Cloudflare Zero Trust 的 Networks → Tunnels 创建 remotely-managed Tunnel，选择 `cloudflared`，只复制运行命令中的 Token。
+2. 在悟空面板选择“VLESS + WebSocket + Cloudflare Tunnel”，填写准备使用的公开主机名并粘贴 Token；本地 Origin 端口和 VLESS UUID 会自动生成，WebSocket 路径可留空随机生成。
+3. 部署完成后，从节点卡片复制 `http://127.0.0.1:<端口>`。
+4. 回到 Tunnel 的 Published application，填写同一个公开主机名，并把 Service URL 设置为刚复制的本地地址。
+
+客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。每个悟空节点应使用独立 Tunnel/Token；不要让多个本地端口共享同一个 Token。
+
+首次部署时，面板会按固定 SHA-256 下载并安装官方 `cloudflared 2026.7.1`（`amd64`/`arm64`），为节点创建独立的 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。节点的启动、停止、重启、状态和删除会同时管理 sing-box 与 cloudflared；节点“检测”会从公网域名验证 Cloudflare TLS、WebSocket、VLESS 认证和代理出站完整链路。
 
 ### sing-box 安全更新与回退
 
@@ -115,6 +128,9 @@ flowchart LR
   N --> W["wukong-web\n非特权用户"]
   W -->|"类型化请求 / Unix Socket"| A["wukong-agent\nroot"]
   A --> S["sing-box / systemd / OpenRC"]
+  C["Cloudflare Edge :443"] --> F["cloudflared\n独立节点服务"]
+  F -->|"127.0.0.1 Origin"| S
+  A --> F
   W --> D[("SQLite WAL")]
   A --> D
   A --> K["root-only 机器密钥"]
@@ -138,6 +154,9 @@ wukongctl node create --name "AC-HY2" --server node.example.com --domain node.ex
   --mode prefer_v6 --ipv4-bind 192.0.2.10 --ipv6 2001:db8::10
 wukongctl node create --protocol vless --name "AC-Reality" \
   --server node.example.com --domain www.cloudflare.com --mode prefer_v6
+wukongctl node create --protocol vless-ws-tunnel --name "AC-CF-WS" \
+  --server edge.example.com --ws-path /wukong-edge \
+  --tunnel-token-file /root/cloudflare-tunnel.token --mode prefer_v6
 wukongctl node create --protocol shadowsocks --name "AC-SS2022" \
   --server node.example.com --mode prefer_v6
 wukongctl node create --protocol tuic --name "AC-TUIC" \
