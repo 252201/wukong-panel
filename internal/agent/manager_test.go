@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,8 +11,26 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/store"
 )
+
+func newDemoManager(t *testing.T) (*Manager, *store.Store) {
+	t.Helper()
+	dir := t.TempDir()
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault, err := security.OpenVault(dir)
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	manager := NewManager(config.Config{ConfigDir: filepath.Join(dir, "configs"), DataDir: dir, SecretDir: filepath.Join(dir, "secrets"), Demo: true}, database, vault)
+	t.Cleanup(func() { database.Close() })
+	return manager, database
+}
 
 func baseRequest() model.NodeCreateRequest {
 	return model.NodeCreateRequest{Protocol: protocolHysteria2, Name: "Test", Mode: "prefer_v6", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", V6OnlyDomains: []string{"chatgpt.com"}}
@@ -176,6 +196,94 @@ func TestNormalizeModeBindingsDropsUnusedAddressFamily(t *testing.T) {
 	v4 = normalizeModeBindings(v4)
 	if v4.IPv6Bind != "" || v4.IPv4Bind == "" {
 		t.Fatalf("IPv4-only bindings were not normalized: %#v", v4)
+	}
+}
+
+func TestCreateBatchSupportsEveryProtocol(t *testing.T) {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+		t.Run(protocol, func(t *testing.T) {
+			manager, database := newDemoManager(t)
+			requests := make([]model.NodeCreateRequest, 2)
+			for index := range requests {
+				requests[index] = model.NodeCreateRequest{Protocol: protocol, Name: fmt.Sprintf("%s-device-%d", protocol, index+1), Mode: "prefer_v6", Server: "node.example.com", Domain: "node.example.com", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", AutoBind: true}
+				if protocol == protocolVLESS {
+					requests[index].Domain = realityDefaultSNI
+				}
+				if protocol == protocolVLESSWSTunnel {
+					requests[index].Server = fmt.Sprintf("device-%d.example.com", index+1)
+					requests[index].Domain = requests[index].Server
+					requests[index].TunnelToken = "eyJ" + strings.Repeat("a", 90) + ".signature"
+				}
+			}
+			nodes, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: requests})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(nodes) != 2 || nodes[0].SharedGroup == "" || nodes[0].SharedGroup != nodes[1].SharedGroup || nodes[0].ListenPort == nodes[1].ListenPort {
+				t.Fatalf("invalid device batch: %#v", nodes)
+			}
+			if protocol == protocolVLESSWSTunnel && cloudflaredNodeKey(nodes[0]) != cloudflaredNodeKey(nodes[1]) {
+				t.Fatalf("Tunnel devices did not share one connector: %#v", nodes)
+			}
+			stored, err := database.Nodes(context.Background())
+			if err != nil || len(stored) != 2 {
+				t.Fatalf("batch was not persisted: %#v err=%v", stored, err)
+			}
+		})
+	}
+}
+
+func TestCreateBatchRejectsInvalidWholeBatchBeforeCreatingNodes(t *testing.T) {
+	manager, database := newDemoManager(t)
+	request := model.NodeCreateRequest{Protocol: protocolHysteria2, Name: "same", Mode: "prefer_v6", Server: "node.example.com", Domain: "node.example.com", IPv6Bind: "2001:db8::5"}
+	_, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{request, request}})
+	if err == nil {
+		t.Fatal("duplicate device batch accepted")
+	}
+	nodes, listErr := database.Nodes(t.Context())
+	if listErr != nil || len(nodes) != 0 {
+		t.Fatalf("invalid batch created partial nodes: %#v err=%v", nodes, listErr)
+	}
+}
+
+func TestTunnelBatchRequiresOneSharedTokenAndDistinctHostnames(t *testing.T) {
+	manager, _ := newDemoManager(t)
+	base := model.NodeCreateRequest{Protocol: protocolVLESSWSTunnel, Name: "one", Mode: "prefer_v6", Server: "one.example.com", IPv6Bind: "2001:db8::5", TunnelToken: "eyJ" + strings.Repeat("a", 90) + ".signature"}
+	second := base
+	second.Name = "two"
+	second.Server = "two.example.com"
+	second.TunnelToken = "eyJ" + strings.Repeat("b", 90) + ".signature"
+	if _, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err == nil || !strings.Contains(err.Error(), "same Tunnel token") {
+		t.Fatalf("different Tunnel tokens were not rejected: %v", err)
+	}
+	second.TunnelToken = base.TunnelToken
+	second.Server = base.Server
+	if _, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: []model.NodeCreateRequest{base, second}}); err == nil || !strings.Contains(err.Error(), "duplicate Cloudflare hostname") {
+		t.Fatalf("duplicate Tunnel hostnames were not rejected: %v", err)
+	}
+}
+
+func TestSharedTunnelConnectorIsRemovedOnlyWithLastDevice(t *testing.T) {
+	manager, database := newDemoManager(t)
+	token := "eyJ" + strings.Repeat("a", 90) + ".signature"
+	requests := []model.NodeCreateRequest{
+		{Protocol: protocolVLESSWSTunnel, Name: "one", Mode: "prefer_v6", Server: "one.example.com", IPv6Bind: "2001:db8::5", TunnelToken: token},
+		{Protocol: protocolVLESSWSTunnel, Name: "two", Mode: "prefer_v6", Server: "two.example.com", IPv6Bind: "2001:db8::5", TunnelToken: token},
+	}
+	nodes, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: requests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove, err := manager.shouldRemoveTunnelConnector(t.Context(), nodes[0])
+	if err != nil || remove {
+		t.Fatalf("shared connector would be removed while two devices remain: remove=%v err=%v", remove, err)
+	}
+	if err = database.DeleteNode(nodes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	remove, err = manager.shouldRemoveTunnelConnector(t.Context(), nodes[1])
+	if err != nil || !remove {
+		t.Fatalf("last device would leave shared connector behind: remove=%v err=%v", remove, err)
 	}
 }
 

@@ -8,6 +8,7 @@ export interface NodeItem {
   listenPort: number
   server: string
   domain: string
+  preferredServer?: string
   ipv4Bind?: string
   ipv6Bind?: string
   autoBind: boolean
@@ -165,6 +166,7 @@ export const api = {
   nodes: () => request<NodeItem[]>('nodes'),
   nodeDeploymentDefaults: () => request<NodeDeploymentDefaults>('nodes/deployment-defaults'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
+  createNodeBatch: (nodes: Record<string, unknown>[]) => request<{jobId: string}>('nodes/batch', { method: 'POST', body: JSON.stringify({ nodes }) }),
   renameNode: (id: string, name: string) => request<{jobId: string}>(`nodes/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),
   share: (id: string) => request<{uri: string; expiresAt: string}>(`nodes/${id}/share`),

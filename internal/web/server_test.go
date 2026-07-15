@@ -27,6 +27,9 @@ func (fakeAgent) Import(context.Context, []string) error { return nil }
 func (fakeAgent) Create(context.Context, model.NodeCreateRequest) (model.Node, error) {
 	return model.Node{}, nil
 }
+func (fakeAgent) CreateBatch(context.Context, model.NodeBatchCreateRequest) ([]model.Node, error) {
+	return nil, nil
+}
 func (fakeAgent) Action(context.Context, string, model.NodeActionRequest) error { return nil }
 func (fakeAgent) Rename(context.Context, string, model.NodeRenameRequest) error { return nil }
 func (fakeAgent) Share(context.Context, string) (model.Share, error)            { return model.Share{}, nil }

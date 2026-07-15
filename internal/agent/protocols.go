@@ -361,8 +361,16 @@ func buildShareURI(node model.Node, credentials protocolCredentials, insecure bo
 		if credentials.UUID == "" || credentials.WebSocketPath == "" {
 			return "", errors.New("VLESS WebSocket Tunnel credentials are incomplete")
 		}
-		query := fmt.Sprintf("encryption=none&security=tls&sni=%s&fp=chrome&type=ws&host=%s&path=%s", sni, urlEncode(node.Server), urlEncode(credentials.WebSocketPath))
-		return fmt.Sprintf("vless://%s@%s:443?%s#%s", urlEncode(credentials.UUID), host, query, name), nil
+		publishedServer := strings.TrimSpace(node.Server)
+		if publishedServer == "" {
+			publishedServer = strings.TrimSpace(node.Domain)
+		}
+		dialServer := strings.TrimSpace(node.PreferredServer)
+		if dialServer == "" {
+			dialServer = publishedServer
+		}
+		query := fmt.Sprintf("encryption=none&security=tls&sni=%s&fp=chrome&type=ws&host=%s&path=%s", urlEncode(publishedServer), urlEncode(publishedServer), urlEncode(credentials.WebSocketPath))
+		return fmt.Sprintf("vless://%s@%s:443?%s#%s", urlEncode(credentials.UUID), hostForURI(dialServer), query, name), nil
 	case protocolShadowsocks:
 		userinfo := base64.RawURLEncoding.EncodeToString([]byte(credentials.Method + ":" + credentials.Password))
 		return fmt.Sprintf("ss://%s@%s:%d#%s", userinfo, host, node.ListenPort, name), nil

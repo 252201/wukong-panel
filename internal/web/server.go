@@ -32,6 +32,7 @@ type AgentAPI interface {
 	DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error)
 	Import(context.Context, []string) error
 	Create(context.Context, model.NodeCreateRequest) (model.Node, error)
+	CreateBatch(context.Context, model.NodeBatchCreateRequest) ([]model.Node, error)
 	Action(context.Context, string, model.NodeActionRequest) error
 	Rename(context.Context, string, model.NodeRenameRequest) error
 	Share(context.Context, string) (model.Share, error)
@@ -64,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
 	mux.HandleFunc("GET /api/v1/nodes/deployment-defaults", s.auth(s.nodeDeploymentDefaults, false))
 	mux.HandleFunc("POST /api/v1/nodes", s.auth(s.createNode, true))
+	mux.HandleFunc("POST /api/v1/nodes/batch", s.auth(s.createNodeBatch, true))
 	mux.HandleFunc("PATCH /api/v1/nodes/{id}", s.auth(s.renameNode, true))
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
@@ -306,6 +308,19 @@ func (s *Server) createNode(w http.ResponseWriter, r *http.Request, session stor
 		return
 	}
 	go s.runJob(job, func(ctx context.Context) error { _, err := s.agent.Create(ctx, request); return err })
+	writeJSON(w, 202, map[string]string{"jobId": job.ID})
+}
+func (s *Server) createNodeBatch(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request model.NodeBatchCreateRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	job, err := s.store.CreateJob("node.create_batch", fmt.Sprintf("%d 台设备", len(request.Nodes)))
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	go s.runJob(job, func(ctx context.Context) error { _, err := s.agent.CreateBatch(ctx, request); return err })
 	writeJSON(w, 202, map[string]string{"jobId": job.ID})
 }
 func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request, session store.Session) {

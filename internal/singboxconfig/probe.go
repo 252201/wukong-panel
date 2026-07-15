@@ -275,33 +275,14 @@ func buildProtocolProbe(inbound map[string]any, serverOverride, serverName strin
 
 // ProbeVLESSWebSocketEndpoint validates the complete public Cloudflare path,
 // including edge TLS, WebSocket upgrade, VLESS authentication and proxy egress.
-func ProbeVLESSWebSocketEndpoint(ctx context.Context, binary, server, uuid, path string) (ProbeResult, error) {
-	result := ProbeResult{Protocol: "vless-ws-tunnel", Inbound: server, Port: 443}
-	server = strings.TrimSpace(server)
-	uuid = strings.TrimSpace(uuid)
-	path = strings.TrimSpace(path)
-	if server == "" || uuid == "" || !strings.HasPrefix(path, "/") {
-		return result, errorsText("VLESS WebSocket endpoint parameters are incomplete")
+func ProbeVLESSWebSocketEndpoint(ctx context.Context, binary, dialServer, publishedServer, uuid, path string) (ProbeResult, error) {
+	dialServer = strings.TrimSpace(dialServer)
+	publishedServer = strings.TrimSpace(publishedServer)
+	if dialServer == "" {
+		dialServer = publishedServer
 	}
-	outbound := map[string]any{
-		"type":        "vless",
-		"tag":         "probe-out",
-		"server":      server,
-		"server_port": 443,
-		"uuid":        uuid,
-		"tls": map[string]any{
-			"enabled":     true,
-			"server_name": server,
-			"utls":        map[string]any{"enabled": true, "fingerprint": "chrome"},
-		},
-		"transport": map[string]any{
-			"type":    "ws",
-			"path":    path,
-			"headers": map[string]any{"Host": server},
-		},
-	}
-	root := map[string]any{"log": map[string]any{"level": "error"}, "outbounds": []any{outbound}, "route": map[string]any{"final": "probe-out"}}
-	probe, err := json.MarshalIndent(root, "", "  ")
+	result := ProbeResult{Protocol: "vless-ws-tunnel", Inbound: publishedServer, Port: 443}
+	probe, err := buildVLESSWebSocketEndpointProbe(dialServer, publishedServer, uuid, path)
 	if err != nil {
 		return result, err
 	}
@@ -316,6 +297,38 @@ func ProbeVLESSWebSocketEndpoint(ctx context.Context, binary, server, uuid, path
 		return result, errorsText(result.Error)
 	}
 	return result, nil
+}
+
+func buildVLESSWebSocketEndpointProbe(dialServer, publishedServer, uuid, path string) ([]byte, error) {
+	dialServer = strings.TrimSpace(dialServer)
+	publishedServer = strings.TrimSpace(publishedServer)
+	if dialServer == "" {
+		dialServer = publishedServer
+	}
+	uuid = strings.TrimSpace(uuid)
+	path = strings.TrimSpace(path)
+	if dialServer == "" || publishedServer == "" || uuid == "" || !strings.HasPrefix(path, "/") {
+		return nil, errorsText("VLESS WebSocket endpoint parameters are incomplete")
+	}
+	outbound := map[string]any{
+		"type":        "vless",
+		"tag":         "probe-out",
+		"server":      dialServer,
+		"server_port": 443,
+		"uuid":        uuid,
+		"tls": map[string]any{
+			"enabled":     true,
+			"server_name": publishedServer,
+			"utls":        map[string]any{"enabled": true, "fingerprint": "chrome"},
+		},
+		"transport": map[string]any{
+			"type":    "ws",
+			"path":    path,
+			"headers": map[string]any{"Host": publishedServer},
+		},
+	}
+	root := map[string]any{"log": map[string]any{"level": "error"}, "outbounds": []any{outbound}, "route": map[string]any{"final": "probe-out"}}
+	return json.MarshalIndent(root, "", "  ")
 }
 
 func buildHY2Probe(inbound map[string]any, serverOverride, serverName string) ([]byte, error) {

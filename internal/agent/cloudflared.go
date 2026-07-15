@@ -180,6 +180,13 @@ func cloudflaredServiceName(nodeID string) string {
 	return "cloudflared-wukong-" + nodeID
 }
 
+func cloudflaredNodeKey(node model.Node) string {
+	if node.Ownership == "managed" && strings.TrimSpace(node.SharedGroup) != "" {
+		return node.SharedGroup
+	}
+	return node.ID
+}
+
 func (m *Manager) cloudflaredTokenPath(nodeID string) string {
 	root := strings.TrimSpace(m.cfg.SecretDir)
 	if root == "" {
@@ -277,16 +284,17 @@ depend(){ need net; after firewall; }
 }
 
 func (m *Manager) cloudflaredStatus(ctx context.Context, node model.Node) string {
-	return m.serviceStatus(ctx, node.ServiceManager, cloudflaredServiceName(node.ID))
+	return m.serviceStatus(ctx, node.ServiceManager, cloudflaredServiceName(cloudflaredNodeKey(node)))
 }
 
 func (m *Manager) removeCloudflaredService(ctx context.Context, node model.Node) error {
+	key := cloudflaredNodeKey(node)
 	serviceNode := node
-	serviceNode.ServiceName = cloudflaredServiceName(node.ID)
+	serviceNode.ServiceName = cloudflaredServiceName(key)
 	_ = m.serviceCommand(ctx, serviceNode.ServiceManager, "stop", serviceNode.ServiceName)
 	_ = m.disableService(ctx, serviceNode)
 	serviceErr := m.removeService(serviceNode)
-	tokenErr := os.Remove(m.cloudflaredTokenPath(node.ID))
+	tokenErr := os.Remove(m.cloudflaredTokenPath(key))
 	if errors.Is(serviceErr, os.ErrNotExist) {
 		serviceErr = nil
 	}
@@ -307,7 +315,7 @@ func (m *Manager) checkCloudflaredNode(ctx context.Context, node model.Node) err
 	if err := validateCloudflaredRuntime(ctx, binary); err != nil {
 		return fmt.Errorf("cloudflared binary: %w", err)
 	}
-	info, err := os.Stat(m.cloudflaredTokenPath(node.ID))
+	info, err := os.Stat(m.cloudflaredTokenPath(cloudflaredNodeKey(node)))
 	if err != nil {
 		return fmt.Errorf("Cloudflare Tunnel token file: %w", err)
 	}

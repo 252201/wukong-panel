@@ -272,6 +272,86 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 }
 
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	request, err := prepareCreateRequest(request)
+	if err != nil {
+		return model.Node{}, err
+	}
+	return m.createPrepared(ctx, request, "", true)
+}
+
+func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreateRequest) ([]model.Node, error) {
+	if len(request.Nodes) < 2 || len(request.Nodes) > 20 {
+		return nil, errors.New("device batch must contain between 2 and 20 nodes")
+	}
+	prepared := make([]model.NodeCreateRequest, 0, len(request.Nodes))
+	names := map[string]bool{}
+	ports := map[int]bool{}
+	hostnames := map[string]bool{}
+	tunnelToken := ""
+	protocol := ""
+	for index, item := range request.Nodes {
+		value, err := prepareCreateRequest(item)
+		if err != nil {
+			return nil, fmt.Errorf("device %d: %w", index+1, err)
+		}
+		if protocol == "" {
+			protocol = value.Protocol
+		} else if value.Protocol != protocol {
+			return nil, errors.New("all device nodes in a batch must use the same protocol")
+		}
+		nameKey := strings.ToLower(strings.TrimSpace(value.Name))
+		if names[nameKey] {
+			return nil, fmt.Errorf("device %d: duplicate node name %q", index+1, value.Name)
+		}
+		names[nameKey] = true
+		if value.ListenPort != 0 {
+			if ports[value.ListenPort] {
+				return nil, fmt.Errorf("device %d: duplicate listen port %d", index+1, value.ListenPort)
+			}
+			ports[value.ListenPort] = true
+		}
+		if value.Protocol == protocolVLESSWSTunnel {
+			if hostnames[value.Server] {
+				return nil, fmt.Errorf("device %d: duplicate Cloudflare hostname %q", index+1, value.Server)
+			}
+			hostnames[value.Server] = true
+			if tunnelToken == "" {
+				tunnelToken = value.TunnelToken
+			} else if value.TunnelToken != tunnelToken {
+				return nil, errors.New("all Tunnel device nodes must use the same Tunnel token")
+			}
+		}
+		prepared = append(prepared, value)
+	}
+	group, err := security.RandomToken(8)
+	if err != nil {
+		return nil, err
+	}
+	group = "devices-" + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(group))
+	created := make([]model.Node, 0, len(prepared))
+	for index, item := range prepared {
+		node, createErr := m.createPrepared(ctx, item, group, index == 0)
+		if createErr == nil {
+			created = append(created, node)
+			continue
+		}
+		rollbackErrors := []string{}
+		for rollbackIndex := len(created) - 1; rollbackIndex >= 0; rollbackIndex-- {
+			rollbackNode := created[rollbackIndex]
+			if rollbackErr := m.Action(ctx, rollbackNode.ID, "delete", rollbackNode.Name); rollbackErr != nil {
+				rollbackErrors = append(rollbackErrors, rollbackErr.Error())
+			}
+		}
+		if len(rollbackErrors) > 0 {
+			return nil, fmt.Errorf("device %d deployment failed: %w (batch rollback failed: %s)", index+1, createErr, strings.Join(rollbackErrors, "; "))
+		}
+		return nil, fmt.Errorf("device %d deployment failed: %w; previously created devices were rolled back", index+1, createErr)
+	}
+	_ = m.store.Audit("admin", "create_device_batch", group, fmt.Sprintf("protocol=%s nodes=%d", protocol, len(created)))
+	return created, nil
+}
+
+func prepareCreateRequest(request model.NodeCreateRequest) (model.NodeCreateRequest, error) {
 	request.Protocol = normalizeProtocol(request.Protocol)
 	request = normalizeModeBindings(request)
 	if request.Protocol == protocolVLESS && strings.TrimSpace(request.Domain) == "" {
@@ -280,19 +360,26 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if request.Protocol == protocolVLESSWSTunnel {
 		request.Server = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(request.Server)), ".")
 		request.Domain = request.Server
+		request.PreferredServer = normalizePreferredServer(request.PreferredServer)
 		request.TunnelToken = strings.TrimSpace(request.TunnelToken)
 		request.WebSocketPath = strings.TrimSpace(request.WebSocketPath)
 		if request.WebSocketPath == "" {
 			randomPath, randomErr := security.RandomToken(12)
 			if randomErr != nil {
-				return model.Node{}, randomErr
+				return model.NodeCreateRequest{}, randomErr
 			}
 			request.WebSocketPath = "/wukong-" + strings.ToLower(randomPath)
 		}
+	} else {
+		request.PreferredServer = ""
 	}
 	if err := validateCreate(request); err != nil {
-		return model.Node{}, err
+		return model.NodeCreateRequest{}, err
 	}
+	return request, nil
+}
+
+func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRequest, group string, installTunnelConnector bool) (model.Node, error) {
 	port := request.ListenPort
 	if port == 0 {
 		var err error
@@ -317,8 +404,13 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	service := "sing-box-wukong-" + id
 	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+id+".json")
 	manager := detectServiceManager()
+	identity := model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, Ownership: "managed", SharedGroup: group}
+	tunnelServiceKey := id
+	if group != "" {
+		tunnelServiceKey = group
+	}
 	cloudflaredBinary := ""
-	if request.Protocol == protocolVLESSWSTunnel && !m.cfg.Demo {
+	if request.Protocol == protocolVLESSWSTunnel && installTunnelConnector && !m.cfg.Demo {
 		cloudflaredBinary, err = m.ensureCloudflared(ctx)
 		if err != nil {
 			return model.Node{}, err
@@ -354,7 +446,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		}
 		if request.Protocol == protocolVLESS {
 			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
-				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				cleanupErr := m.cleanupFailedCreate(ctx, identity, false)
 				if cleanupErr != nil {
 					return model.Node{}, fmt.Errorf("VLESS REALITY preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
 				}
@@ -363,18 +455,20 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		}
 		if request.Protocol == protocolVLESSWSTunnel {
 			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
-				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
+				cleanupErr := m.cleanupFailedCreate(ctx, identity, false)
 				if cleanupErr != nil {
 					return model.Node{}, fmt.Errorf("VLESS WebSocket local preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
 				}
 				return model.Node{}, fmt.Errorf("VLESS WebSocket local preflight failed: %w", probeErr)
 			}
-			if err = m.installCloudflaredService(ctx, id, manager, cloudflaredBinary, credentials.TunnelToken); err != nil {
-				cleanupErr := m.cleanupFailedCreate(ctx, model.Node{ID: id, Protocol: request.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath})
-				if cleanupErr != nil {
-					return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w (cleanup failed: %v)", err, cleanupErr)
+			if installTunnelConnector {
+				if err = m.installCloudflaredService(ctx, tunnelServiceKey, manager, cloudflaredBinary, credentials.TunnelToken); err != nil {
+					cleanupErr := m.cleanupFailedCreate(ctx, identity, true)
+					if cleanupErr != nil {
+						return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w (cleanup failed: %v)", err, cleanupErr)
+					}
+					return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w", err)
 				}
-				return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w", err)
 			}
 		}
 	}
@@ -390,10 +484,10 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if m.cfg.Demo {
 		version = "1.14-demo"
 	}
-	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", Status: "active"}
+	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
-		if request.Protocol == protocolVLESSWSTunnel && !m.cfg.Demo {
-			_ = m.cleanupFailedCreate(ctx, node)
+		if !m.cfg.Demo {
+			_ = m.cleanupFailedCreate(ctx, node, request.Protocol == protocolVLESSWSTunnel && installTunnelConnector)
 		}
 		return model.Node{}, err
 	}
@@ -534,9 +628,13 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		if err = m.backup(node); err != nil {
 			return err
 		}
-		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+		removeTunnelConnector, connectorErr := m.shouldRemoveTunnelConnector(ctx, node)
+		if connectorErr != nil {
+			return connectorErr
+		}
+		if removeTunnelConnector {
 			tunnelNode := node
-			tunnelNode.ServiceName = cloudflaredServiceName(node.ID)
+			tunnelNode.ServiceName = cloudflaredServiceName(cloudflaredNodeKey(node))
 			if err = m.serviceCommand(ctx, tunnelNode.ServiceManager, "stop", tunnelNode.ServiceName); err != nil {
 				return err
 			}
@@ -545,11 +643,11 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 			return err
 		}
 		_ = m.disableService(ctx, node)
-		if node.SharedGroup == "" {
+		if node.SharedGroup == "" || node.Ownership == "managed" {
 			_ = os.Remove(node.ConfigPath)
 			_ = m.removeService(node)
 		}
-		if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+		if removeTunnelConnector {
 			if err = m.removeCloudflaredService(ctx, node); err != nil {
 				return err
 			}
@@ -569,6 +667,20 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		_ = m.store.Audit("admin", "node_"+action, node.ID, node.Name)
 	}
 	return err
+}
+
+func (m *Manager) shouldRemoveTunnelConnector(ctx context.Context, node model.Node) (bool, error) {
+	if normalizeProtocol(node.Protocol) != protocolVLESSWSTunnel {
+		return false, nil
+	}
+	if node.Ownership != "managed" || node.SharedGroup == "" {
+		return true, nil
+	}
+	count, err := m.store.NodeGroupCount(ctx, node.SharedGroup)
+	if err != nil {
+		return false, err
+	}
+	return count <= 1, nil
 }
 
 func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
@@ -601,7 +713,7 @@ func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
 		if decodeErr != nil {
 			return fail(result, decodeErr)
 		}
-		result, err = singboxconfig.ProbeVLESSWebSocketEndpoint(ctx, m.cfg.SingBoxBin, node.Server, credentials.UUID, credentials.WebSocketPath)
+		result, err = singboxconfig.ProbeVLESSWebSocketEndpoint(ctx, m.cfg.SingBoxBin, node.PreferredServer, node.Server, credentials.UUID, credentials.WebSocketPath)
 	} else {
 		result, err = singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, node.ConfigPath, node.Protocol, node.ListenPort)
 	}
@@ -710,8 +822,8 @@ func (m *Manager) installConfig(ctx context.Context, path, service, manager stri
 	return command(ctx, "rc-service", service, "start")
 }
 
-func (m *Manager) cleanupFailedCreate(ctx context.Context, node model.Node) error {
-	if normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel && node.ID != "" {
+func (m *Manager) cleanupFailedCreate(ctx context.Context, node model.Node, removeTunnelConnector bool) error {
+	if removeTunnelConnector && normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel && node.ID != "" {
 		_ = m.removeCloudflaredService(ctx, node)
 	}
 	_ = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
@@ -924,6 +1036,9 @@ func validateCreate(r model.NodeCreateRequest) error {
 		if !validTunnelHostname(r.Server) {
 			return errors.New("Cloudflare Tunnel hostname must be a valid DNS hostname")
 		}
+		if !validPreferredServer(r.PreferredServer) {
+			return errors.New("Cloudflare preferred endpoint must be a DNS hostname or IP address without a scheme or port")
+		}
 		if !validWebSocketPath(r.WebSocketPath) {
 			return errors.New("WebSocket path must start with /, contain no whitespace, ? or #, and be at most 128 characters")
 		}
@@ -939,11 +1054,20 @@ func (m *Manager) actionNodeServices(ctx context.Context, node model.Node, actio
 		return m.serviceCommand(ctx, node.ServiceManager, action, node.ServiceName)
 	}
 	tunnelNode := node
-	tunnelNode.ServiceName = cloudflaredServiceName(node.ID)
+	tunnelNode.ServiceName = cloudflaredServiceName(cloudflaredNodeKey(node))
+	sharedConnector := node.Ownership == "managed" && node.SharedGroup != ""
 	switch action {
 	case "start":
+		if sharedConnector && m.cloudflaredStatus(ctx, node) != "active" {
+			if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "start", tunnelNode.ServiceName); err != nil {
+				return err
+			}
+		}
 		if err := m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName); err != nil {
 			return err
+		}
+		if sharedConnector {
+			return nil
 		}
 		if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "start", tunnelNode.ServiceName); err != nil {
 			_ = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
@@ -951,11 +1075,22 @@ func (m *Manager) actionNodeServices(ctx context.Context, node model.Node, actio
 		}
 		return nil
 	case "stop":
+		if sharedConnector {
+			return m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
+		}
 		if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "stop", tunnelNode.ServiceName); err != nil {
 			return err
 		}
 		return m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName)
 	case "restart":
+		if sharedConnector {
+			if m.cloudflaredStatus(ctx, node) != "active" {
+				if err := m.serviceCommand(ctx, tunnelNode.ServiceManager, "start", tunnelNode.ServiceName); err != nil {
+					return err
+				}
+			}
+			return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
+		}
 		if err := m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err != nil {
 			return err
 		}
@@ -981,6 +1116,22 @@ func validTunnelHostname(value string) bool {
 		}
 	}
 	return true
+}
+
+func normalizePreferredServer(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(strings.ToLower(value), ".")
+}
+
+func validPreferredServer(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || net.ParseIP(value) != nil || validTunnelHostname(value)
 }
 
 func validWebSocketPath(value string) bool {

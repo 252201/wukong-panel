@@ -142,19 +142,24 @@ func TestShareURIForEverySupportedProtocol(t *testing.T) {
 		}
 		if protocol == protocolVLESSWSTunnel {
 			credentials.WebSocketPath = "/wukong-test"
+			node.PreferredServer = "preferred.example.com"
 		}
 		share, err := buildShareURI(node, credentials, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		parsed, err := url.Parse(share)
-		if err != nil || parsed.Scheme == "" || parsed.Hostname() != node.Server || parsed.Port() == "" {
+		wantServer := node.Server
+		if node.PreferredServer != "" {
+			wantServer = node.PreferredServer
+		}
+		if err != nil || parsed.Scheme == "" || parsed.Hostname() != wantServer || parsed.Port() == "" {
 			t.Fatalf("invalid %s share URI: %s (%v)", protocol, share, err)
 		}
 		if protocol == protocolVLESS && (parsed.Query().Get("security") != "reality" || parsed.Query().Get("pbk") != credentials.RealityPublicKey) {
 			t.Fatalf("VLESS REALITY share fields missing: %s", share)
 		}
-		if protocol == protocolVLESSWSTunnel && (parsed.Port() != "443" || parsed.Query().Get("security") != "tls" || parsed.Query().Get("type") != "ws" || parsed.Query().Get("path") != "/wukong-test") {
+		if protocol == protocolVLESSWSTunnel && (parsed.Port() != "443" || parsed.Query().Get("security") != "tls" || parsed.Query().Get("type") != "ws" || parsed.Query().Get("path") != "/wukong-test" || parsed.Query().Get("sni") != node.Server || parsed.Query().Get("host") != node.Server) {
 			t.Fatalf("VLESS WebSocket Tunnel share fields missing: %s", share)
 		}
 	}
@@ -197,6 +202,23 @@ func TestValidateCreateRequiresCloudflareTunnelInputs(t *testing.T) {
 		t.Fatalf("standard Base64 Tunnel token rejected: %v", err)
 	}
 	request.TunnelToken = "eyJ" + strings.Repeat("a", 90) + ".signature"
+	request.PreferredServer = "best.cloudflare.example"
+	if err := validateCreate(request); err != nil {
+		t.Fatalf("valid preferred endpoint rejected: %v", err)
+	}
+	request.PreferredServer = "104.16.0.1"
+	if err := validateCreate(request); err != nil {
+		t.Fatalf("preferred IP rejected: %v", err)
+	}
+	request.PreferredServer = "https://best.cloudflare.example"
+	if validateCreate(request) == nil {
+		t.Fatal("preferred endpoint URL accepted")
+	}
+	request.PreferredServer = "best.cloudflare.example:443"
+	if validateCreate(request) == nil {
+		t.Fatal("preferred endpoint with port accepted")
+	}
+	request.PreferredServer = ""
 	request.WebSocketPath = "missing-leading-slash"
 	if validateCreate(request) == nil {
 		t.Fatal("invalid WebSocket path accepted")
@@ -205,6 +227,15 @@ func TestValidateCreateRequiresCloudflareTunnelInputs(t *testing.T) {
 	request.Server = "https://edge.example.com"
 	if validateCreate(request) == nil {
 		t.Fatal("URL accepted as a Tunnel hostname")
+	}
+}
+
+func TestNormalizePreferredServer(t *testing.T) {
+	if got := normalizePreferredServer(" BEST.Cloudflare.Example. "); got != "best.cloudflare.example" {
+		t.Fatalf("hostname not normalized: %q", got)
+	}
+	if got := normalizePreferredServer("[2001:0db8::1]"); got != "2001:db8::1" {
+		t.Fatalf("IPv6 not normalized: %q", got)
 	}
 }
 

@@ -136,6 +136,24 @@ func TestBuildProbeForEverySupportedProtocol(t *testing.T) {
 	}
 }
 
+func TestBuildVLESSWebSocketEndpointProbeSeparatesDialAndIdentity(t *testing.T) {
+	data, err := buildVLESSWebSocketEndpointProbe("preferred.example.com", "origin.example.com", "d342d11e-d424-4583-b36e-524ab1f0afa4", "/wukong-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+	outbound := root["outbounds"].([]any)[0].(map[string]any)
+	tls := outbound["tls"].(map[string]any)
+	transport := outbound["transport"].(map[string]any)
+	headers := transport["headers"].(map[string]any)
+	if outbound["server"] != "preferred.example.com" || tls["server_name"] != "origin.example.com" || headers["Host"] != "origin.example.com" {
+		t.Fatalf("dial endpoint and TLS/WS identity were not separated: %#v", outbound)
+	}
+}
+
 func TestGeneratedProbesPassRealSingBoxCheck(t *testing.T) {
 	binary := os.Getenv("SING_BOX_TEST_BIN")
 	if binary == "" {
@@ -168,4 +186,17 @@ func TestGeneratedProbesPassRealSingBoxCheck(t *testing.T) {
 			}
 		})
 	}
+	t.Run("vless-ws-tunnel-preferred", func(t *testing.T) {
+		data, buildErr := buildVLESSWebSocketEndpointProbe("preferred.example.com", "origin.example.com", "d342d11e-d424-4583-b36e-524ab1f0afa4", "/wukong-test")
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		path := filepath.Join(t.TempDir(), "vless-ws-tunnel-preferred.json")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if output, checkErr := exec.Command(binary, "check", "-c", path).CombinedOutput(); checkErr != nil {
+			t.Fatalf("sing-box rejected preferred endpoint probe: %v\n%s\n%s", checkErr, output, data)
+		}
+	})
 }

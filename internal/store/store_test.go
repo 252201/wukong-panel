@@ -175,6 +175,60 @@ func TestNodeProbeResultRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPreferredServerRoundTrip(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{ID: "preferred", Name: "Preferred", Protocol: "vless-ws-tunnel", Mode: "prefer_v6", ListenPort: 45119, Server: "origin.example.com", Domain: "origin.example.com", PreferredServer: "preferred.example.com", ServiceName: "sing-box-preferred", ServiceManager: "systemd", ConfigPath: "/etc/s-box/preferred.json", ConfigVersion: "1.14", Ownership: "managed", Status: "active"}
+	if err = s.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Node(t.Context(), node.ID, false)
+	if err != nil || stored.PreferredServer != node.PreferredServer {
+		t.Fatalf("preferred server not preserved: %#v err=%v", stored, err)
+	}
+	items, err := s.Nodes(t.Context())
+	if err != nil || len(items) != 1 || items[0].PreferredServer != node.PreferredServer {
+		t.Fatalf("preferred server missing from node list: %#v err=%v", items, err)
+	}
+}
+
+func TestLegacyNodesSchemaAddsPreferredServer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-nodes.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`CREATE TABLE nodes (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL, protocol TEXT NOT NULL, mode TEXT NOT NULL,
+		listen_port INTEGER NOT NULL, server TEXT NOT NULL DEFAULT '', domain TEXT NOT NULL DEFAULT '',
+		ipv4_bind TEXT NOT NULL DEFAULT '', ipv6_bind TEXT NOT NULL DEFAULT '', auto_bind INTEGER NOT NULL DEFAULT 1,
+		service_name TEXT NOT NULL, service_manager TEXT NOT NULL, config_path TEXT NOT NULL,
+		config_version TEXT NOT NULL, ownership TEXT NOT NULL, shared_group TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL, secret_cipher TEXT NOT NULL, probe_status TEXT NOT NULL DEFAULT '',
+		probe_latency_ms INTEGER NOT NULL DEFAULT 0, probe_exit_ip TEXT NOT NULL DEFAULT '',
+		probe_target TEXT NOT NULL DEFAULT '', probe_error TEXT NOT NULL DEFAULT '', probe_checked_at INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var count int
+	if err = s.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('nodes') WHERE name='preferred_server'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("preferred_server migration missing: count=%d err=%v", count, err)
+	}
+}
+
 func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
