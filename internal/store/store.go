@@ -676,7 +676,7 @@ func (s *Store) Jobs(limit int) ([]model.Job, error) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.DB.Query("SELECT id,kind,target,status,progress,message,error,created_at,updated_at FROM jobs ORDER BY created_at DESC LIMIT ?", limit)
+	rows, err := s.DB.Query("SELECT id,kind,target,status,progress,message,error,created_at,updated_at FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}

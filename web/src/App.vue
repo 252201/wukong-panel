@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type Settings, type SingBoxMigrationPlan, type TrafficBucket, type TrafficTimeline } from './api'
 
@@ -17,6 +17,7 @@ const page = ref<Page>('overview')
 const overview = ref<Overview | null>(null)
 const nodes = ref<NodeItem[]>([])
 const jobs = ref<Job[]>([])
+const jobList = ref<HTMLElement | null>(null)
 const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, collectEndpoints: true })
 const endpoints = ref<EndpointStat[]>([])
 const timeline = ref<TrafficTimeline | null>(null)
@@ -191,11 +192,20 @@ async function refreshAll() {
   const [overviewData, nodeData, jobData, settingData, endpointData, timelineData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline()])
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; timeline.value = timelineData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
 }
+async function showJobLog(jobId: string) {
+  page.value = 'jobs'
+  await refreshAll()
+  const index = jobs.value.findIndex(job => job.id === jobId)
+  if (index > 0) jobs.value = [jobs.value[index], ...jobs.value.slice(0, index), ...jobs.value.slice(index + 1)]
+  await nextTick()
+  jobList.value?.scrollIntoView({ block: 'start', behavior: 'auto' })
+}
 async function createNode() {
   busy.value = true
   try {
     const creatingDeviceBatch = deviceMode.value
     const common = { ...createForm, v6OnlyDomains: createForm.v6OnlyDomains.split(',').map(item => item.trim()).filter(Boolean) }
+    let jobId = ''
     if (creatingDeviceBatch) {
       const requests = deviceNodes.map(device => ({
         ...common,
@@ -208,20 +218,17 @@ async function createNode() {
           webSocketPath: device.webSocketPath.trim(),
         } : {}),
       }))
-      await api.createNodeBatch(requests)
+      jobId = (await api.createNodeBatch(requests)).jobId
     } else {
-      await api.createNode(common)
+      jobId = (await api.createNode(common)).jobId
     }
-    modal.value = null; notify(creatingDeviceBatch ? `${deviceNodes.length} 台设备的部署任务已进入队列` : '部署任务已进入队列'); page.value = 'jobs'; await refreshAll()
+    modal.value = null; notify(creatingDeviceBatch ? `${deviceNodes.length} 台设备的部署任务已进入队列` : '部署任务已进入队列'); await showJobLog(jobId)
   } catch (error) { notify(error instanceof Error ? error.message : '部署失败') }
   finally { busy.value = false }
 }
 function newDeviceDraft(index: number): DeviceDraft {
   deviceSequence.value += 1
   return { key: deviceSequence.value, name: `设备 ${index + 1}`, listenPort: 0, server: '', preferredServer: '', webSocketPath: '' }
-}
-function cloudflarePathPattern(path: string) {
-  return `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
 }
 function resetDeviceDrafts() {
   deviceNodes.splice(0, deviceNodes.length, newDeviceDraft(0), newDeviceDraft(1))
@@ -315,15 +322,15 @@ async function renameNode() {
   if (!name || name === selectedNode.value.name) return
   busy.value = true
   try {
-    await api.renameNode(selectedNode.value.id, name)
-    modal.value = null; notify('重命名任务已创建'); page.value = 'jobs'; await refreshAll()
+    const result = await api.renameNode(selectedNode.value.id, name)
+    modal.value = null; notify('重命名任务已创建'); await showJobLog(result.jobId)
   } catch (error) { notify(error instanceof Error ? error.message : '重命名失败') }
   finally { busy.value = false }
 }
 async function deleteNode() {
   if (!selectedNode.value) return
   busy.value = true
-  try { await api.nodeAction(selectedNode.value.id, 'delete', deleteConfirm.value); modal.value = null; notify('删除任务已创建'); page.value = 'jobs'; await refreshAll() }
+  try { const result = await api.nodeAction(selectedNode.value.id, 'delete', deleteConfirm.value); modal.value = null; notify('删除任务已创建'); await showJobLog(result.jobId) }
   catch (error) { notify(error instanceof Error ? error.message : '删除失败') }
   finally { busy.value = false }
 }
@@ -339,7 +346,7 @@ async function openImport() {
 }
 async function importSelected() {
   busy.value = true
-  try { await api.importNodes(selectedCandidates.value); modal.value = null; page.value = 'jobs'; notify('接管任务已创建'); await refreshAll() }
+  try { const result = await api.importNodes(selectedCandidates.value); modal.value = null; notify('接管任务已创建'); await showJobLog(result.jobId) }
   catch (error) { notify(error instanceof Error ? error.message : '接管失败') }
   finally { busy.value = false }
 }
@@ -432,7 +439,6 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <div class="node-title-row"><h3>{{ node.name }}</h3><button type="button" title="重命名节点" :aria-label="`重命名节点 ${node.name}`" @click="openRename(node)">重命名</button></div>
             <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
             <div v-if="node.protocol === 'vless-ws-tunnel' && node.preferredServer" class="preferred-route"><span><small>优选接入</small><code>{{ node.preferredServer }}</code></span><i>→</i><span><small>SNI · WS HOST</small><code>{{ node.server }}</code></span></div>
-            <div v-if="node.protocol === 'vless-ws-tunnel' && node.webSocketPath" class="tunnel-origin tunnel-route"><span><small>Published application · Path</small><code>{{ cloudflarePathPattern(node.webSocketPath) }}</code></span><button type="button" title="复制 Cloudflare Path 正则" @click="copy(cloudflarePathPattern(node.webSocketPath))">复制</button></div>
             <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-origin"><span><small>Cloudflare Service</small><code>{{ tunnelOrigin(node) }}</code></span><button type="button" title="复制 Cloudflare Service URL" @click="copy(tunnelOrigin(node))">复制</button></div>
             <div class="node-specs"><span><small>出站策略</small><b>{{ modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ {{ node.ownership === 'managed' ? (node.protocol === 'vless-ws-tunnel' ? '设备编队 · 独立节点，共享 Tunnel 连接器' : '设备编队 · 独立端口、凭据与生命周期') : '与同配置内其他端点共享生命周期' }}</p>
@@ -483,7 +489,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 
       <div v-else-if="page === 'jobs'" class="page-content">
         <div class="page-intro"><div><p>MISSION LOG</p><h2>任务进度与操作留痕</h2></div><span>{{ jobs.length }} 条最近任务</span></div>
-        <section class="job-list panel-card"><div v-for="job in jobs" :key="job.id" class="job-row"><span class="job-icon" :class="job.status">{{ job.status === 'success' ? '✓' : job.status === 'failed' ? '!' : '↻' }}</span><div class="job-copy"><b>{{ jobLabel(job.kind) }}</b><small>{{ job.target }} · {{ new Date(job.createdAt).toLocaleString(language) }}</small><p v-if="job.error">{{ job.error }}</p></div><div class="job-progress"><span>{{ job.message }}</span><div><i :class="job.status" :style="{ width: `${job.progress}%` }"></i></div></div></div><p v-if="!jobs.length" class="empty">暂无任务记录。</p></section>
+        <section ref="jobList" class="job-list panel-card"><div v-for="job in jobs" :key="job.id" class="job-row"><span class="job-icon" :class="job.status">{{ job.status === 'success' ? '✓' : job.status === 'failed' ? '!' : '↻' }}</span><div class="job-copy"><b>{{ jobLabel(job.kind) }}</b><small>{{ job.target }} · {{ new Date(job.createdAt).toLocaleString(language) }}</small><p v-if="job.error">{{ job.error }}</p></div><div class="job-progress"><span>{{ job.message }}</span><div><i :class="job.status" :style="{ width: `${job.progress}%` }"></i></div></div></div><p v-if="!jobs.length" class="empty">暂无任务记录。</p></section>
       </div>
 
       <div v-else class="page-content settings-page">

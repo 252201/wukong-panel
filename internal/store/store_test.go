@@ -39,6 +39,32 @@ func TestAuthenticationLifecycle(t *testing.T) {
 	}
 }
 
+func TestJobsOrdersNewestInsertionFirstWhenTimestampsMatch(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	first, err := s.CreateJob("node.create", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateJob("node.delete", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec("UPDATE jobs SET created_at=?", time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.Jobs(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != second.ID || items[1].ID != first.ID {
+		t.Fatalf("jobs not ordered by newest insertion: %#v", items)
+	}
+}
+
 func TestDemoSeedIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "test.db"))
