@@ -3,32 +3,33 @@ package monitor
 import (
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 )
 
 func TestEndpointPacketUsesIPv4PacketLength(t *testing.T) {
 	var pending int64
-	if _, _, _, _, ok := endpointPacket("1700000000.1 IP (tos 0x0, ttl 64, id 1, offset 0, flags [DF], proto UDP (17), length 1280)", &pending); ok {
+	if _, _, _, _, _, ok := endpointPacket("1700000000.1 IP (tos 0x0, ttl 64, id 1, offset 0, flags [DF], proto UDP (17), length 1280)", &pending); ok {
 		t.Fatal("metadata line must not produce a packet")
 	}
-	port, host, clientPort, size, ok := endpointPacket("    192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 1252", &pending)
-	if !ok || port != 45080 || host != "198.51.100.20" || clientPort != "54321" || size != 1280 {
-		t.Fatalf("unexpected IPv4 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	transport, port, host, clientPort, size, ok := endpointPacket("    192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 1252", &pending)
+	if !ok || transport != "udp" || port != 45080 || host != "198.51.100.20" || clientPort != "54321" || size != 1280 {
+		t.Fatalf("unexpected IPv4 packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
 	}
 }
 
 func TestEndpointPacketIncludesIPv6Header(t *testing.T) {
 	var pending int64
 	endpointPacket("1700000000.2 IP6 (flowlabel 0x1, hlim 64, next-header UDP (17) payload length: 1240)", &pending)
-	port, host, clientPort, size, ok := endpointPacket("    2001:db8::1.45081 > 2001:db8::2.54322: UDP, length 1232", &pending)
-	if !ok || port != 45081 || host != "2001:db8::2" || clientPort != "54322" || size != 1280 {
-		t.Fatalf("unexpected IPv6 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	transport, port, host, clientPort, size, ok := endpointPacket("    2001:db8::1.45081 > 2001:db8::2.54322: UDP, length 1232", &pending)
+	if !ok || transport != "udp" || port != 45081 || host != "2001:db8::2" || clientPort != "54322" || size != 1280 {
+		t.Fatalf("unexpected IPv6 packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
 	}
 }
 
 func TestEndpointPacketRejectsLineWithoutLengthMetadata(t *testing.T) {
 	var pending int64
-	if _, _, _, _, ok := endpointPacket("192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 100", &pending); ok {
+	if _, _, _, _, _, ok := endpointPacket("192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 100", &pending); ok {
 		t.Fatal("endpoint without IP packet length metadata must be ignored")
 	}
 }
@@ -36,18 +37,41 @@ func TestEndpointPacketRejectsLineWithoutLengthMetadata(t *testing.T) {
 func TestEndpointPacketParsesAlpineSingleLineIPv6(t *testing.T) {
 	var pending int64
 	line := "1783909462.501781 eth0 Out IP6 (flowlabel 0x92a6f, hlim 64, next-header UDP (17) payload length: 1288) 2a01:db8::1.55119 > 2602:db8::2.56681: UDP, length 1280"
-	port, host, clientPort, size, ok := endpointPacket(line, &pending)
-	if !ok || port != 55119 || host != "2602:db8::2" || clientPort != "56681" || size != 1328 {
-		t.Fatalf("unexpected Alpine IPv6 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	transport, port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || transport != "udp" || port != 55119 || host != "2602:db8::2" || clientPort != "56681" || size != 1328 {
+		t.Fatalf("unexpected Alpine IPv6 packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
 	}
 }
 
 func TestEndpointPacketParsesAlpineSingleLineIPv4(t *testing.T) {
 	var pending int64
 	line := "1783909462.501781 eth0 Out IP (tos 0x0, ttl 64, id 1, offset 0, flags [DF], proto UDP (17), length 1280) 192.0.2.10.45115 > 198.51.100.20.56681: UDP, length 1252"
-	port, host, clientPort, size, ok := endpointPacket(line, &pending)
-	if !ok || port != 45115 || host != "198.51.100.20" || clientPort != "56681" || size != 1280 {
-		t.Fatalf("unexpected Alpine IPv4 packet: %d %q %q %d %v", port, host, clientPort, size, ok)
+	transport, port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || transport != "udp" || port != 45115 || host != "198.51.100.20" || clientPort != "56681" || size != 1280 {
+		t.Fatalf("unexpected Alpine IPv4 packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
+	}
+}
+
+func TestEndpointPacketCountsTCPPayloadAndSkipsACK(t *testing.T) {
+	var pending int64
+	endpointPacket("1700000000.3 IP (tos 0x0, ttl 64, id 2, offset 0, flags [DF], proto TCP (6), length 120)", &pending)
+	transport, port, host, clientPort, size, ok := endpointPacket("    127.0.0.1.45116 > 127.0.0.1.53324: Flags [P.], seq 1:81, ack 1, win 512, length 80", &pending)
+	if !ok || transport != "tcp" || port != 45116 || host != "127.0.0.1" || clientPort != "53324" || size != 80 {
+		t.Fatalf("unexpected TCP payload packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
+	}
+
+	endpointPacket("1700000000.4 IP (tos 0x0, ttl 64, id 3, offset 0, flags [DF], proto TCP (6), length 40)", &pending)
+	if _, _, _, _, _, ok := endpointPacket("    127.0.0.1.45116 > 127.0.0.1.53324: Flags [.], ack 81, win 512, length 0", &pending); ok {
+		t.Fatal("TCP ACK without payload must not count as device traffic")
+	}
+}
+
+func TestEndpointPacketParsesLinuxAnySingleLineTCP(t *testing.T) {
+	var pending int64
+	line := "1783909462.501781 lo In IP (tos 0x0, ttl 64, id 4, offset 0, flags [DF], proto TCP (6), length 104) 127.0.0.1.45116 > 127.0.0.1.53324: Flags [P.], seq 1:65, ack 1, win 512, length 64"
+	transport, port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || transport != "tcp" || port != 45116 || host != "127.0.0.1" || clientPort != "53324" || size != 64 {
+		t.Fatalf("unexpected Linux any TCP packet: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
 	}
 }
 
@@ -107,15 +131,30 @@ func TestProcessSnapshotOnLinux(t *testing.T) {
 	}
 }
 
-func TestUDPEndpointProtocolFilter(t *testing.T) {
-	for _, protocol := range []string{"hysteria2", "tuic", "shadowsocks"} {
-		if !udpEndpointProtocol(protocol) {
-			t.Fatalf("UDP endpoint protocol %s was excluded", protocol)
+func TestEndpointProtocolTransports(t *testing.T) {
+	tests := map[string]string{
+		"hysteria2":       "udp",
+		"tuic":            "udp",
+		"shadowsocks":     "udp,tcp",
+		"vless":           "tcp",
+		"vless-ws-tunnel": "tcp",
+		"trojan":          "tcp",
+		"unknown":         "",
+	}
+	for protocol, want := range tests {
+		if got := strings.Join(endpointTransports(protocol), ","); got != want {
+			t.Fatalf("endpointTransports(%q) = %q, want %q", protocol, got, want)
 		}
 	}
-	for _, protocol := range []string{"vless", "trojan", "unknown"} {
-		if udpEndpointProtocol(protocol) {
-			t.Fatalf("TCP-only protocol %s was included in UDP capture", protocol)
-		}
+}
+
+func TestEndpointCaptureFilterSeparatesTCPAndUDPPorts(t *testing.T) {
+	ports := map[string]map[int]struct{}{
+		"udp": {45115: {}, 45080: {}},
+		"tcp": {45116: {}, 45080: {}},
+	}
+	want := "(udp and (src port 45080 or src port 45115)) or (tcp and (src port 45080 or src port 45116))"
+	if got := endpointCaptureFilter(ports); got != want {
+		t.Fatalf("endpointCaptureFilter() = %q, want %q", got, want)
 	}
 }
