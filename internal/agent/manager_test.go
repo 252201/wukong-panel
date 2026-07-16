@@ -193,6 +193,51 @@ func TestRenameUpdatesOnlyNodeMetadata(t *testing.T) {
 	}
 }
 
+func TestEditDeviceNodePreservesCredentialAndUpdatesSharedRuntime(t *testing.T) {
+	manager, database := newDemoManager(t)
+	requests := []model.NodeCreateRequest{
+		{Protocol: protocolHysteria2, Name: "iPhone", Mode: "prefer_v6", ListenPort: 45115, Server: "node.example.com", Domain: "node.example.com", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", AutoBind: true, V6OnlyDomains: []string{"chatgpt.com"}},
+		{Protocol: protocolHysteria2, Name: "Mac", Mode: "prefer_v6", ListenPort: 45116, Server: "node.example.com", Domain: "node.example.com", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", AutoBind: true, V6OnlyDomains: []string{"chatgpt.com"}},
+	}
+	nodes, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: requests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := database.Node(t.Context(), nodes[0].ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSecret, err := manager.vault.Decrypt(before.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := model.NodeEditRequest{Name: "iPhone18", Mode: "v4only", ListenPort: 45125, Server: "new.example.com", Domain: "new.example.com", IPv4Bind: "192.0.2.8", AutoBind: false}
+	if err = manager.Edit(t.Context(), nodes[0].ID, edit); err != nil {
+		t.Fatal(err)
+	}
+	first, err := database.Node(t.Context(), nodes[0].ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.Node(t.Context(), nodes[1].ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterSecret, err := manager.vault.Decrypt(first.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Name != "iPhone18" || first.ListenPort != 45125 || first.Server != "new.example.com" || first.Mode != "v4only" || first.IPv4Bind != "192.0.2.8" || first.IPv6Bind != "" {
+		t.Fatalf("unexpected edited node: %#v", first)
+	}
+	if second.Name != "Mac" || second.ListenPort != 45116 || second.Mode != "v4only" || second.IPv4Bind != "192.0.2.8" || second.IPv6Bind != "" {
+		t.Fatalf("shared runtime settings not propagated: %#v", second)
+	}
+	if beforeSecret != afterSecret {
+		t.Fatal("editing changed the node credential")
+	}
+}
+
 func TestDemoProbeActionStoresSuccessfulRoundTrip(t *testing.T) {
 	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

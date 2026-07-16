@@ -50,6 +50,12 @@ func (d directAgent) Create(ctx context.Context, r model.NodeCreateRequest) (mod
 func (d directAgent) CreateBatch(ctx context.Context, r model.NodeBatchCreateRequest) ([]model.Node, error) {
 	return d.manager.CreateBatch(ctx, r)
 }
+func (d directAgent) EditDetails(ctx context.Context, id string) (model.NodeEditDetails, error) {
+	return d.manager.EditDetails(ctx, id)
+}
+func (d directAgent) Edit(ctx context.Context, id string, r model.NodeEditRequest) error {
+	return d.manager.Edit(ctx, id, r)
+}
 func (d directAgent) Action(ctx context.Context, id string, r model.NodeActionRequest) error {
 	return d.manager.Action(ctx, id, r.Action, r.ConfirmName)
 }

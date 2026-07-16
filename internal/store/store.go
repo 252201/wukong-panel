@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 CREATE TABLE IF NOT EXISTS process_recent (
   pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
-  memory_percent REAL NOT NULL, updated_at INTEGER NOT NULL
+  memory_percent REAL NOT NULL, node_names TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS process_state (
   id INTEGER PRIMARY KEY CHECK(id=1), total_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
@@ -133,6 +134,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 		if err := s.ensureColumn("nodes", name, definition); err != nil {
 			return err
 		}
+	}
+	if err := s.ensureColumn("process_recent", "node_names", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
 	}
 	defaults := map[string]string{
 		"language": "zh-CN", "timezone": "Asia/Shanghai", "interface": "auto",
@@ -387,6 +391,43 @@ func (s *Store) RenameNode(ctx context.Context, id, name string) error {
 	}
 	return tx.Commit()
 }
+
+// UpdateManagedNodeEdit atomically persists one managed node edit. When the
+// node belongs to a shared runtime, outbound settings are kept identical for
+// every member because a single sing-box config owns that route section.
+func (s *Store) UpdateManagedNodeEdit(ctx context.Context, node model.Node, secretCipher string, updateSharedRuntime bool) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if updateSharedRuntime {
+		if strings.TrimSpace(node.SharedGroup) == "" {
+			return errors.New("shared group is required")
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE nodes SET mode=?,ipv4_bind=?,ipv6_bind=?,auto_bind=?,updated_at=? WHERE shared_group=? AND ownership='managed'`, node.Mode, node.IPv4Bind, node.IPv6Bind, boolInt(node.AutoBind), time.Now().Unix(), node.SharedGroup); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE nodes SET name=?,mode=?,listen_port=?,server=?,domain=?,preferred_server=?,websocket_path=?,ipv4_bind=?,ipv6_bind=?,auto_bind=?,secret_cipher=?,updated_at=? WHERE id=? AND ownership='managed'`, node.Name, node.Mode, node.ListenPort, node.Server, node.Domain, node.PreferredServer, node.WebSocketPath, node.IPv4Bind, node.IPv6Bind, boolInt(node.AutoBind), secretCipher, time.Now().Unix(), node.ID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return sql.ErrNoRows
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE endpoint_recent SET node_name=? WHERE node_id=?", node.Name, node.ID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE endpoint_daily SET node_name=? WHERE node_id=?", node.Name, node.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 func (s *Store) DeleteNode(id string) error {
 	_, err := s.DB.Exec("DELETE FROM nodes WHERE id=?", id)
 	return err
@@ -510,7 +551,8 @@ func (s *Store) ReplaceProcesses(ts int64, totalCount int, processes []model.Pro
 		if process.PID <= 0 || process.Name == "" {
 			continue
 		}
-		if _, err = tx.Exec(`INSERT INTO process_recent(pid,name,cpu,rss_bytes,memory_percent,updated_at) VALUES(?,?,?,?,?,?)`, process.PID, process.Name, process.CPU, process.RSSBytes, process.MemoryPercent, ts); err != nil {
+		nodeNames, _ := json.Marshal(process.Nodes)
+		if _, err = tx.Exec(`INSERT INTO process_recent(pid,name,cpu,rss_bytes,memory_percent,node_names,updated_at) VALUES(?,?,?,?,?,?,?)`, process.PID, process.Name, process.CPU, process.RSSBytes, process.MemoryPercent, string(nodeNames), ts); err != nil {
 			return err
 		}
 	}
@@ -528,7 +570,7 @@ func (s *Store) Processes(limit int) ([]model.ProcessStat, int, error) {
 	if err := s.DB.QueryRow("SELECT total_count FROM process_state WHERE id=1").Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.DB.Query(`SELECT pid,name,cpu,rss_bytes,memory_percent FROM process_recent ORDER BY cpu DESC,rss_bytes DESC LIMIT ?`, limit)
+	rows, err := s.DB.Query(`SELECT pid,name,cpu,rss_bytes,memory_percent,node_names FROM process_recent ORDER BY cpu DESC,rss_bytes DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -536,9 +578,11 @@ func (s *Store) Processes(limit int) ([]model.ProcessStat, int, error) {
 	items := []model.ProcessStat{}
 	for rows.Next() {
 		var item model.ProcessStat
-		if err = rows.Scan(&item.PID, &item.Name, &item.CPU, &item.RSSBytes, &item.MemoryPercent); err != nil {
+		var nodeNames string
+		if err = rows.Scan(&item.PID, &item.Name, &item.CPU, &item.RSSBytes, &item.MemoryPercent, &nodeNames); err != nil {
 			return nil, 0, err
 		}
+		_ = json.Unmarshal([]byte(nodeNames), &item.Nodes)
 		items = append(items, item)
 	}
 	return items, total, rows.Err()

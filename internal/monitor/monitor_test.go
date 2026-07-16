@@ -110,12 +110,23 @@ func TestProcessDisplayNameOnlyClassifiesWukongSubcommands(t *testing.T) {
 	}
 }
 
+func TestProcessConfigPath(t *testing.T) {
+	for _, cmdline := range []string{
+		"/etc/s-box/sing-box\x00run\x00-c\x00/etc/s-box/device-group.json\x00",
+		"/etc/s-box/sing-box\x00run\x00--config=/etc/s-box/device-group.json\x00",
+	} {
+		if got := processConfigPath([]byte(cmdline)); got != "/etc/s-box/device-group.json" {
+			t.Fatalf("unexpected process config path %q", got)
+		}
+	}
+}
+
 func TestProcessSnapshotOnLinux(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("requires Linux procfs")
 	}
 	collector := &Collector{lastProcessCPU: map[int]uint64{}}
-	items, count := collector.processSnapshot(1_000_000_000)
+	items, count := collector.processSnapshot(1_000_000_000, nil)
 	if count == 0 || len(items) == 0 {
 		t.Fatalf("empty Linux process snapshot: count=%d items=%d", count, len(items))
 	}

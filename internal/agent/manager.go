@@ -1188,6 +1188,293 @@ func (m *Manager) Rename(ctx context.Context, id string, request model.NodeRenam
 	return nil
 }
 
+func (m *Manager) EditDetails(ctx context.Context, id string) (model.NodeEditDetails, error) {
+	node, err := m.store.Node(ctx, id, false)
+	if err != nil {
+		return model.NodeEditDetails{}, err
+	}
+	if node.Ownership != "managed" {
+		return model.NodeEditDetails{}, errors.New("only Wukong-managed nodes can be edited")
+	}
+	domains := []string{}
+	if !m.cfg.Demo {
+		data, readErr := os.ReadFile(node.ConfigPath)
+		if readErr != nil {
+			return model.NodeEditDetails{}, readErr
+		}
+		var root map[string]any
+		if json.Unmarshal(data, &root) != nil {
+			return model.NodeEditDetails{}, errors.New("managed node configuration is invalid")
+		}
+		domains = v6OnlyDomainsFromConfig(root)
+	}
+	return model.NodeEditDetails{Node: node, V6OnlyDomains: domains}, nil
+}
+
+func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditRequest) error {
+	node, err := m.store.Node(ctx, id, true)
+	if err != nil {
+		return err
+	}
+	if node.Ownership != "managed" {
+		return errors.New("only Wukong-managed nodes can be edited")
+	}
+	if !m.cfg.Demo {
+		if err = m.validateManagedNode(node); err != nil {
+			return err
+		}
+	}
+	secret, err := m.vault.Decrypt(node.Secret)
+	if err != nil {
+		return err
+	}
+	credentials, err := decodeProtocolCredentials(node.Protocol, secret)
+	if err != nil {
+		return err
+	}
+	request := model.NodeCreateRequest{
+		Protocol: node.Protocol, Name: edit.Name, Mode: edit.Mode, ListenPort: edit.ListenPort,
+		Server: edit.Server, Domain: edit.Domain, PreferredServer: edit.PreferredServer,
+		WebSocketPath: edit.WebSocketPath, IPv4Bind: edit.IPv4Bind, IPv6Bind: edit.IPv6Bind,
+		AutoBind: edit.AutoBind, V6OnlyDomains: normalizeDomainList(edit.V6OnlyDomains),
+		TunnelToken: credentials.TunnelToken,
+	}
+	request, err = prepareCreateRequest(request)
+	if err != nil {
+		return err
+	}
+	if request.ListenPort == 0 {
+		request.ListenPort, err = freeProtocolPort(node.Protocol)
+		if err != nil {
+			return err
+		}
+	}
+	allNodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, other := range allNodes {
+		if other.ID == node.ID {
+			continue
+		}
+		if request.ListenPort != node.ListenPort && other.ListenPort == request.ListenPort {
+			return fmt.Errorf("listen port %d is already assigned to %s", request.ListenPort, other.Name)
+		}
+		if node.Protocol == protocolVLESSWSTunnel && other.Protocol == protocolVLESSWSTunnel && strings.EqualFold(strings.TrimSpace(other.Server), request.Server) {
+			return fmt.Errorf("Cloudflare hostname %s is already assigned to %s", request.Server, other.Name)
+		}
+	}
+	if request.ListenPort != node.ListenPort && !protocolPortAvailable(node.Protocol, request.ListenPort) {
+		return fmt.Errorf("listen port %d is already in use", request.ListenPort)
+	}
+
+	sharedRuntime, runtimeNodes, err := m.managedSharedRuntime(ctx, node)
+	if err != nil {
+		return err
+	}
+	if !sharedRuntime {
+		runtimeNodes = []model.Node{node}
+	}
+	if m.cfg.Demo {
+		credentials.WebSocketPath = request.WebSocketPath
+		encoded, encodeErr := encodeProtocolCredentials(credentials)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		cipher, encryptErr := m.vault.Encrypt(encoded)
+		if encryptErr != nil {
+			return encryptErr
+		}
+		updated := editedNode(node, request)
+		return m.store.UpdateManagedNodeEdit(ctx, updated, cipher, sharedRuntime)
+	}
+
+	original, err := os.ReadFile(node.ConfigPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err = json.Unmarshal(original, &root); err != nil {
+		return err
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	if len(inbounds) == 0 {
+		return errors.New("managed configuration has no inbounds")
+	}
+	newInbounds := make([]any, 0, len(runtimeNodes))
+	var targetCipher string
+	for _, runtimeNode := range runtimeNodes {
+		stored, nodeErr := m.store.Node(ctx, runtimeNode.ID, true)
+		if nodeErr != nil {
+			return nodeErr
+		}
+		storedSecret, decryptErr := m.vault.Decrypt(stored.Secret)
+		if decryptErr != nil {
+			return decryptErr
+		}
+		storedCredentials, decodeErr := decodeProtocolCredentials(stored.Protocol, storedSecret)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		runtimeRequest := requestFromNode(stored, request.V6OnlyDomains)
+		runtimeRequest.Mode = request.Mode
+		runtimeRequest.IPv4Bind = request.IPv4Bind
+		runtimeRequest.IPv6Bind = request.IPv6Bind
+		runtimeRequest.AutoBind = request.AutoBind
+		if stored.ID == node.ID {
+			runtimeRequest = request
+			storedCredentials.WebSocketPath = request.WebSocketPath
+			encoded, encodeErr := encodeProtocolCredentials(storedCredentials)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			targetCipher, err = m.vault.Encrypt(encoded)
+			if err != nil {
+				return err
+			}
+		}
+		oldInbound := inboundByPort(inbounds, stored.ListenPort)
+		if oldInbound == nil {
+			return fmt.Errorf("inbound on port %d was not found", stored.ListenPort)
+		}
+		certPath, keyPath := certificatePathsFromInbound(oldInbound)
+		if protocolUsesCertificate(stored.Protocol) && !certificatePairCoversDomain(certPath, keyPath, runtimeRequest.Domain) {
+			if certificatePairCoversDomain(m.cfg.TLSCertFile, m.cfg.TLSKeyFile, runtimeRequest.Domain) {
+				certPath, keyPath = m.cfg.TLSCertFile, m.cfg.TLSKeyFile
+			} else {
+				return fmt.Errorf("current certificate does not cover TLS domain %s; issue or install a matching certificate before editing", runtimeRequest.Domain)
+			}
+		}
+		inbound, buildErr := buildProtocolInbound(runtimeRequest, runtimeRequest.ListenPort, storedCredentials, certPath, keyPath)
+		if buildErr != nil {
+			return buildErr
+		}
+		newInbounds = append(newInbounds, inbound)
+	}
+	payload, err := buildConfigWithInbounds(request, newInbounds, m.Version(ctx))
+	if err != nil {
+		return err
+	}
+	if err = m.backup(node); err != nil {
+		return err
+	}
+	tmp := node.ConfigPath + ".edit.tmp"
+	if err = os.WriteFile(tmp, payload, 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+		return fmt.Errorf("edited configuration check failed: %w", err)
+	}
+	wasActive := m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active"
+	if err = os.Rename(tmp, node.ConfigPath); err != nil {
+		return err
+	}
+	rollback := func() error {
+		if restoreErr := os.WriteFile(node.ConfigPath, original, 0o600); restoreErr != nil {
+			return restoreErr
+		}
+		if wasActive {
+			return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
+		}
+		return nil
+	}
+	if wasActive {
+		if err = m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err != nil {
+			if restoreErr := rollback(); restoreErr != nil {
+				return fmt.Errorf("edited service restart failed: %w (rollback failed: %v)", err, restoreErr)
+			}
+			return fmt.Errorf("edited service restart failed; previous configuration restored: %w", err)
+		}
+	}
+	updated := editedNode(node, request)
+	if err = m.store.UpdateManagedNodeEdit(ctx, updated, targetCipher, sharedRuntime); err != nil {
+		if restoreErr := rollback(); restoreErr != nil {
+			return fmt.Errorf("persist edited node failed: %w (configuration rollback failed: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("persist edited node failed; previous configuration restored: %w", err)
+	}
+	_ = m.store.Audit("admin", "node_edit", node.ID, fmt.Sprintf("%s port=%d mode=%s", updated.Name, updated.ListenPort, updated.Mode))
+	return nil
+}
+
+func editedNode(node model.Node, request model.NodeCreateRequest) model.Node {
+	node.Name, node.Mode, node.ListenPort = strings.TrimSpace(request.Name), request.Mode, request.ListenPort
+	node.Server, node.Domain = request.Server, request.Domain
+	node.PreferredServer, node.WebSocketPath = request.PreferredServer, request.WebSocketPath
+	node.IPv4Bind, node.IPv6Bind, node.AutoBind = request.IPv4Bind, request.IPv6Bind, request.AutoBind
+	return node
+}
+
+func requestFromNode(node model.Node, domains []string) model.NodeCreateRequest {
+	return model.NodeCreateRequest{Protocol: node.Protocol, Name: node.Name, Mode: node.Mode, ListenPort: node.ListenPort, Server: node.Server, Domain: node.Domain, PreferredServer: node.PreferredServer, WebSocketPath: node.WebSocketPath, IPv4Bind: node.IPv4Bind, IPv6Bind: node.IPv6Bind, AutoBind: node.AutoBind, V6OnlyDomains: domains}
+}
+
+func normalizeDomainList(values []string) []string {
+	result, seen := []string{}, map[string]bool{}
+	for _, value := range values {
+		value = strings.Trim(strings.ToLower(strings.TrimSpace(value)), ".")
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func v6OnlyDomainsFromConfig(root map[string]any) []string {
+	route, _ := root["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	for _, item := range rules {
+		rule, _ := item.(map[string]any)
+		if stringValue(rule["outbound"]) != "out-v6only" {
+			continue
+		}
+		values, _ := rule["domain_suffix"].([]any)
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			if domain := stringValue(value); domain != "" {
+				result = append(result, domain)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func inboundByPort(inbounds []any, port int) map[string]any {
+	for _, item := range inbounds {
+		inbound, _ := item.(map[string]any)
+		if int(numberValue(inbound["listen_port"])) == port {
+			return inbound
+		}
+	}
+	return nil
+}
+
+func certificatePathsFromInbound(inbound map[string]any) (string, string) {
+	tlsConfig, _ := inbound["tls"].(map[string]any)
+	return stringValue(tlsConfig["certificate_path"]), stringValue(tlsConfig["key_path"])
+}
+
+func protocolPortAvailable(protocol string, port int) bool {
+	if protocolUsesTCP(protocol) {
+		listener, err := net.Listen("tcp", fmt.Sprintf("[::]:%d", port))
+		if err != nil {
+			return false
+		}
+		_ = listener.Close()
+	}
+	if protocolUsesUDP(protocol) {
+		packet, err := net.ListenPacket("udp", fmt.Sprintf("[::]:%d", port))
+		if err != nil {
+			return false
+		}
+		_ = packet.Close()
+	}
+	return true
+}
+
 func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 	node, err := m.store.Node(ctx, id, true)
 	if err != nil {
