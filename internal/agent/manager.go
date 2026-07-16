@@ -41,6 +41,7 @@ type Manager struct {
 }
 
 func (m *Manager) RunReconciler(ctx context.Context) {
+	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileRuntimeVersion(ctx)
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
@@ -49,10 +50,177 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			_ = m.ReconcileDeviceGroups(ctx)
 			_ = m.ReconcileRuntimeVersion(ctx)
 			_ = m.ReconcileBindings(ctx)
 		}
 	}
+}
+
+func (m *Manager) ReconcileDeviceGroups(ctx context.Context) error {
+	if m.cfg.Demo {
+		return nil
+	}
+	nodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	groups := map[string][]model.Node{}
+	for _, node := range nodes {
+		if node.Ownership == "managed" && strings.TrimSpace(node.SharedGroup) != "" {
+			groups[node.SharedGroup] = append(groups[node.SharedGroup], node)
+		}
+	}
+	errorsByGroup := []string{}
+	for group, groupNodes := range groups {
+		if len(groupNodes) < 2 || deviceGroupAlreadyShared(groupNodes) {
+			continue
+		}
+		if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(group) {
+			errorsByGroup = append(errorsByGroup, fmt.Sprintf("%s: invalid group identifier", group))
+			continue
+		}
+		if err := m.consolidateDeviceGroup(ctx, group, groupNodes); err != nil {
+			errorsByGroup = append(errorsByGroup, fmt.Sprintf("%s: %v", group, err))
+			_ = m.store.Audit("agent", "device_group_consolidation_failed", group, err.Error())
+		}
+	}
+	if len(errorsByGroup) > 0 {
+		return errors.New(strings.Join(errorsByGroup, "; "))
+	}
+	return nil
+}
+
+func deviceGroupAlreadyShared(nodes []model.Node) bool {
+	if len(nodes) < 2 {
+		return false
+	}
+	first := nodes[0]
+	for _, node := range nodes[1:] {
+		if node.ServiceName != first.ServiceName || node.ServiceManager != first.ServiceManager || node.ConfigPath != first.ConfigPath {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Manager) consolidateDeviceGroup(ctx context.Context, group string, nodes []model.Node) error {
+	first := nodes[0]
+	payload, err := mergeDeviceGroupConfigs(nodes)
+	if err != nil {
+		return err
+	}
+	manager := first.ServiceManager
+	service := "sing-box-wukong-" + group
+	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+group+".json")
+	checkPath := configPath + ".consolidate.tmp"
+	if err = os.WriteFile(checkPath, payload, 0o600); err != nil {
+		return err
+	}
+	if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", checkPath); err != nil {
+		_ = os.Remove(checkPath)
+		return fmt.Errorf("merged configuration check failed: %w", err)
+	}
+	_ = os.Remove(checkPath)
+	for _, node := range nodes {
+		if err = m.backup(node); err != nil {
+			return fmt.Errorf("backup legacy device %s: %w", node.Name, err)
+		}
+	}
+	oldServices := map[string]model.Node{}
+	wasActive := false
+	for _, node := range nodes {
+		key := node.ServiceManager + "\x00" + node.ServiceName
+		oldServices[key] = node
+		if m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active" {
+			wasActive = true
+		}
+	}
+	stopped := []model.Node{}
+	for _, node := range oldServices {
+		if m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) != "active" {
+			continue
+		}
+		if err = m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName); err != nil {
+			for _, previous := range stopped {
+				_ = m.serviceCommand(ctx, previous.ServiceManager, "start", previous.ServiceName)
+			}
+			return fmt.Errorf("stop legacy service %s: %w", node.ServiceName, err)
+		}
+		stopped = append(stopped, node)
+	}
+	target := model.Node{ID: group, Protocol: first.Protocol, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, Ownership: "managed", SharedGroup: group}
+	if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
+		_ = m.cleanupFailedCreate(ctx, target, false)
+		for _, node := range stopped {
+			_ = m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName)
+		}
+		return fmt.Errorf("start consolidated service: %w", err)
+	}
+	status := "active"
+	if !wasActive {
+		status = "inactive"
+		if err = m.serviceCommand(ctx, manager, "stop", service); err != nil {
+			_ = m.cleanupFailedCreate(ctx, target, false)
+			return fmt.Errorf("preserve inactive group state: %w", err)
+		}
+	}
+	version := m.Version(ctx)
+	if err = m.store.UpdateNodeGroupRuntime(ctx, group, service, manager, configPath, version, status); err != nil {
+		_ = m.cleanupFailedCreate(ctx, target, false)
+		for _, node := range stopped {
+			_ = m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName)
+		}
+		return fmt.Errorf("persist consolidated runtime: %w", err)
+	}
+	for _, node := range oldServices {
+		if node.ServiceName == service && node.ServiceManager == manager {
+			continue
+		}
+		_ = m.disableService(ctx, node)
+		_ = m.removeService(node)
+		if node.ConfigPath != configPath {
+			_ = os.Remove(node.ConfigPath)
+		}
+	}
+	_ = m.store.Audit("agent", "device_group_consolidated", group, fmt.Sprintf("nodes=%d service=%s", len(nodes), service))
+	return nil
+}
+
+func mergeDeviceGroupConfigs(nodes []model.Node) ([]byte, error) {
+	if len(nodes) < 2 {
+		return nil, errors.New("at least two device nodes are required for consolidation")
+	}
+	var root map[string]any
+	inbounds := make([]any, 0, len(nodes))
+	for index, node := range nodes {
+		data, err := os.ReadFile(node.ConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", node.ConfigPath, err)
+		}
+		var current map[string]any
+		if err = json.Unmarshal(data, &current); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", node.ConfigPath, err)
+		}
+		if index == 0 {
+			root = current
+		}
+		currentInbounds, _ := current["inbounds"].([]any)
+		found := false
+		for _, item := range currentInbounds {
+			inbound, _ := item.(map[string]any)
+			if int(numberValue(inbound["listen_port"])) == node.ListenPort {
+				inbounds = append(inbounds, item)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("inbound port %d for %s was not found", node.ListenPort, node.Name)
+		}
+	}
+	root["inbounds"] = inbounds
+	return json.MarshalIndent(root, "", "  ")
 }
 
 func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
@@ -289,6 +457,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 	tunnelHostnames := map[string]bool{}
 	tunnelToken := ""
 	protocol := ""
+	var sharedRequest model.NodeCreateRequest
 	for index, item := range request.Nodes {
 		value, err := prepareCreateRequest(item)
 		if err != nil {
@@ -296,8 +465,11 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 		}
 		if protocol == "" {
 			protocol = value.Protocol
+			sharedRequest = value
 		} else if value.Protocol != protocol {
 			return nil, errors.New("all device nodes in a batch must use the same protocol")
+		} else if !sameBatchRuntimeSettings(sharedRequest, value) {
+			return nil, errors.New("all device nodes in a batch must use the same outbound mode, bind addresses and IPv6 domain policy")
 		}
 		nameKey := strings.ToLower(strings.TrimSpace(value.Name))
 		if names[nameKey] {
@@ -329,27 +501,180 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 		return nil, err
 	}
 	group = "devices-" + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(group))
-	created := make([]model.Node, 0, len(prepared))
-	for index, item := range prepared {
-		node, createErr := m.createPrepared(ctx, item, group, index == 0)
-		if createErr == nil {
-			created = append(created, node)
-			continue
-		}
-		rollbackErrors := []string{}
-		for rollbackIndex := len(created) - 1; rollbackIndex >= 0; rollbackIndex-- {
-			rollbackNode := created[rollbackIndex]
-			if rollbackErr := m.Action(ctx, rollbackNode.ID, "delete", rollbackNode.Name); rollbackErr != nil {
-				rollbackErrors = append(rollbackErrors, rollbackErr.Error())
-			}
-		}
-		if len(rollbackErrors) > 0 {
-			return nil, fmt.Errorf("device %d deployment failed: %w (batch rollback failed: %s)", index+1, createErr, strings.Join(rollbackErrors, "; "))
-		}
-		return nil, fmt.Errorf("device %d deployment failed: %w; previously created devices were rolled back", index+1, createErr)
+	created, err := m.createDeviceGroup(ctx, prepared, group)
+	if err != nil {
+		return nil, err
 	}
 	_ = m.store.Audit("admin", "create_device_batch", group, fmt.Sprintf("protocol=%s nodes=%d", protocol, len(created)))
 	return created, nil
+}
+
+func sameBatchRuntimeSettings(a, b model.NodeCreateRequest) bool {
+	if a.Mode != b.Mode || a.IPv4Bind != b.IPv4Bind || a.IPv6Bind != b.IPv6Bind || a.AutoBind != b.AutoBind || len(a.V6OnlyDomains) != len(b.V6OnlyDomains) {
+		return false
+	}
+	for index := range a.V6OnlyDomains {
+		if a.V6OnlyDomains[index] != b.V6OnlyDomains[index] {
+			return false
+		}
+	}
+	return true
+}
+
+type preparedDeviceNode struct {
+	node         model.Node
+	request      model.NodeCreateRequest
+	credentials  protocolCredentials
+	cipher       string
+	certPath     string
+	keyPath      string
+	generateCert bool
+}
+
+func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCreateRequest, group string) ([]model.Node, error) {
+	manager := detectServiceManager()
+	service := "sing-box-wukong-" + group
+	configPath := filepath.Join(m.cfg.ConfigDir, "wukong-"+group+".json")
+	version := m.Version(ctx)
+	if m.cfg.Demo {
+		version = "1.14-demo"
+	}
+	usedPorts := map[int]bool{}
+	prepared := make([]preparedDeviceNode, 0, len(requests))
+	for index, request := range requests {
+		port := request.ListenPort
+		if port == 0 {
+			var err error
+			port, err = freeUnusedProtocolPort(request.Protocol, usedPorts)
+			if err != nil {
+				return nil, fmt.Errorf("device %d: %w", index+1, err)
+			}
+		}
+		if usedPorts[port] {
+			return nil, fmt.Errorf("device %d: duplicate listen port %d", index+1, port)
+		}
+		usedPorts[port] = true
+		id, err := security.RandomToken(8)
+		if err != nil {
+			return nil, err
+		}
+		id = strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(id))
+		credentials, err := generateProtocolCredentials(request.Protocol, request.Password)
+		if err != nil {
+			return nil, fmt.Errorf("device %d: %w", index+1, err)
+		}
+		if request.Protocol == protocolVLESSWSTunnel {
+			credentials.WebSocketPath = request.WebSocketPath
+			credentials.TunnelToken = request.TunnelToken
+		}
+		secret, err := encodeProtocolCredentials(credentials)
+		if err != nil {
+			return nil, err
+		}
+		cipher, err := m.vault.Encrypt(secret)
+		if err != nil {
+			return nil, err
+		}
+		certPath, keyPath, generateCertificate := "", "", false
+		if protocolUsesCertificate(request.Protocol) {
+			certPath, keyPath, generateCertificate, err = m.certificatePaths(request, id)
+			if err != nil {
+				return nil, fmt.Errorf("device %d: %w", index+1, err)
+			}
+		}
+		node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
+		prepared = append(prepared, preparedDeviceNode{node: node, request: request, credentials: credentials, cipher: cipher, certPath: certPath, keyPath: keyPath, generateCert: generateCertificate})
+	}
+	identity := prepared[0].node
+	installedRuntime := false
+	installedTunnel := false
+	cleanup := func() {
+		if installedTunnel {
+			_ = m.removeCloudflaredService(ctx, identity)
+		}
+		if installedRuntime {
+			_ = m.cleanupFailedCreate(ctx, identity, false)
+		}
+	}
+	if !m.cfg.Demo {
+		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
+			return nil, err
+		}
+		inbounds := make([]any, 0, len(prepared))
+		for index := range prepared {
+			item := &prepared[index]
+			if item.generateCert {
+				sni := item.request.Domain
+				if sni == "" {
+					sni = "www.bing.com"
+				}
+				if err := generateSelfSigned(item.keyPath, item.certPath, sni); err != nil {
+					return nil, fmt.Errorf("device %d: %w", index+1, err)
+				}
+			}
+			inbound, err := buildProtocolInbound(item.request, item.node.ListenPort, item.credentials, item.certPath, item.keyPath)
+			if err != nil {
+				return nil, fmt.Errorf("device %d: %w", index+1, err)
+			}
+			inbounds = append(inbounds, inbound)
+		}
+		payload, err := buildConfigWithInbounds(requests[0], inbounds, version)
+		if err != nil {
+			return nil, err
+		}
+		installedRuntime = true
+		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
+			cleanup()
+			return nil, err
+		}
+		for index, item := range prepared {
+			if item.request.Protocol != protocolVLESS && item.request.Protocol != protocolVLESSWSTunnel {
+				continue
+			}
+			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, item.request.Protocol, item.node.ListenPort); probeErr != nil {
+				cleanup()
+				return nil, fmt.Errorf("device %d local preflight failed: %w", index+1, probeErr)
+			}
+		}
+		if requests[0].Protocol == protocolVLESSWSTunnel {
+			cloudflaredBinary, ensureErr := m.ensureCloudflared(ctx)
+			if ensureErr != nil {
+				cleanup()
+				return nil, ensureErr
+			}
+			installedTunnel = true
+			if err = m.installCloudflaredService(ctx, group, manager, cloudflaredBinary, prepared[0].credentials.TunnelToken); err != nil {
+				cleanup()
+				return nil, fmt.Errorf("Cloudflare Tunnel service installation failed: %w", err)
+			}
+		}
+	}
+	created := make([]model.Node, 0, len(prepared))
+	for index, item := range prepared {
+		if err := m.store.UpsertNode(ctx, item.node, item.cipher); err != nil {
+			for _, node := range created {
+				_ = m.store.DeleteNode(node.ID)
+			}
+			cleanup()
+			return nil, fmt.Errorf("device %d persistence failed: %w", index+1, err)
+		}
+		created = append(created, item.node)
+		_ = m.store.Audit("admin", "create_node", item.node.ID, item.node.Name)
+	}
+	return created, nil
+}
+
+func freeUnusedProtocolPort(protocol string, used map[int]bool) (int, error) {
+	for attempt := 0; attempt < 64; attempt++ {
+		port, err := freeProtocolPort(protocol)
+		if err != nil {
+			return 0, err
+		}
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, errors.New("failed to allocate a unique device port")
 }
 
 func prepareCreateRequest(request model.NodeCreateRequest) (model.NodeCreateRequest, error) {
@@ -611,6 +936,9 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		if action == "stop" {
 			status = "inactive"
 		}
+		if shared, _, _ := m.managedSharedRuntime(ctx, node); shared {
+			return m.store.SetNodeGroupStatus(node.SharedGroup, status)
+		}
 		return m.store.SetNodeStatus(id, status)
 	}
 	if action == "check" {
@@ -626,6 +954,17 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 		return m.probeNode(ctx, node)
 	}
 	if action == "delete" {
+		sharedRuntime, groupNodes, groupErr := m.managedSharedRuntime(ctx, node)
+		if groupErr != nil {
+			return groupErr
+		}
+		if sharedRuntime && len(groupNodes) > 1 {
+			if err = m.removeNodeFromSharedConfig(ctx, node); err != nil {
+				return err
+			}
+			_ = m.store.Audit("admin", "node_delete", node.ID, node.Name)
+			return nil
+		}
 		if err = m.backup(node); err != nil {
 			return err
 		}
@@ -661,13 +1000,104 @@ func (m *Manager) Action(ctx context.Context, id, action, confirmName string) er
 			if action == "stop" {
 				status = "inactive"
 			}
-			_ = m.store.SetNodeStatus(id, status)
+			if shared, _, groupErr := m.managedSharedRuntime(ctx, node); groupErr == nil && shared {
+				_ = m.store.SetNodeGroupStatus(node.SharedGroup, status)
+			} else {
+				_ = m.store.SetNodeStatus(id, status)
+			}
 		}
 	}
 	if err == nil {
 		_ = m.store.Audit("admin", "node_"+action, node.ID, node.Name)
 	}
 	return err
+}
+
+func (m *Manager) managedSharedRuntime(ctx context.Context, node model.Node) (bool, []model.Node, error) {
+	if node.Ownership != "managed" || strings.TrimSpace(node.SharedGroup) == "" {
+		return false, nil, nil
+	}
+	nodes, err := m.store.NodesByGroup(ctx, node.SharedGroup)
+	if err != nil {
+		return false, nil, err
+	}
+	if len(nodes) < 2 {
+		return false, nodes, nil
+	}
+	for _, item := range nodes {
+		if item.Ownership != "managed" || item.ServiceName != node.ServiceName || item.ServiceManager != node.ServiceManager || item.ConfigPath != node.ConfigPath {
+			return false, nodes, nil
+		}
+	}
+	return true, nodes, nil
+}
+
+func (m *Manager) removeNodeFromSharedConfig(ctx context.Context, node model.Node) error {
+	if err := m.backup(node); err != nil {
+		return err
+	}
+	original, err := os.ReadFile(node.ConfigPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err = json.Unmarshal(original, &root); err != nil {
+		return err
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	remaining := make([]any, 0, len(inbounds))
+	removed := false
+	for _, item := range inbounds {
+		inbound, _ := item.(map[string]any)
+		if !removed && int(numberValue(inbound["listen_port"])) == node.ListenPort {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, item)
+	}
+	if !removed {
+		return fmt.Errorf("device inbound on port %d was not found in shared configuration", node.ListenPort)
+	}
+	if len(remaining) == 0 {
+		return errors.New("refusing to leave a shared sing-box configuration without inbounds")
+	}
+	root["inbounds"] = remaining
+	payload, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := node.ConfigPath + ".device-delete.tmp"
+	if err = os.WriteFile(tmp, payload, 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+		return fmt.Errorf("shared configuration check failed: %w", err)
+	}
+	if err = os.Rename(tmp, node.ConfigPath); err != nil {
+		return err
+	}
+	if err = m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err != nil {
+		restoreErr := m.restoreSharedConfig(ctx, node, original)
+		if restoreErr != nil {
+			return fmt.Errorf("shared service restart failed: %w (configuration rollback failed: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("shared service restart failed and the previous configuration was restored: %w", err)
+	}
+	if err = m.store.DeleteNode(node.ID); err != nil {
+		if restoreErr := m.restoreSharedConfig(ctx, node, original); restoreErr != nil {
+			return fmt.Errorf("delete device metadata failed: %w (configuration rollback failed: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("delete device metadata failed and the previous configuration was restored: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) restoreSharedConfig(ctx context.Context, node model.Node, payload []byte) error {
+	if err := os.WriteFile(node.ConfigPath, payload, 0o600); err != nil {
+		return err
+	}
+	return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
 }
 
 func (m *Manager) shouldRemoveTunnelConnector(ctx context.Context, node model.Node) (bool, error) {
@@ -848,6 +1278,13 @@ func buildConfig(request model.NodeCreateRequest, port int, credentials protocol
 	if err != nil {
 		return nil, err
 	}
+	return buildConfigWithInbounds(request, []any{inbound}, version)
+}
+
+func buildConfigWithInbounds(request model.NodeCreateRequest, inbounds []any, version string) ([]byte, error) {
+	if len(inbounds) == 0 {
+		return nil, errors.New("at least one inbound is required")
+	}
 	capabilities := singboxconfig.CapabilitiesFor(version)
 	outbounds := []any{}
 	rules := []any{}
@@ -883,7 +1320,7 @@ func buildConfig(request model.NodeCreateRequest, port int, credentials protocol
 		}
 		rules = append(rules, rule)
 	}
-	root := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": []any{inbound}, "outbounds": outbounds, "route": map[string]any{"rules": rules, "final": final}}
+	root := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": inbounds, "outbounds": outbounds, "route": map[string]any{"rules": rules, "final": final}}
 	if capabilities.NewDNSServers {
 		root["dns"] = map[string]any{"servers": []any{map[string]any{"type": "local", "tag": "local"}}}
 	}
