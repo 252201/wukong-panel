@@ -129,16 +129,10 @@ func TestMergeLegacyDeviceConfigsSelectsEachNodeInbound(t *testing.T) {
 }
 
 func TestPreferredCandidateName(t *testing.T) {
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2, "测试001"); got != "测试001" {
-		t.Fatalf("known node name ignored: %q", got)
-	}
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2, ""); got != "悟空节点 · 59904" {
+	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2); got != "悟空节点 · 59904" {
 		t.Fatalf("generic inbound tag not replaced: %q", got)
 	}
-	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 1958, protocolHysteria2, "in"); got != "悟空节点 · 1958" {
-		t.Fatalf("generic stored name not replaced: %q", got)
-	}
-	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, protocolHysteria2, ""); got != "Mac mini" {
+	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, protocolHysteria2); got != "Mac mini" {
 		t.Fatalf("descriptive inbound tag changed: %q", got)
 	}
 }

@@ -91,6 +91,10 @@ type NodeActionRequest struct {
 	ConfirmName string `json:"confirmName,omitempty"`
 }
 
+type CandidateDeleteRequest struct {
+	ConfirmName string `json:"confirmName"`
+}
+
 type NodeRenameRequest struct {
 	Name string `json:"name"`
 }

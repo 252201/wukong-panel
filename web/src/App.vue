@@ -31,6 +31,8 @@ const language = ref<'zh-CN' | 'en-US'>('zh-CN')
 const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | null>(null)
 const candidates = ref<Candidate[]>([])
 const selectedCandidates = ref<string[]>([])
+const candidateDeleteTarget = ref<Candidate | null>(null)
+const candidateDeleteConfirm = ref('')
 const selectedNode = ref<NodeItem | null>(null)
 const shareURI = ref('')
 const shareQR = ref('')
@@ -133,7 +135,7 @@ function axisRate(value = 0) {
 }
 function uptime(value = 0) { const days = Math.floor(value / 86400); const hours = Math.floor(value % 86400 / 3600); return days ? `${days}天 ${hours}时` : `${hours}时` }
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
-function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.create_batch': '部署设备节点', 'node.edit': '编辑节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.probe': '连通性检测', 'node.delete': '删除节点', 'nodes.import': '接管节点' } as Record<string, string>)[kind] || kind }
+function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.create_batch': '部署设备节点', 'node.edit': '编辑节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.probe': '连通性检测', 'node.delete': '删除节点', 'nodes.import': '接管节点', 'candidate.delete': '彻底删除接管节点' } as Record<string, string>)[kind] || kind }
 function notify(message: string) { toast.value = message; window.setTimeout(() => { if (toast.value === message) toast.value = '' }, 3200) }
 function probeState(node: NodeItem) { return probeJobs[node.id] ? 'running' : node.probeStatus || 'idle' }
 function probeTime(value?: string) {
@@ -361,7 +363,7 @@ async function revealShare(node: NodeItem) {
   catch (error) { notify(error instanceof Error ? error.message : '无法生成分享链接') }
 }
 async function openImport() {
-  modal.value = 'import'; candidates.value = []; selectedCandidates.value = []
+  modal.value = 'import'; candidates.value = []; selectedCandidates.value = []; candidateDeleteTarget.value = null; candidateDeleteConfirm.value = ''
   try { candidates.value = await api.scan(); selectedCandidates.value = candidates.value.map(item => item.fingerprint) }
   catch (error) { notify(error instanceof Error ? error.message : '扫描失败') }
 }
@@ -369,6 +371,26 @@ async function importSelected() {
   busy.value = true
   try { await api.importNodes(selectedCandidates.value); modal.value = null; notify('接管任务已创建'); await showJobLog() }
   catch (error) { notify(error instanceof Error ? error.message : '接管失败') }
+  finally { busy.value = false }
+}
+function stageCandidateDelete(candidate: Candidate) {
+  candidateDeleteTarget.value = candidate
+  candidateDeleteConfirm.value = ''
+  selectedCandidates.value = selectedCandidates.value.filter(id => id !== candidate.fingerprint)
+}
+function cancelCandidateDelete() {
+  candidateDeleteTarget.value = null
+  candidateDeleteConfirm.value = ''
+}
+async function deleteCandidate() {
+  const candidate = candidateDeleteTarget.value
+  if (!candidate || candidateDeleteConfirm.value !== candidate.name) return
+  busy.value = true
+  try {
+    await api.deleteCandidate(candidate.fingerprint, candidateDeleteConfirm.value)
+    modal.value = null; candidateDeleteTarget.value = null; candidateDeleteConfirm.value = ''
+    notify('彻底删除任务已创建'); await showJobLog()
+  } catch (error) { notify(error instanceof Error ? error.message : '无法创建彻底删除任务') }
   finally { busy.value = false }
 }
 async function saveSettings() {
@@ -550,7 +572,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <label class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label>
       <div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}</button></div>
     </form>
-    <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。</p><div class="candidate-list"><label v-for="item in candidates" :key="item.fingerprint"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
+    <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。彻底删除会先建立校验快照。</p><div class="candidate-list"><div v-for="item in candidates" :key="item.fingerprint" class="candidate-row" :class="{ deleting: candidateDeleteTarget?.fingerprint === item.fingerprint }"><label class="candidate-select"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><button type="button" class="candidate-purge" title="从服务器彻底删除此候选节点" @click="stageCandidateDelete(item)">彻底删除</button></div><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><section v-if="candidateDeleteTarget" class="candidate-delete-confirm" role="alert"><header><span>险</span><div><b>彻底删除 {{ candidateDeleteTarget.name }}？</b><small>{{ candidateDeleteTarget.configPath }}</small></div></header><p v-if="candidateDeleteTarget.sharedGroup">系统会先建立 SHA-256 快照，只从共享配置移除端口 {{ candidateDeleteTarget.listenPort }} 的 inbound；其他节点与共享服务会保留。配置校验或重启失败将自动恢复。</p><p v-else>系统会先建立 SHA-256 快照，再停止并删除 {{ candidateDeleteTarget.serviceName === 'unknown' ? '对应配置文件' : '对应服务与配置文件' }}。此操作不可从面板撤销。</p><label>输入完整节点名称确认<input v-model="candidateDeleteConfirm" autocomplete="off" :placeholder="candidateDeleteTarget.name"></label><div><button type="button" class="secondary" @click="cancelCandidateDelete">保留节点</button><button type="button" class="danger-button" :disabled="busy || candidateDeleteConfirm !== candidateDeleteTarget.name" @click="deleteCandidate">{{ busy ? '正在创建任务…' : '确认彻底删除' }}</button></div></section><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>

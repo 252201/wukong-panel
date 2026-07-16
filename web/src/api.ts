@@ -177,6 +177,7 @@ export const api = {
   share: (id: string) => request<{uri: string; expiresAt: string}>(`nodes/${id}/share`),
   scan: () => request<Candidate[]>('imports/scan'),
   importNodes: (fingerprints: string[]) => request<{jobId: string}>('imports/confirm', { method: 'POST', body: JSON.stringify({ fingerprints }) }),
+  deleteCandidate: (fingerprint: string, confirmName: string) => request<{jobId: string}>(`imports/${encodeURIComponent(fingerprint)}/delete`, { method: 'POST', body: JSON.stringify({ confirmName }) }),
   jobs: () => request<Job[]>('jobs'),
   job: (id: string) => request<Job>(`jobs/${id}`),
   settings: () => request<Settings>('settings'),

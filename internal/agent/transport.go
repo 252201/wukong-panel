@@ -51,6 +51,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /scan", s.authorize(s.scan))
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
 	mux.HandleFunc("POST /import", s.authorize(s.importNodes))
+	mux.HandleFunc("POST /imports/{id}/delete", s.authorize(s.deleteCandidate))
 	mux.HandleFunc("POST /nodes", s.authorize(s.create))
 	mux.HandleFunc("POST /nodes/batch", s.authorize(s.createBatch))
 	mux.HandleFunc("GET /nodes/{id}/edit", s.authorize(s.editDetails))
@@ -110,6 +111,17 @@ func (s *Server) importNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"imported": count})
+}
+func (s *Server) deleteCandidate(w http.ResponseWriter, r *http.Request) {
+	var request model.CandidateDeleteRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	if err := s.manager.DeleteCandidate(r.Context(), r.PathValue("id"), request.ConfirmName); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	var request model.NodeCreateRequest
@@ -256,6 +268,9 @@ func (c *Client) DeploymentDefaults(ctx context.Context) (model.NodeDeploymentDe
 }
 func (c *Client) Import(ctx context.Context, ids []string) error {
 	return c.request(ctx, "POST", "/import", map[string]any{"fingerprints": ids}, nil)
+}
+func (c *Client) DeleteCandidate(ctx context.Context, id string, request model.CandidateDeleteRequest) error {
+	return c.request(ctx, "POST", "/imports/"+url.PathEscape(id)+"/delete", request, nil)
 }
 func (c *Client) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
 	var node model.Node

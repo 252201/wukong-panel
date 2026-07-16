@@ -359,3 +359,232 @@ func TestScanDiscoversEveryImportableProtocolAndSkipsWebSocketTunnel(t *testing.
 		t.Fatalf("VLESS WebSocket inbound without Tunnel metadata was imported: %#v", candidates)
 	}
 }
+
+func TestScanSkipsRegisteredManagedAndImportedInbounds(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "shared.json")
+	payload := []byte(`{
+  "inbounds": [
+    {"type":"hysteria2","tag":"hy2-managed-in","listen_port":47101,"users":[{"password":"managed-secret"}]},
+    {"type":"hysteria2","tag":"hy2-imported-in","listen_port":47102,"users":[{"password":"imported-secret"}]},
+    {"type":"hysteria2","tag":"hy2-external-in","listen_port":47103,"users":[{"password":"external-secret"}]}
+  ]
+}`)
+	if err := os.WriteFile(configPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	for _, node := range []model.Node{
+		{ID: "managed", Name: "Managed", Protocol: protocolHysteria2, Mode: "prefer_v6", ListenPort: 47101, ConfigPath: configPath, ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"},
+		{ID: "imported", Name: "Imported", Protocol: protocolHysteria2, Mode: "prefer_v6", ListenPort: 47102, ConfigPath: filepath.Join(dir, ".", "shared.json"), ConfigVersion: "1.13.14", Ownership: "imported", Status: "active"},
+	} {
+		if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	manager := NewManager(config.Config{ConfigDir: dir, Demo: true}, database, nil)
+	candidates, err := manager.Scan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].ListenPort != 47103 || candidates[0].Name != "external" {
+		t.Fatalf("registered inbounds leaked into scan results: %#v", candidates)
+	}
+	if candidates[0].SharedGroup != configPath {
+		t.Fatalf("unregistered shared inbound lost group metadata: %#v", candidates[0])
+	}
+}
+
+func TestDeleteCandidateRemovesOnlySelectedSharedInbound(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	configPath := filepath.Join(dir, "shared.json")
+	original := []byte(`{
+  "inbounds": [
+    {"type":"hysteria2","tag":"hy2-first-in","listen_port":47201,"users":[{"password":"first-secret"}]},
+    {"type":"hysteria2","tag":"hy2-second-in","listen_port":47202,"users":[{"password":"second-secret"}]},
+    {"type":"hysteria2","tag":"hy2-third-in","listen_port":47203,"users":[{"password":"third-secret"}]}
+  ]
+}`)
+	if err := os.WriteFile(configPath, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	manager := NewManager(config.Config{ConfigDir: dir, DataDir: dataDir, Demo: true}, database, nil)
+	candidates, err := manager.Scan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target model.NodeCandidate
+	for _, candidate := range candidates {
+		if candidate.ListenPort == 47202 {
+			target = candidate
+		}
+	}
+	if target.Fingerprint == "" {
+		t.Fatalf("shared deletion target missing: %#v", candidates)
+	}
+	if err = manager.DeleteCandidate(t.Context(), target.Fingerprint, "wrong-name"); err == nil || !strings.Contains(err.Error(), "confirmation") {
+		t.Fatalf("candidate deletion accepted the wrong confirmation: %v", err)
+	}
+	if current, readErr := os.ReadFile(configPath); readErr != nil || string(current) != string(original) {
+		t.Fatalf("wrong confirmation changed config: err=%v payload=%s", readErr, current)
+	}
+	if err = manager.DeleteCandidate(t.Context(), target.Fingerprint, target.Name); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(current, &root); err != nil {
+		t.Fatal(err)
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	if len(inbounds) != 2 {
+		t.Fatalf("shared config has %d inbounds after deleting one: %s", len(inbounds), current)
+	}
+	for _, item := range inbounds {
+		if int(numberValue(item.(map[string]any)["listen_port"])) == 47202 {
+			t.Fatalf("deleted inbound remains in shared config: %s", current)
+		}
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("shared config mode changed: mode=%v", info.Mode().Perm())
+	}
+	backups, err := filepath.Glob(filepath.Join(dataDir, "backups", "*-"+target.Fingerprint, "shared.json"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("candidate backup missing: backups=%v err=%v", backups, err)
+	}
+	candidates, err = manager.Scan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("deleted candidate was still discovered: %#v", candidates)
+	}
+}
+
+func TestDeleteCandidateCheckFailurePreservesSharedConfig(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	configPath := filepath.Join(dir, "shared.json")
+	original := []byte(`{
+  "inbounds": [
+    {"type":"hysteria2","tag":"hy2-keep-in","listen_port":47211,"users":[{"password":"keep-secret"}]},
+    {"type":"hysteria2","tag":"hy2-delete-in","listen_port":47212,"users":[{"password":"delete-secret"}]}
+  ]
+}`)
+	if err := os.WriteFile(configPath, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nif [ \"$1\" = version ]; then echo 'sing-box version 1.13.14'; exit 0; fi\necho 'invalid generated config' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	manager := NewManager(config.Config{ConfigDir: dir, DataDir: dataDir, SingBoxBin: binary}, database, nil)
+	candidates, err := manager.Scan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target model.NodeCandidate
+	for _, candidate := range candidates {
+		if candidate.ListenPort == 47212 {
+			target = candidate
+		}
+	}
+	if target.Fingerprint == "" {
+		t.Fatalf("shared deletion target missing: %#v", candidates)
+	}
+	if err = manager.DeleteCandidate(t.Context(), target.Fingerprint, target.Name); err == nil || !strings.Contains(err.Error(), "configuration check failed") {
+		t.Fatalf("candidate deletion ignored the failed config check: %v", err)
+	}
+	current, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(current) != string(original) {
+		t.Fatalf("failed config check changed shared config:\n%s", current)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("failed config check changed mode: %v", info.Mode().Perm())
+	}
+	backups, err := filepath.Glob(filepath.Join(dataDir, "backups", "*-"+target.Fingerprint, "shared.json"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("failed deletion backup missing: backups=%v err=%v", backups, err)
+	}
+}
+
+func TestDeleteCandidateRemovesLastConfigAndRefusesRegisteredNode(t *testing.T) {
+	t.Run("last candidate", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "single.json")
+		if err := os.WriteFile(configPath, []byte(`{"inbounds":[{"type":"hysteria2","tag":"hy2-single-in","listen_port":47301,"users":[{"password":"secret"}]}]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		database, err := store.Open(filepath.Join(dir, "wukong.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+		manager := NewManager(config.Config{ConfigDir: dir, DataDir: filepath.Join(dir, "data"), Demo: true}, database, nil)
+		candidates, err := manager.Scan(t.Context())
+		if err != nil || len(candidates) != 1 {
+			t.Fatalf("single candidate scan failed: candidates=%#v err=%v", candidates, err)
+		}
+		if err = manager.DeleteCandidate(t.Context(), candidates[0].Fingerprint, candidates[0].Name); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = os.Stat(configPath); !os.IsNotExist(err) {
+			t.Fatalf("last candidate config still exists: %v", err)
+		}
+	})
+
+	t.Run("registered candidate", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "managed.json")
+		if err := os.WriteFile(configPath, []byte(`{"inbounds":[{"type":"hysteria2","tag":"hy2-managed-in","listen_port":47302,"users":[{"password":"secret"}]}]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		database, err := store.Open(filepath.Join(dir, "wukong.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+		node := model.Node{ID: "managed", Name: "Managed", Protocol: protocolHysteria2, Mode: "prefer_v6", ListenPort: 47302, ConfigPath: configPath, ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+		if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+			t.Fatal(err)
+		}
+		manager := NewManager(config.Config{ConfigDir: dir, DataDir: filepath.Join(dir, "data"), Demo: true}, database, nil)
+		id := fingerprint(configPath, 47302, "hy2-managed-in")
+		if err = manager.DeleteCandidate(t.Context(), id, "managed"); err == nil || !strings.Contains(err.Error(), "already registered") {
+			t.Fatalf("registered node was accepted for candidate deletion: %v", err)
+		}
+		if _, err = os.Stat(configPath); err != nil {
+			t.Fatalf("registered node config was removed: %v", err)
+		}
+	})
+}

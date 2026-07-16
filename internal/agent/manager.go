@@ -341,11 +341,13 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 		return nil, err
 	}
 	version := m.Version(ctx)
-	knownNames := map[string]string{}
-	if knownNodes, knownErr := m.store.Nodes(ctx); knownErr == nil {
-		for _, node := range knownNodes {
-			knownNames[candidateKey(node.ConfigPath, node.ListenPort)] = node.Name
-		}
+	knownNodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list registered nodes: %w", err)
+	}
+	registered := make(map[string]struct{}, len(knownNodes))
+	for _, node := range knownNodes {
+		registered[candidateKey(node.ConfigPath, node.ListenPort)] = struct{}{}
 	}
 	result := []model.NodeCandidate{}
 	for _, path := range files {
@@ -380,10 +382,10 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if port < 1 {
 				continue
 			}
-			name := stringValue(inbound["tag"])
-			if name == "" {
-				name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+			if _, exists := registered[candidateKey(path, port)]; exists {
+				continue
 			}
+			name := candidateInboundName(path, inbound)
 			credentials, credentialErr := credentialsFromInbound(protocol, inbound)
 			if credentialErr != nil {
 				continue
@@ -398,12 +400,234 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 			if len(inbounds) > 1 {
 				shared = path
 			}
-			candidateName := preferredCandidateName(name, path, index, port, protocol, knownNames[candidateKey(path, port)])
+			candidateName := preferredCandidateName(name, path, index, port, protocol)
 			result = append(result, model.NodeCandidate{Fingerprint: fingerprint, Name: candidateName, Protocol: protocol, Mode: mode, ListenPort: port, Domain: domain, IPv4Bind: v4, IPv6Bind: v6, ServiceName: service, ServiceManager: manager, ConfigPath: path, ConfigVersion: version, SharedGroup: shared, Secret: secret})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ListenPort < result[j].ListenPort })
 	return result, nil
+}
+
+func (m *Manager) DeleteCandidate(ctx context.Context, id, confirmName string) error {
+	candidates, err := m.Scan(ctx)
+	if err != nil {
+		return err
+	}
+	var candidate model.NodeCandidate
+	found := false
+	for _, item := range candidates {
+		if item.Fingerprint == id {
+			candidate = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("candidate node was not found or is already registered")
+	}
+	if confirmName != candidate.Name {
+		return errors.New("confirmation name does not match")
+	}
+	if err = m.validateCandidate(candidate); err != nil {
+		return err
+	}
+	node := model.Node{
+		ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol,
+		ListenPort: candidate.ListenPort, ServiceName: candidate.ServiceName,
+		ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath,
+		Ownership: "unmanaged", SharedGroup: candidate.SharedGroup,
+	}
+	if err = m.backup(node); err != nil {
+		return fmt.Errorf("backup candidate configuration: %w", err)
+	}
+	original, err := os.ReadFile(candidate.ConfigPath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(candidate.ConfigPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err = json.Unmarshal(original, &root); err != nil {
+		return fmt.Errorf("parse candidate configuration: %w", err)
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	remaining := make([]any, 0, len(inbounds))
+	removed := false
+	for _, item := range inbounds {
+		inbound, _ := item.(map[string]any)
+		port := int(numberValue(inbound["listen_port"]))
+		name := candidateInboundName(candidate.ConfigPath, inbound)
+		if !removed && fingerprint(candidate.ConfigPath, port, name) == candidate.Fingerprint {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, item)
+	}
+	if !removed {
+		return errors.New("candidate inbound changed before deletion; scan again")
+	}
+	if len(remaining) > 0 {
+		root["inbounds"] = remaining
+		payload, marshalErr := json.MarshalIndent(root, "", "  ")
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if err = m.replaceCandidateConfig(ctx, node, original, payload, info.Mode().Perm()); err != nil {
+			return err
+		}
+	} else if err = m.deleteCandidateRuntime(ctx, node, original, info.Mode().Perm()); err != nil {
+		return err
+	}
+	_ = m.store.Audit("admin", "candidate_delete", candidate.Fingerprint, fmt.Sprintf("%s port=%d config=%s", candidate.Name, candidate.ListenPort, candidate.ConfigPath))
+	return nil
+}
+
+func candidateInboundName(path string, inbound map[string]any) string {
+	name := stringValue(inbound["tag"])
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	return name
+}
+
+func (m *Manager) validateCandidate(candidate model.NodeCandidate) error {
+	root := filepath.Clean(m.cfg.ConfigDir)
+	clean := filepath.Clean(candidate.ConfigPath)
+	relative, err := filepath.Rel(root, clean)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return errors.New("candidate config path is outside the managed configuration directory")
+	}
+	if candidate.ServiceName == "unknown" && candidate.ServiceManager == "unknown" {
+		return nil
+	}
+	if candidate.ServiceManager != "systemd" && candidate.ServiceManager != "openrc" {
+		return errors.New("candidate service manager is unsupported")
+	}
+	matched, _ := regexp.MatchString(`^[A-Za-z0-9_.@-]+$`, candidate.ServiceName)
+	if !matched || candidate.ServiceName == "" || candidate.ServiceName == "unknown" {
+		return errors.New("candidate service name is invalid")
+	}
+	return nil
+}
+
+func (m *Manager) replaceCandidateConfig(ctx context.Context, node model.Node, original, updated []byte, mode os.FileMode) error {
+	tmp := node.ConfigPath + ".candidate-delete.tmp"
+	if err := os.WriteFile(tmp, updated, mode); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if !m.cfg.Demo {
+		if err := command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+			return fmt.Errorf("candidate configuration check failed: %w", err)
+		}
+	}
+	wasActive := m.candidateServiceKnown(node) && m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active"
+	if err := os.Rename(tmp, node.ConfigPath); err != nil {
+		return err
+	}
+	if !wasActive {
+		return nil
+	}
+	if err := m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err != nil {
+		rollbackErr := m.restoreCandidateConfig(ctx, node, original, mode, true)
+		if rollbackErr != nil {
+			return fmt.Errorf("candidate service restart failed: %w (configuration rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("candidate service restart failed and the previous configuration was restored: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) restoreCandidateConfig(ctx context.Context, node model.Node, payload []byte, mode os.FileMode, restart bool) error {
+	tmp := node.ConfigPath + ".candidate-delete.rollback"
+	if err := os.WriteFile(tmp, payload, mode); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err := os.Rename(tmp, node.ConfigPath); err != nil {
+		return err
+	}
+	if restart {
+		return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
+	}
+	return nil
+}
+
+func (m *Manager) deleteCandidateRuntime(ctx context.Context, node model.Node, original []byte, mode os.FileMode) error {
+	if !m.candidateServiceKnown(node) {
+		return os.Remove(node.ConfigPath)
+	}
+	wasActive := m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active"
+	wasEnabled := m.serviceEnabled(ctx, node.ServiceManager, node.ServiceName)
+	if wasActive {
+		if err := m.serviceCommand(ctx, node.ServiceManager, "stop", node.ServiceName); err != nil {
+			return err
+		}
+	}
+	if wasEnabled {
+		if err := m.disableService(ctx, node); err != nil {
+			if wasActive {
+				_ = m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName)
+			}
+			return err
+		}
+	}
+	restoreState := func() error {
+		if wasEnabled {
+			if err := m.enableService(ctx, node); err != nil {
+				return err
+			}
+		}
+		if wasActive {
+			return m.serviceCommand(ctx, node.ServiceManager, "start", node.ServiceName)
+		}
+		return nil
+	}
+	if err := os.Remove(node.ConfigPath); err != nil {
+		if stateErr := restoreState(); stateErr != nil {
+			return fmt.Errorf("remove candidate config: %w (service state rollback failed: %v)", err, stateErr)
+		}
+		return err
+	}
+	if err := m.removeService(node); err != nil {
+		restoreErr := os.WriteFile(node.ConfigPath, original, mode)
+		stateErr := restoreState()
+		if restoreErr != nil || stateErr != nil {
+			return fmt.Errorf("remove candidate service: %w (config rollback: %v; service rollback: %v)", err, restoreErr, stateErr)
+		}
+		return fmt.Errorf("remove candidate service failed and the previous runtime was restored: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) candidateServiceKnown(node model.Node) bool {
+	return !m.cfg.Demo && node.ServiceName != "" && node.ServiceName != "unknown" && (node.ServiceManager == "systemd" || node.ServiceManager == "openrc")
+}
+
+func (m *Manager) serviceEnabled(ctx context.Context, manager, name string) bool {
+	if manager == "openrc" {
+		output, err := exec.CommandContext(ctx, "rc-update", "show", "default").CombinedOutput()
+		if err != nil {
+			return false
+		}
+		for _, line := range strings.Split(string(output), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 && fields[0] == name {
+				return true
+			}
+		}
+		return false
+	}
+	return command(ctx, "systemctl", "is-enabled", "--quiet", name+".service") == nil
+}
+
+func (m *Manager) enableService(ctx context.Context, node model.Node) error {
+	if node.ServiceManager == "openrc" {
+		return command(ctx, "rc-update", "add", node.ServiceName, "default")
+	}
+	return command(ctx, "systemctl", "enable", node.ServiceName+".service")
 }
 
 func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error) {
@@ -1987,10 +2211,7 @@ func displayName(tag string, index int, protocol string) string {
 func candidateKey(path string, port int) string {
 	return filepath.Clean(path) + "\x00" + strconv.Itoa(port)
 }
-func preferredCandidateName(tag, path string, index, port int, protocol, known string) string {
-	if strings.TrimSpace(known) != "" && !genericNodeName(known) {
-		return known
-	}
+func preferredCandidateName(tag, path string, index, port int, protocol string) string {
 	name := displayName(tag, index, protocol)
 	if genericNodeName(name) {
 		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
