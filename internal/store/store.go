@@ -339,6 +339,13 @@ func (s *Store) SetNodeStatus(id, status string) error {
 	_, err := s.DB.Exec("UPDATE nodes SET status=?,updated_at=? WHERE id=?", status, time.Now().Unix(), id)
 	return err
 }
+func (s *Store) SetNodeGroupStatus(group, status string) error {
+	if strings.TrimSpace(group) == "" {
+		return errors.New("node group is required")
+	}
+	_, err := s.DB.Exec("UPDATE nodes SET status=?,updated_at=? WHERE shared_group=?", status, time.Now().Unix(), group)
+	return err
+}
 func (s *Store) SetNodeProbeResult(id, status string, latencyMS int64, exitIP, target, probeError string, checkedAt time.Time) error {
 	checked := checkedAt.Unix()
 	if checkedAt.IsZero() {
@@ -392,6 +399,54 @@ func (s *Store) NodeGroupCount(ctx context.Context, group string) (int, error) {
 	var count int
 	err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM nodes WHERE shared_group=?", group).Scan(&count)
 	return count, err
+}
+
+func (s *Store) NodesByGroup(ctx context.Context, group string) ([]model.Node, error) {
+	if strings.TrimSpace(group) == "" {
+		return nil, errors.New("node group is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,protocol,mode,listen_port,server,domain,preferred_server,websocket_path,ipv4_bind,ipv6_bind,auto_bind,
+service_name,service_manager,config_path,config_version,ownership,shared_group,status,probe_status,probe_latency_ms,
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes WHERE shared_group=? ORDER BY created_at,id`, group)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []model.Node{}
+	for rows.Next() {
+		var n model.Node
+		var auto int
+		var probeChecked, created, updated int64
+		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated); err != nil {
+			return nil, err
+		}
+		n.AutoBind = auto == 1
+		n.CreatedAt = time.Unix(created, 0)
+		n.UpdatedAt = time.Unix(updated, 0)
+		if probeChecked > 0 {
+			n.ProbeCheckedAt = time.Unix(probeChecked, 0)
+		}
+		result = append(result, n)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) UpdateNodeGroupRuntime(ctx context.Context, group, serviceName, serviceManager, configPath, configVersion, status string) error {
+	if strings.TrimSpace(group) == "" {
+		return errors.New("node group is required")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE nodes SET service_name=?,service_manager=?,config_path=?,config_version=?,status=?,updated_at=? WHERE shared_group=? AND ownership='managed'`, serviceName, serviceManager, configPath, configVersion, status, time.Now().Unix(), group)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated < 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) AddMetric(m model.Metric) error {

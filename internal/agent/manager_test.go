@@ -75,6 +75,59 @@ func TestBuildModernConfig(t *testing.T) {
 	}
 }
 
+func TestBuildDeviceGroupConfigContainsMultipleInbounds(t *testing.T) {
+	request := baseRequest()
+	first, err := buildProtocolInbound(request, 45115, protocolCredentials{Password: "first-secret"}, "/tmp/device.cer", "/tmp/device.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRequest := request
+	secondRequest.Name = "Second"
+	second, err := buildProtocolInbound(secondRequest, 45116, protocolCredentials{Password: "second-secret"}, "/tmp/device.cer", "/tmp/device.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := buildConfigWithInbounds(request, []any{first, second}, "1.13.14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(payload, &root); err != nil {
+		t.Fatal(err)
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	if len(inbounds) != 2 {
+		t.Fatalf("device group config has %d inbounds, want 2", len(inbounds))
+	}
+}
+
+func TestMergeLegacyDeviceConfigsSelectsEachNodeInbound(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "first.json"), filepath.Join(dir, "second.json")}
+	for index, path := range paths {
+		payload := fmt.Sprintf(`{"inbounds":[{"type":"hysteria2","tag":"device-%d","listen_port":%d}],"outbounds":[{"type":"direct","tag":"direct"}]}`, index+1, 45115+index)
+		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes := []model.Node{
+		{Name: "one", ListenPort: 45115, ConfigPath: paths[0]},
+		{Name: "two", ListenPort: 45116, ConfigPath: paths[1]},
+	}
+	payload, err := mergeDeviceGroupConfigs(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(payload, &root); err != nil {
+		t.Fatal(err)
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	if len(inbounds) != 2 || int(numberValue(inbounds[0].(map[string]any)["listen_port"])) != 45115 || int(numberValue(inbounds[1].(map[string]any)["listen_port"])) != 45116 {
+		t.Fatalf("legacy device inbounds were not merged correctly: %#v", inbounds)
+	}
+}
+
 func TestPreferredCandidateName(t *testing.T) {
 	if got := preferredCandidateName("hy2-in", "/etc/s-box/wukong-random.json", 0, 59904, protocolHysteria2, "测试001"); got != "测试001" {
 		t.Fatalf("known node name ignored: %q", got)
@@ -222,6 +275,9 @@ func TestCreateBatchSupportsEveryProtocol(t *testing.T) {
 			if len(nodes) != 2 || nodes[0].SharedGroup == "" || nodes[0].SharedGroup != nodes[1].SharedGroup || nodes[0].ListenPort == nodes[1].ListenPort {
 				t.Fatalf("invalid device batch: %#v", nodes)
 			}
+			if nodes[0].ServiceName != nodes[1].ServiceName || nodes[0].ConfigPath != nodes[1].ConfigPath {
+				t.Fatalf("device batch does not share one sing-box runtime: %#v", nodes)
+			}
 			if protocol == protocolVLESSWSTunnel && cloudflaredNodeKey(nodes[0]) != cloudflaredNodeKey(nodes[1]) {
 				t.Fatalf("Tunnel devices did not share one connector: %#v", nodes)
 			}
@@ -230,6 +286,30 @@ func TestCreateBatchSupportsEveryProtocol(t *testing.T) {
 				t.Fatalf("batch was not persisted: %#v err=%v", stored, err)
 			}
 		})
+	}
+}
+
+func TestDeviceGroupLifecycleUpdatesEveryNode(t *testing.T) {
+	manager, database := newDemoManager(t)
+	requests := []model.NodeCreateRequest{
+		{Protocol: protocolHysteria2, Name: "one", Mode: "prefer_v6", Server: "node.example.com", Domain: "node.example.com", IPv6Bind: "2001:db8::5"},
+		{Protocol: protocolHysteria2, Name: "two", Mode: "prefer_v6", Server: "node.example.com", Domain: "node.example.com", IPv6Bind: "2001:db8::5"},
+	}
+	nodes, err := manager.CreateBatch(t.Context(), model.NodeBatchCreateRequest{Nodes: requests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.Action(t.Context(), nodes[0].ID, "stop", ""); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.Nodes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range stored {
+		if node.Status != "inactive" {
+			t.Fatalf("group member %s remained %s", node.Name, node.Status)
+		}
 	}
 }
 

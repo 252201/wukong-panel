@@ -9,7 +9,7 @@
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立端口、凭据、服务与分享配置。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
+- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
@@ -103,11 +103,11 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 4. 部署完成后，从每张节点卡片复制对应的 `http://127.0.0.1:<端口>` Cloudflare Service URL。
 5. 回到同一个 Tunnel，为每台设备分别添加一条 Published application，填写对应的独立主机名，Path 留空，Service URL 使用对应节点卡片的本地地址。WebSocket 路径会自动写入客户端配置，不需要再填入 Cloudflare 路由。
 
-客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组共享一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过不同公开主机名的多条 Published application 路由到各自的本地 Origin。同一设备组不允许重复使用 Cloudflare 公开主机名。
+客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组共享一个 sing-box 进程、一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过不同公开主机名的多条 Published application 路由到各自的本地 Origin。同一设备组不允许重复使用 Cloudflare 公开主机名。
 
 如果已经测得更适合当前网络的 Cloudflare 优选域名或 IP，可在部署表单填写“优选连接域名 / IP”。面板只会把它写入分享链接和 Clash/Mihomo 订阅的 `server`；TLS `servername`、SNI、WebSocket `Host` 和 Tunnel Published application 路由仍使用上面的 Cloudflare 节点域名。该字段不能包含 `http://`、`https://`、路径或端口，留空即使用 Cloudflare 标准 Anycast。优选地址的可用性会随运营商、地区和时间变化，需要用户自行测试并维护。
 
-首次部署时，面板会按固定 SHA-256 下载并安装官方 `cloudflared 2026.7.1`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备组中单个节点的停止、重启或删除只影响该节点，删除最后一台设备时才移除共享连接器。节点“检测”会从公网域名验证 Cloudflare TLS、WebSocket、VLESS 认证和代理出站完整链路。
+首次部署时，面板会按固定 SHA-256 下载并安装官方 `cloudflared 2026.7.1`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备编队的启动、停止和重启按整组执行，删除单台设备只会从共享配置移除对应 inbound 并重启组进程，删除最后一台设备时才移除共享 sing-box 与 Tunnel 连接器。升级后的 Agent 会自动把旧版多进程设备编队校验并合并为单进程，失败时恢复旧服务。节点“检测”仍按单台设备的端口和凭据验证完整代理链路。
 
 ### sing-box 安全更新与回退
 
@@ -131,7 +131,7 @@ flowchart LR
   B["浏览器 / HTTPS"] --> N["nginx 随机入口"]
   N --> W["wukong-web\n非特权用户"]
   W -->|"类型化请求 / Unix Socket"| A["wukong-agent\nroot"]
-  A --> S["sing-box / systemd / OpenRC"]
+  A --> S["sing-box / systemd / OpenRC\n设备编队单进程多 inbound"]
   C["Cloudflare Edge :443"] --> F["cloudflared\n独立节点服务"]
   F -->|"127.0.0.1 Origin"| S
   A --> F
