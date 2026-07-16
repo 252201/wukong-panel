@@ -285,7 +285,19 @@ func (c *Collector) sample() {
 		diskUsed = 10_960_000_000
 		diskValue = 27.4
 	}
-	processes, processCount := c.processSnapshot(memoryTotal)
+	nodeNamesByConfig := map[string][]string{}
+	if nodes, nodeErr := c.store.Nodes(context.Background()); nodeErr == nil {
+		for _, node := range nodes {
+			if node.ConfigPath == "" {
+				continue
+			}
+			nodeNamesByConfig[filepath.Clean(node.ConfigPath)] = append(nodeNamesByConfig[filepath.Clean(node.ConfigPath)], node.Name)
+		}
+		for path := range nodeNamesByConfig {
+			sort.Strings(nodeNamesByConfig[path])
+		}
+	}
+	processes, processCount := c.processSnapshot(memoryTotal, nodeNamesByConfig)
 	if c.demo && len(processes) == 0 {
 		processes = []model.ProcessStat{
 			{PID: 1421, Name: "sing-box", CPU: 6.9, RSSBytes: 84_230_000, MemoryPercent: 4.2},
@@ -523,7 +535,20 @@ func processDisplayName(name string, cmdline []byte) string {
 	}
 }
 
-func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int) {
+func processConfigPath(cmdline []byte) string {
+	fields := strings.FieldsFunc(string(cmdline), func(r rune) bool { return r == 0 })
+	for index, field := range fields {
+		if (field == "-c" || field == "--config") && index+1 < len(fields) {
+			return filepath.Clean(fields[index+1])
+		}
+		if strings.HasPrefix(field, "--config=") {
+			return filepath.Clean(strings.TrimPrefix(field, "--config="))
+		}
+	}
+	return ""
+}
+
+func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[string][]string) ([]model.ProcessStat, int) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, 0
@@ -555,9 +580,14 @@ func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int
 		if statusName != "" {
 			name = statusName
 		}
-		if name == "wukong-panel" || strings.HasPrefix(name, "ld-musl-") {
+		var cmdline []byte
+		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") {
 			cmdline, _ := os.ReadFile("/proc/" + entry.Name() + "/cmdline")
 			name = processDisplayName(name, cmdline)
+		}
+		nodeNames := []string(nil)
+		if name == "sing-box" {
+			nodeNames = append(nodeNames, nodeNamesByConfig[processConfigPath(cmdline)]...)
 		}
 		cpu := 0.0
 		if previous, exists := c.lastProcessCPU[pid]; exists && ticks >= previous && totalDelta > 0 {
@@ -568,7 +598,7 @@ func (c *Collector) processSnapshot(memoryTotal int64) ([]model.ProcessStat, int
 			memoryPercent = float64(rss) / float64(memoryTotal) * 100
 		}
 		current[pid] = ticks
-		items = append(items, model.ProcessStat{PID: pid, Name: name, CPU: cpu, RSSBytes: rss, MemoryPercent: memoryPercent})
+		items = append(items, model.ProcessStat{PID: pid, Name: name, Nodes: nodeNames, CPU: cpu, RSSBytes: rss, MemoryPercent: memoryPercent})
 	}
 	c.lastProcessCPU = current
 	c.lastProcessTotal = totalCPU

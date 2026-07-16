@@ -62,7 +62,9 @@ export interface Overview {
   panelVersion: string
 }
 
-export interface ProcessStat { pid: number; name: string; cpu: number; rssBytes: number; memoryPercent: number }
+export interface ProcessStat { pid: number; name: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }
+
+export interface NodeEditDetails { node: NodeItem; v6OnlyDomains: string[] }
 
 export interface DeviceTraffic { nodeId: string; nodeName: string; bytes: number; rateBps: number }
 export interface TrafficBucket { label: string; startedAt: number; rxBytes: number; txBytes: number }
@@ -168,6 +170,8 @@ export const api = {
   nodeDeploymentDefaults: () => request<NodeDeploymentDefaults>('nodes/deployment-defaults'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
   createNodeBatch: (nodes: Record<string, unknown>[]) => request<{jobId: string}>('nodes/batch', { method: 'POST', body: JSON.stringify({ nodes }) }),
+  nodeEditDetails: (id: string) => request<NodeEditDetails>(`nodes/${id}/edit`),
+  editNode: (id: string, data: Record<string, unknown>) => request<{jobId: string}>(`nodes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   renameNode: (id: string, name: string) => request<{jobId: string}>(`nodes/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   nodeAction: (id: string, action: string, confirmName = '') => request<{jobId: string}>(`nodes/${id}/actions`, { method: 'POST', body: JSON.stringify({ action, confirmName }) }),
   share: (id: string) => request<{uri: string; expiresAt: string}>(`nodes/${id}/share`),

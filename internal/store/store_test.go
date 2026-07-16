@@ -283,13 +283,13 @@ func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
 	defer s.Close()
 	processes := []model.ProcessStat{
 		{PID: 20, Name: "wukong-panel", CPU: 1.2, RSSBytes: 40_000_000, MemoryPercent: 2},
-		{PID: 10, Name: "sing-box", CPU: 6.9, RSSBytes: 84_000_000, MemoryPercent: 4.2},
+		{PID: 10, Name: "sing-box", Nodes: []string{"Apple-TV", "iPhone18"}, CPU: 6.9, RSSBytes: 84_000_000, MemoryPercent: 4.2},
 	}
 	if err := s.ReplaceProcesses(time.Now().Unix(), 106, processes); err != nil {
 		t.Fatal(err)
 	}
 	items, count, err := s.Processes(10)
-	if err != nil || count != 106 || len(items) != 2 || items[0].Name != "sing-box" {
+	if err != nil || count != 106 || len(items) != 2 || items[0].Name != "sing-box" || len(items[0].Nodes) != 2 || items[0].Nodes[1] != "iPhone18" {
 		t.Fatalf("unexpected processes: %#v count=%d err=%v", items, count, err)
 	}
 }

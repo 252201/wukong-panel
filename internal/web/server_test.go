@@ -30,6 +30,10 @@ func (fakeAgent) Create(context.Context, model.NodeCreateRequest) (model.Node, e
 func (fakeAgent) CreateBatch(context.Context, model.NodeBatchCreateRequest) ([]model.Node, error) {
 	return nil, nil
 }
+func (fakeAgent) EditDetails(context.Context, string) (model.NodeEditDetails, error) {
+	return model.NodeEditDetails{}, nil
+}
+func (fakeAgent) Edit(context.Context, string, model.NodeEditRequest) error     { return nil }
 func (fakeAgent) Action(context.Context, string, model.NodeActionRequest) error { return nil }
 func (fakeAgent) Rename(context.Context, string, model.NodeRenameRequest) error { return nil }
 func (fakeAgent) Share(context.Context, string) (model.Share, error)            { return model.Share{}, nil }

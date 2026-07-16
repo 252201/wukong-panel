@@ -95,6 +95,27 @@ type NodeRenameRequest struct {
 	Name string `json:"name"`
 }
 
+// NodeEditRequest contains the mutable, non-secret settings of a managed node.
+// Protocol and credentials deliberately cannot be changed in-place.
+type NodeEditRequest struct {
+	Name            string   `json:"name"`
+	Mode            string   `json:"mode"`
+	ListenPort      int      `json:"listenPort"`
+	Server          string   `json:"server"`
+	Domain          string   `json:"domain"`
+	PreferredServer string   `json:"preferredServer,omitempty"`
+	WebSocketPath   string   `json:"webSocketPath,omitempty"`
+	IPv4Bind        string   `json:"ipv4Bind"`
+	IPv6Bind        string   `json:"ipv6Bind"`
+	AutoBind        bool     `json:"autoBind"`
+	V6OnlyDomains   []string `json:"v6OnlyDomains"`
+}
+
+type NodeEditDetails struct {
+	Node          Node     `json:"node"`
+	V6OnlyDomains []string `json:"v6OnlyDomains"`
+}
+
 type Share struct {
 	URI       string `json:"uri"`
 	ExpiresAt string `json:"expiresAt"`
@@ -119,11 +140,12 @@ type Metric struct {
 }
 
 type ProcessStat struct {
-	PID           int     `json:"pid"`
-	Name          string  `json:"name"`
-	CPU           float64 `json:"cpu"`
-	RSSBytes      int64   `json:"rssBytes"`
-	MemoryPercent float64 `json:"memoryPercent"`
+	PID           int      `json:"pid"`
+	Name          string   `json:"name"`
+	Nodes         []string `json:"nodes,omitempty"`
+	CPU           float64  `json:"cpu"`
+	RSSBytes      int64    `json:"rssBytes"`
+	MemoryPercent float64  `json:"memoryPercent"`
 }
 
 type EndpointStat struct {
