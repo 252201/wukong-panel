@@ -166,6 +166,10 @@ function bucketHeight(item: TrafficBucket) { return Math.max(item.rxBytes + item
 function bucketSegment(value: number, item: TrafficBucket) { const total = item.rxBytes + item.txBytes; return total ? value / total * 100 : 0 }
 function timelineLabel(item: TrafficBucket) { return timelineRange.value === 'today' ? `${item.label}:00` : item.label }
 function updateDeviceLimit() { deviceLimit.value = window.innerWidth < 720 ? 2 : window.innerWidth < 1100 ? 3 : 4 }
+function navigateTo(nextPage: Page) {
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  page.value = nextPage
+}
 
 async function bootstrap() {
   loading.value = true
@@ -193,9 +197,8 @@ async function refreshAll() {
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; timeline.value = timelineData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
 }
 async function showJobLog() {
-  page.value = 'jobs'
+  navigateTo('jobs')
   await refreshAll()
-  window.scrollTo({ top: 0, behavior: 'auto' })
 }
 async function createNode() {
   busy.value = true
@@ -412,8 +415,8 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 
   <div v-else class="app-shell">
     <aside class="sidebar">
-      <button class="brand-button" @click="page = 'overview'"><span class="mini-orbit">悟</span><span><strong>悟空面板</strong><small>WUKONG PANEL</small></span></button>
-      <nav><button v-for="item in navItems" :key="item.id" :class="{ active: page === item.id }" @click="page = item.id"><i>{{ item.seal }}</i><span>{{ item.label }}</span><b v-if="item.id === 'jobs' && activeJobs">{{ activeJobs }}</b></button></nav>
+      <button class="brand-button" @click="navigateTo('overview')"><span class="mini-orbit">悟</span><span><strong>悟空面板</strong><small>WUKONG PANEL</small></span></button>
+      <nav><button v-for="item in navItems" :key="item.id" :class="{ active: page === item.id }" @click="navigateTo(item.id)"><i>{{ item.seal }}</i><span>{{ item.label }}</span><b v-if="item.id === 'jobs' && activeJobs">{{ activeJobs }}</b></button></nav>
       <div class="sidebar-foot"><div class="server-pulse"><i></i><span><b>本机 Agent</b><small>安全通道已连接</small></span></div><button class="ghost-icon" title="退出" @click="logout">↪</button></div>
     </aside>
 
@@ -444,7 +447,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         </section>
 
         <section class="overview-lower">
-          <article class="panel-card node-preview"><div class="card-head"><div><span class="section-mark red">阵</span><div><h3>节点兵器谱</h3><p>按服务状态实时排列</p></div></div><button class="text-button" @click="page = 'nodes'">查看全部 →</button></div><div class="compact-nodes"><div v-for="node in nodes.slice(0, 4)" :key="node.id"><i :class="node.status"></i><span><b>{{ node.name }}</b><small>{{ protocolInfo(node.protocol).badge }} · {{ nodePublicPort(node) }}/{{ protocolInfo(node.protocol).transport }}</small></span><em>{{ node.status === 'active' ? t('online') : t('offline') }}</em></div><p v-if="!nodes.length" class="empty">尚无节点，点击右上角部署第一座节点。</p></div></article>
+          <article class="panel-card node-preview"><div class="card-head"><div><span class="section-mark red">阵</span><div><h3>节点兵器谱</h3><p>按服务状态实时排列</p></div></div><button class="text-button" @click="navigateTo('nodes')">查看全部 →</button></div><div class="compact-nodes"><div v-for="node in nodes.slice(0, 4)" :key="node.id"><i :class="node.status"></i><span><b>{{ node.name }}</b><small>{{ protocolInfo(node.protocol).badge }} · {{ nodePublicPort(node) }}/{{ protocolInfo(node.protocol).transport }}</small></span><em>{{ node.status === 'active' ? t('online') : t('offline') }}</em></div><p v-if="!nodes.length" class="empty">尚无节点，点击右上角部署第一座节点。</p></div></article>
           <article class="panel-card system-glance"><div class="card-head"><div><span class="section-mark jade">脉</span><div><h3>主机气脉</h3><p>资源水位</p></div></div><span class="uptime">运行 {{ uptime(overview?.now.uptime) }}</span></div><div class="resource-row"><span>CPU</span><div><i :style="{ width: `${overview?.now.cpu || 0}%` }"></i></div><b>{{ overview?.now.cpu.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>内存</span><div><i :style="{ width: `${overview?.now.memory || 0}%` }"></i></div><b>{{ overview?.now.memory.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>磁盘</span><div><i :style="{ width: `${overview?.now.disk || 0}%` }"></i></div><b>{{ overview?.now.disk.toFixed(1) || 0 }}%</b></div><div class="version-strip"><span>Panel {{ overview?.panelVersion }}</span><span>sing-box {{ overview?.singBoxVersion }}</span></div></article>
         </section>
       </div>

@@ -582,7 +582,7 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 		}
 		var cmdline []byte
 		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") {
-			cmdline, _ := os.ReadFile("/proc/" + entry.Name() + "/cmdline")
+			cmdline, _ = os.ReadFile("/proc/" + entry.Name() + "/cmdline")
 			name = processDisplayName(name, cmdline)
 		}
 		nodeNames := []string(nil)

@@ -2,9 +2,12 @@ package monitor
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEndpointPacketUsesIPv4PacketLength(t *testing.T) {
@@ -119,6 +122,48 @@ func TestProcessConfigPath(t *testing.T) {
 			t.Fatalf("unexpected process config path %q", got)
 		}
 	}
+}
+
+func TestProcessSnapshotMapsSingBoxNodeNames(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux procfs")
+	}
+	tempDir := t.TempDir()
+	scriptPath := filepath.Join(tempDir, "hold.sh")
+	if err := os.WriteFile(scriptPath, []byte("sleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	singBoxPath := filepath.Join(tempDir, "sing-box")
+	if err := os.Symlink("/bin/sh", singBoxPath); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(tempDir, "device-group.json")
+	command := exec.Command(singBoxPath, scriptPath, "run", "--config="+configPath)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_, _ = command.Process.Wait()
+	})
+
+	collector := &Collector{lastProcessCPU: map[int]uint64{}}
+	want := []string{"Apple-TV", "iPhone"}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		items, _ := collector.processSnapshot(1_000_000_000, map[string][]string{configPath: want})
+		for _, item := range items {
+			if item.PID != command.Process.Pid {
+				continue
+			}
+			if len(item.Nodes) == len(want) && item.Nodes[0] == want[0] && item.Nodes[1] == want[1] {
+				return
+			}
+			t.Fatalf("sing-box process node names missing: %#v", item)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("sing-box helper process %d was not collected", command.Process.Pid)
 }
 
 func TestProcessSnapshotOnLinux(t *testing.T) {

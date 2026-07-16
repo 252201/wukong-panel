@@ -157,7 +157,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .page-caption { display: block; max-width: 620px; margin-top: 9px; color: var(--muted-2); font-size: 8px; font-weight: 500; line-height: 1.6; }
 .node-card, .add-node-card { min-height: 380px; }
 .node-card.tunnel { min-height: 510px; }
-.node-card.tunnel.preferred { min-height: 580px; }
 .preferred-route { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; margin-top: 12px; padding: 10px 11px; border: 1px solid rgba(212,173,87,.18); background: linear-gradient(100deg, rgba(212,173,87,.045), rgba(82,182,144,.035)); }
 .preferred-route span { min-width: 0; }
 .preferred-route small, .preferred-route code { display: block; }
