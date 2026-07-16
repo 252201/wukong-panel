@@ -31,6 +31,7 @@ type AgentAPI interface {
 	Scan(context.Context) ([]model.NodeCandidate, error)
 	DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error)
 	Import(context.Context, []string) error
+	DeleteCandidate(context.Context, string, model.CandidateDeleteRequest) error
 	Create(context.Context, model.NodeCreateRequest) (model.Node, error)
 	CreateBatch(context.Context, model.NodeBatchCreateRequest) ([]model.Node, error)
 	EditDetails(context.Context, string) (model.NodeEditDetails, error)
@@ -74,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/actions", s.auth(s.nodeAction, true))
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
 	mux.HandleFunc("GET /api/v1/imports/scan", s.auth(s.scan, false))
+	mux.HandleFunc("POST /api/v1/imports/{id}/delete", s.auth(s.deleteCandidate, true))
 	mux.HandleFunc("GET /api/v1/system/sing-box/migration", s.auth(s.singBoxMigration, false))
 	mux.HandleFunc("POST /api/v1/imports/confirm", s.auth(s.confirmImport, true))
 	mux.HandleFunc("GET /api/v1/jobs", s.auth(s.jobs, false))
@@ -419,6 +421,20 @@ func (s *Server) confirmImport(w http.ResponseWriter, r *http.Request, session s
 		return
 	}
 	go s.runJob(job, func(ctx context.Context) error { return s.agent.Import(ctx, request.Fingerprints) })
+	writeJSON(w, 202, map[string]string{"jobId": job.ID})
+}
+func (s *Server) deleteCandidate(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request model.CandidateDeleteRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	id := r.PathValue("id")
+	job, err := s.store.CreateJob("candidate.delete", request.ConfirmName)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	go s.runJob(job, func(ctx context.Context) error { return s.agent.DeleteCandidate(ctx, id, request) })
 	writeJSON(w, 202, map[string]string{"jobId": job.ID})
 }
 

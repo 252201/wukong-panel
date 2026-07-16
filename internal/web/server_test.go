@@ -24,6 +24,9 @@ func (fakeAgent) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaul
 	return model.NodeDeploymentDefaults{PanelDomain: "panel.example.com"}, nil
 }
 func (fakeAgent) Import(context.Context, []string) error { return nil }
+func (fakeAgent) DeleteCandidate(context.Context, string, model.CandidateDeleteRequest) error {
+	return nil
+}
 func (fakeAgent) Create(context.Context, model.NodeCreateRequest) (model.Node, error) {
 	return model.Node{}, nil
 }

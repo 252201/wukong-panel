@@ -44,6 +44,9 @@ func (d directAgent) Import(ctx context.Context, ids []string) error {
 	_, err := d.manager.Import(ctx, ids)
 	return err
 }
+func (d directAgent) DeleteCandidate(ctx context.Context, id string, r model.CandidateDeleteRequest) error {
+	return d.manager.DeleteCandidate(ctx, id, r.ConfirmName)
+}
 func (d directAgent) Create(ctx context.Context, r model.NodeCreateRequest) (model.Node, error) {
 	return d.manager.Create(ctx, r)
 }
