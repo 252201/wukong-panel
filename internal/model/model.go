@@ -143,6 +143,15 @@ type Metric struct {
 	Uptime           int64   `json:"uptime"`
 }
 
+// LiveTraffic is the lightweight, in-memory network rate sample. Historical
+// metrics intentionally remain on the slower persistence interval.
+type LiveTraffic struct {
+	Timestamp int64   `json:"timestamp"`
+	Interface string  `json:"interface"`
+	RXBPS     float64 `json:"rxBps"`
+	TXBPS     float64 `json:"txBps"`
+}
+
 type ProcessStat struct {
 	PID           int      `json:"pid"`
 	Name          string   `json:"name"`

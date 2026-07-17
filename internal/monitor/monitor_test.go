@@ -204,6 +204,27 @@ func TestEndpointProtocolTransports(t *testing.T) {
 	}
 }
 
+func TestLiveTrafficUsesActualElapsedTimeAndHandlesCounterReset(t *testing.T) {
+	collector := &Collector{}
+	started := time.Unix(100, 0)
+	collector.updateLive("eth0", 1_000, 2_000, started)
+	collector.updateLive("eth0", 4_000, 8_000, started.Add(1500*time.Millisecond))
+	sample := collector.LiveTraffic()
+	if sample.Interface != "eth0" || sample.RXBPS != 2_000 || sample.TXBPS != 4_000 {
+		t.Fatalf("unexpected live traffic sample: %#v", sample)
+	}
+	collector.updateLive("eth0", 100, 200, started.Add(2500*time.Millisecond))
+	sample = collector.LiveTraffic()
+	if sample.RXBPS != 0 || sample.TXBPS != 0 {
+		t.Fatalf("counter reset produced a spike: %#v", sample)
+	}
+	collector.updateLive("eth1", 10_000, 20_000, started.Add(3500*time.Millisecond))
+	sample = collector.LiveTraffic()
+	if sample.Interface != "eth1" || sample.RXBPS != 0 || sample.TXBPS != 0 {
+		t.Fatalf("interface change produced a spike: %#v", sample)
+	}
+}
+
 func TestEndpointCaptureFilterSeparatesTCPAndUDPPorts(t *testing.T) {
 	ports := map[string]map[int]struct{}{
 		"udp": {45115: {}, 45080: {}},

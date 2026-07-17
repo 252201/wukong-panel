@@ -166,6 +166,37 @@ start_panel_services() {
   fi
 }
 
+reset_panel_password() {
+  database=/var/lib/wukong-panel/wukong.db
+  [ -r "$database" ] || die "未找到面板数据库 $database，无法重置密码"
+  download_panel_binary
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  backup_dir="/var/lib/wukong-panel/backups/password-reset-$timestamp-$$"
+  install -d -m 0700 "$backup_dir"
+  info "停止面板服务并备份数据库"
+  stop_panel_services
+  for database_file in /var/lib/wukong-panel/wukong.db*; do
+    [ -e "$database_file" ] || continue
+    if ! cp -a "$database_file" "$backup_dir/"; then
+      start_panel_services || true
+      die "数据库备份失败，密码未重置"
+    fi
+  done
+  if ! reset_output=$("$TMP_DIR/wukong-panel" reset-password --data-dir /var/lib/wukong-panel 2>&1); then
+    start_panel_services || true
+    die "密码重置失败：$reset_output"
+  fi
+  printf '%s\n' "$reset_output"
+  if ! start_panel_services; then
+    die "密码已重置，但面板服务恢复失败；数据库备份位于 $backup_dir"
+  fi
+  if ! health=$(wait_for_web); then
+    die "密码已重置且服务已启动，但健康检查未通过；数据库备份位于 $backup_dir"
+  fi
+  info "面板密码重置完成：$health"
+  info "重置前数据库备份：$backup_dir"
+}
+
 wait_for_web() {
   attempt=0
   while [ "$attempt" -lt 30 ]; do
@@ -710,8 +741,9 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall
+  --action ACTION      install、update、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall
   --update             等同于 --action update
+  --reset-password     重置 admin 密码、撤销会话并强制首次登录改密
   --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
   --rollback-sing-box  回退到上一次保留的 sing-box 版本
   --uninstall-sing-box 备份后卸载 sing-box 二进制、JSON 配置和节点服务
@@ -738,6 +770,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --action) ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --update) ACTION=update; HAS_CONFIG_ARGS=true; shift ;;
+    --reset-password) ACTION=reset-password; HAS_CONFIG_ARGS=true; shift ;;
     --update-sing-box) ACTION=singbox-update; HAS_CONFIG_ARGS=true; shift ;;
     --rollback-sing-box) ACTION=singbox-rollback; HAS_CONFIG_ARGS=true; shift ;;
     --uninstall-sing-box) ACTION=singbox-uninstall; HAS_CONFIG_ARGS=true; shift ;;
@@ -770,9 +803,9 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 更新 sing-box（保留旧版，可回退）" "  3) 回退 sing-box 到上一版本" "  4) 卸载 sing-box（先完整备份节点）" "  5) 重新配置 / 修复安装" "  6) 卸载面板（保留配置和数据）" "  7) 完全卸载（删除面板配置和数据）" "  8) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 更新 sing-box（保留旧版，可回退）" "  3) 回退 sing-box 到上一版本" "  4) 卸载 sing-box（先完整备份节点）" "  5) 重置面板 admin 密码" "  6) 重新配置 / 修复安装" "  7) 卸载面板（保留配置和数据）" "  8) 完全卸载（删除面板配置和数据）" "  9) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|singbox-update) ACTION=singbox-update ;; 3|singbox-rollback) ACTION=singbox-rollback ;; 4|singbox-uninstall) ACTION=singbox-uninstall ;; 5|install|repair) ACTION=install ;; 6|uninstall) ACTION=uninstall ;; 7|purge) ACTION=uninstall; PURGE=true ;; 8|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|singbox-update) ACTION=singbox-update ;; 3|singbox-rollback) ACTION=singbox-rollback ;; 4|singbox-uninstall) ACTION=singbox-uninstall ;; 5|reset-password) ACTION=reset-password ;; 6|install|repair) ACTION=install ;; 7|uninstall) ACTION=uninstall ;; 8|purge) ACTION=uninstall; PURGE=true ;; 9|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
@@ -786,7 +819,7 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|uninstall|singbox-update|singbox-rollback|singbox-uninstall) ;; *) die "--action 必须是 install、update、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall" ;; esac
+case "$ACTION" in install|update|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall) ;; *) die "--action 必须是 install、update、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall" ;; esac
 
 if [ "$ACTION" = "uninstall" ]; then
   if [ "$INTERACTIVE_SESSION" = true ]; then
@@ -799,7 +832,7 @@ if [ "$ACTION" = "uninstall" ]; then
 fi
 
 case "$ACTION" in
-  update|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
+  update|reset-password|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
 esac
 
 if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-uninstall" ]; then
@@ -885,6 +918,10 @@ trap 'exit 143' TERM
 
 if [ "$ACTION" = "update" ]; then
   update_panel
+  exit 0
+fi
+if [ "$ACTION" = "reset-password" ]; then
+  reset_panel_password
   exit 0
 fi
 if [ "$ACTION" = "singbox-update" ]; then

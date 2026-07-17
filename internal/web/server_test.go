@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,6 +20,9 @@ import (
 
 type fakeAgent struct{}
 
+func (fakeAgent) LiveTraffic(context.Context) (model.LiveTraffic, error) {
+	return model.LiveTraffic{Timestamp: 1, Interface: "eth0", RXBPS: 2, TXBPS: 3}, nil
+}
 func (fakeAgent) Scan(context.Context) ([]model.NodeCandidate, error) { return nil, nil }
 func (fakeAgent) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
 	return model.NodeDeploymentDefaults{PanelDomain: "panel.example.com"}, nil
@@ -44,6 +48,12 @@ func (fakeAgent) MigrationPlan(context.Context, string) (singboxconfig.Plan, err
 	return singboxconfig.Plan{Compatible: true}, nil
 }
 
+type unavailableLiveAgent struct{ fakeAgent }
+
+func (unavailableLiveAgent) LiveTraffic(context.Context) (model.LiveTraffic, error) {
+	return model.LiveTraffic{}, errors.New("agent unavailable")
+}
+
 func TestBillingPeriodBeforeAndAfterResetDay(t *testing.T) {
 	tz := "Asia/Shanghai"
 	before := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
@@ -67,6 +77,23 @@ func TestMaskToken(t *testing.T) {
 func TestMaskEndpointNamesCloudflareTunnel(t *testing.T) {
 	if got := maskEndpoint("cloudflare-tunnel"); got != "Cloudflare Tunnel" {
 		t.Fatalf("unexpected Tunnel endpoint label %q", got)
+	}
+}
+
+func TestLiveTrafficFallsBackToLatestStoredMetric(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err = database.AddMetric(model.Metric{Timestamp: time.Now().Unix(), Interface: "eth9", RXBPS: 456, TXBPS: 789}); err != nil {
+		t.Fatal(err)
+	}
+	server := New(config.Config{BasePath: "/", SecureCookie: false}, database, unavailableLiveAgent{}, "test")
+	recorder := httptest.NewRecorder()
+	server.liveTraffic(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/metrics/live", nil), store.Session{})
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"interface":"eth9"`) || !strings.Contains(recorder.Body.String(), `"rxBps":456`) {
+		t.Fatalf("unexpected live traffic fallback: %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
