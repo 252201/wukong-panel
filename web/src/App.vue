@@ -198,21 +198,6 @@ async function refreshAll() {
   const [overviewData, nodeData, jobData, settingData, endpointData, timelineData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline()])
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; timeline.value = timelineData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
 }
-let liveRefreshPending = false
-async function refreshLiveTraffic() {
-  if (!overview.value || liveRefreshPending) return
-  liveRefreshPending = true
-  try {
-    const sample = await api.liveTraffic()
-    if (!overview.value) return
-    overview.value.now.timestamp = sample.timestamp
-    overview.value.now.interface = sample.interface
-    overview.value.now.rxBps = sample.rxBps
-    overview.value.now.txBps = sample.txBps
-  } finally {
-    liveRefreshPending = false
-  }
-}
 async function showJobLog() {
   navigateTo('jobs')
   await refreshAll()
@@ -425,16 +410,8 @@ async function scanSingBoxMigration() {
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
-let liveTimer = 0
-onMounted(async () => {
-  updateDeviceLimit()
-  window.addEventListener('resize', updateDeviceLimit)
-  await bootstrap()
-  setTimelineRange('today')
-  timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) refreshAll().catch(() => {}) }, 10_000)
-  liveTimer = window.setInterval(() => { if (document.visibilityState === 'visible' && authenticated.value && !mustChange.value) refreshLiveTraffic().catch(() => {}) }, 1_000)
-})
-onBeforeUnmount(() => { window.clearInterval(timer); window.clearInterval(liveTimer); window.removeEventListener('resize', updateDeviceLimit) })
+onMounted(async () => { updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) refreshAll().catch(() => {}) }, 10_000) })
+onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
 <template>
