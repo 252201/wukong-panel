@@ -46,6 +46,13 @@ export interface Metric {
   uptime: number
 }
 
+export interface LiveTraffic {
+  timestamp: number
+  interface: string
+  rxBps: number
+  txBps: number
+}
+
 export interface Overview {
   now: Metric
   history: Metric[]
@@ -163,6 +170,7 @@ export const api = {
   logout: () => request<{ok: boolean}>('auth/logout', { method: 'POST', body: '{}' }),
   changePassword: (password: string) => request<{ok: boolean}>('auth/password', { method: 'POST', body: JSON.stringify({ password }) }),
   overview: () => request<Overview>('overview'),
+  liveTraffic: () => request<LiveTraffic>('metrics/live'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
   singBoxMigration: async (target = '1.13.14') => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),

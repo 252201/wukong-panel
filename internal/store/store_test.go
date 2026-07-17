@@ -39,6 +39,46 @@ func TestAuthenticationLifecycle(t *testing.T) {
 	}
 }
 
+func TestResetAdminPasswordRevokesSessionsAndForcesChange(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	original, _, err := s.EnsureAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _, err := s.Authenticate("admin", original)
+	if err != nil || userID == 0 {
+		t.Fatalf("initial authentication failed: %v", err)
+	}
+	session, err := s.CreateSession(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetSetting("timezone", "Asia/Taipei"); err != nil {
+		t.Fatal(err)
+	}
+	temporary, err := s.ResetAdminPassword()
+	if err != nil || temporary == "" || temporary == original {
+		t.Fatalf("password reset failed: %v", err)
+	}
+	if oldID, _, authErr := s.Authenticate("admin", original); authErr != nil || oldID != 0 {
+		t.Fatalf("old password still authenticates: id=%d err=%v", oldID, authErr)
+	}
+	resetID, mustChange, err := s.Authenticate("admin", temporary)
+	if err != nil || resetID != userID || !mustChange {
+		t.Fatalf("temporary password invalid: id=%d mustChange=%v err=%v", resetID, mustChange, err)
+	}
+	if _, err = s.Session(session.Token); err == nil {
+		t.Fatal("password reset did not revoke existing session")
+	}
+	if timezone, settingErr := s.Setting("timezone"); settingErr != nil || timezone != "Asia/Taipei" {
+		t.Fatalf("password reset changed settings: %q %v", timezone, settingErr)
+	}
+}
+
 func TestJobsOrdersNewestInsertionFirstWhenTimestampsMatch(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +30,11 @@ type Collector struct {
 	lastCPU, lastIdle uint64
 	lastProcessTotal  uint64
 	lastProcessCPU    map[int]uint64
+	liveMu            sync.RWMutex
+	live              model.LiveTraffic
+	liveRX, liveTX    int64
+	liveAt            time.Time
+	liveReady         bool
 }
 
 func New(s *store.Store, demo bool) *Collector {
@@ -36,6 +42,7 @@ func New(s *store.Store, demo bool) *Collector {
 }
 
 func (c *Collector) Run(ctx context.Context) {
+	go c.runLive(ctx)
 	c.sample()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -47,6 +54,79 @@ func (c *Collector) Run(ctx context.Context) {
 			c.sample()
 		}
 	}
+}
+
+func (c *Collector) runLive(ctx context.Context) {
+	c.sampleLive()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.sampleLive()
+		}
+	}
+}
+
+func (c *Collector) sampleLive() {
+	c.liveMu.RLock()
+	iface := c.live.Interface
+	c.liveMu.RUnlock()
+	if iface == "" || iface == "auto" || iface == "unknown" {
+		iface = defaultInterface()
+	}
+	rx, tx := networkBytes(iface)
+	now := time.Now()
+	if c.demo && rx == 0 && tx == 0 {
+		phase := float64(now.UnixNano()%int64(120*time.Second)) / float64(120*time.Second) * math.Pi * 2
+		c.liveMu.Lock()
+		c.live = model.LiveTraffic{
+			Timestamp: now.Unix(), Interface: iface,
+			RXBPS: 400_000 + 200_000*(1+math.Sin(phase)),
+			TXBPS: 180_000 + 90_000*(1+math.Cos(phase)),
+		}
+		c.liveReady = false
+		c.liveMu.Unlock()
+		return
+	}
+	c.updateLive(iface, rx, tx, now)
+}
+
+func (c *Collector) updateLive(iface string, rx, tx int64, now time.Time) {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	sample := model.LiveTraffic{Timestamp: now.Unix(), Interface: iface}
+	if c.liveReady && c.live.Interface == iface {
+		elapsed := now.Sub(c.liveAt).Seconds()
+		if elapsed > 0 {
+			if rx >= c.liveRX {
+				sample.RXBPS = float64(rx-c.liveRX) / elapsed
+			}
+			if tx >= c.liveTX {
+				sample.TXBPS = float64(tx-c.liveTX) / elapsed
+			}
+		}
+	}
+	c.live = sample
+	c.liveRX, c.liveTX, c.liveAt, c.liveReady = rx, tx, now, true
+}
+
+func (c *Collector) setLiveInterface(iface string) {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if c.live.Interface == iface {
+		return
+	}
+	c.live = model.LiveTraffic{Timestamp: time.Now().Unix(), Interface: iface}
+	c.liveReady = false
+}
+
+func (c *Collector) LiveTraffic() model.LiveTraffic {
+	c.liveMu.RLock()
+	defer c.liveMu.RUnlock()
+	return c.live
 }
 
 func (c *Collector) RunEndpoints(ctx context.Context) {
@@ -245,6 +325,7 @@ func (c *Collector) sample() {
 	if iface == "" || iface == "auto" {
 		iface = defaultInterface()
 	}
+	c.setLiveInterface(iface)
 	rx, tx := networkBytes(iface)
 	now := time.Now()
 	oldIface, lastRX, lastTX, accRX, accTX, _ := c.store.TrafficState()

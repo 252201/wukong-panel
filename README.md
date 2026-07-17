@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.6.8-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.6.9-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -16,7 +16,7 @@
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
-- 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
+- 实时观测：网卡速率使用 1 秒轻量内存采样；CPU、内存、磁盘、负载、节点状态、进程 CPU/RSS 与历史 SQLite 指标仍按 10 秒采样，避免实时显示给 VPS 带来不必要的进程扫描和写盘压力；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：六种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
@@ -52,6 +52,11 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --update
 
+# 忘记 admin 密码：备份数据库、撤销全部会话并生成一次性密码
+# 登录后必须立即设置至少 12 位的新密码
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --reset-password
+
 # 更新到悟空验证过的 sing-box 稳定版本；旧二进制和配置快照会保留
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --update-sing-box
@@ -73,7 +78,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.6.8 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.6.9 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \

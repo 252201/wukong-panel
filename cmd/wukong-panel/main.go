@@ -28,10 +28,16 @@ import (
 
 var version = "dev"
 
-type directAgent struct{ manager *agent.Manager }
+type directAgent struct {
+	manager   *agent.Manager
+	collector *monitor.Collector
+}
 
 func (d directAgent) Health(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"ok": true, "version": d.manager.Version(ctx)}, nil
+}
+func (d directAgent) LiveTraffic(context.Context) (model.LiveTraffic, error) {
+	return d.collector.LiveTraffic(), nil
 }
 
 func (d directAgent) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
@@ -81,7 +87,10 @@ func main() {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	if cfg.AgentToken == "" {
+	if cfg.Command == "reset-password" && os.Geteuid() != 0 {
+		log.Fatal("reset-password must be run as root")
+	}
+	if cfg.Command != "reset-password" && cfg.AgentToken == "" {
 		token, err := ensureToken(cfg.AgentTokenFile)
 		if err != nil {
 			log.Fatal(err)
@@ -97,6 +106,12 @@ func main() {
 	defer stop()
 
 	switch cfg.Command {
+	case "reset-password":
+		password, err := s.ResetAdminPassword()
+		fatalIf(err)
+		fmt.Printf("WUKONG_RESET_PASSWORD=%s\n", password)
+		fmt.Println("The admin must change this temporary password after signing in. All existing sessions were revoked.")
+		return
 	case "init":
 		vault := mustVault(cfg.SecretDir)
 		password, created, err := s.EnsureAdmin()
@@ -132,7 +147,7 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
-		server := agent.NewServer(manager, cfg.AgentToken)
+		server := agent.NewServer(manager, cfg.AgentToken, collector.LiveTraffic)
 		fatalServe(server.ListenAndServe(ctx, cfg.AgentSocket))
 		return
 	case "web":
@@ -161,11 +176,11 @@ func main() {
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
 		go func() { <-ctx.Done() }()
-		server := webserver.New(cfg, s, directAgent{manager}, version)
+		server := webserver.New(cfg, s, directAgent{manager: manager, collector: collector}, version)
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:
-		log.Fatalf("unknown command %q (use serve, agent, web, init, doctor, scan, node, singbox)", cfg.Command)
+		log.Fatalf("unknown command %q (use serve, agent, web, init, reset-password, doctor, scan, node, singbox)", cfg.Command)
 	}
 }
 

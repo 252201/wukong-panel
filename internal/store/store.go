@@ -199,6 +199,49 @@ func (s *Store) EnsureAdmin() (string, bool, error) {
 	return password, true, err
 }
 
+func (s *Store) ResetAdminPassword() (string, error) {
+	var userID int64
+	if err := s.DB.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errors.New("admin user does not exist")
+		}
+		return "", err
+	}
+	password, err := security.RandomToken(15)
+	if err != nil {
+		return "", err
+	}
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		return "", err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec("UPDATE users SET password_hash=?,must_change=1 WHERE id=? AND username='admin'", hash, userID)
+	if err != nil {
+		return "", err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected != 1 {
+		if affectedErr != nil {
+			return "", affectedErr
+		}
+		return "", errors.New("admin user changed while resetting password")
+	}
+	if _, err = tx.Exec("DELETE FROM sessions WHERE user_id=?", userID); err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec("INSERT INTO audit_logs(ts,actor,action,target,detail) VALUES(?,?,?,?,?)", time.Now().Unix(), "root", "reset_password", "admin", "all sessions revoked; password change required"); err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
 type Session struct {
 	Token, CSRF string
 	UserID      int64
