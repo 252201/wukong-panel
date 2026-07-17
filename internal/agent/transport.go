@@ -20,17 +20,12 @@ import (
 )
 
 type Server struct {
-	manager     *Manager
-	token       string
-	liveTraffic func() model.LiveTraffic
+	manager *Manager
+	token   string
 }
 
-func NewServer(manager *Manager, token string, liveTraffic ...func() model.LiveTraffic) *Server {
-	server := &Server{manager: manager, token: token}
-	if len(liveTraffic) > 0 {
-		server.liveTraffic = liveTraffic[0]
-	}
-	return server
+func NewServer(manager *Manager, token string) *Server {
+	return &Server{manager: manager, token: token}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
@@ -52,13 +47,6 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.manager.Version(r.Context())})
-	}))
-	mux.HandleFunc("GET /metrics/live", s.authorize(func(w http.ResponseWriter, r *http.Request) {
-		if s.liveTraffic == nil {
-			writeError(w, http.StatusServiceUnavailable, "live traffic collector is unavailable")
-			return
-		}
-		writeJSON(w, http.StatusOK, s.liveTraffic())
 	}))
 	mux.HandleFunc("GET /scan", s.authorize(s.scan))
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
@@ -266,11 +254,6 @@ func (c *Client) request(ctx context.Context, method, path string, body any, out
 func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.request(ctx, "GET", "/health", nil, &result)
-	return result, err
-}
-func (c *Client) LiveTraffic(ctx context.Context) (model.LiveTraffic, error) {
-	var result model.LiveTraffic
-	err := c.request(ctx, "GET", "/metrics/live", nil, &result)
 	return result, err
 }
 func (c *Client) Scan(ctx context.Context) ([]model.NodeCandidate, error) {

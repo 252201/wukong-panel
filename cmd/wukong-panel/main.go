@@ -28,18 +28,11 @@ import (
 
 var version = "dev"
 
-type directAgent struct {
-	manager   *agent.Manager
-	collector *monitor.Collector
-}
+type directAgent struct{ manager *agent.Manager }
 
 func (d directAgent) Health(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"ok": true, "version": d.manager.Version(ctx)}, nil
 }
-func (d directAgent) LiveTraffic(context.Context) (model.LiveTraffic, error) {
-	return d.collector.LiveTraffic(), nil
-}
-
 func (d directAgent) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 	return d.manager.Scan(ctx)
 }
@@ -147,7 +140,7 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
-		server := agent.NewServer(manager, cfg.AgentToken, collector.LiveTraffic)
+		server := agent.NewServer(manager, cfg.AgentToken)
 		fatalServe(server.ListenAndServe(ctx, cfg.AgentSocket))
 		return
 	case "web":
@@ -176,7 +169,7 @@ func main() {
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
 		go func() { <-ctx.Done() }()
-		server := webserver.New(cfg, s, directAgent{manager: manager, collector: collector}, version)
+		server := webserver.New(cfg, s, directAgent{manager}, version)
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:

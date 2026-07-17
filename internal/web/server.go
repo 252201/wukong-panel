@@ -28,7 +28,6 @@ import (
 var staticFiles embed.FS
 
 type AgentAPI interface {
-	LiveTraffic(context.Context) (model.LiveTraffic, error)
 	Scan(context.Context) ([]model.NodeCandidate, error)
 	DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error)
 	Import(context.Context, []string) error
@@ -64,7 +63,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/password", s.auth(s.changePassword, true))
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.overview, false))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.metrics, false))
-	mux.HandleFunc("GET /api/v1/metrics/live", s.auth(s.liveTraffic, false))
 	mux.HandleFunc("GET /api/v1/metrics/endpoints", s.auth(s.endpoints, false))
 	mux.HandleFunc("GET /api/v1/metrics/timeline", s.auth(s.timeline, false))
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
@@ -205,19 +203,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request, session store.S
 		return
 	}
 	writeJSON(w, 200, items)
-}
-func (s *Server) liveTraffic(w http.ResponseWriter, r *http.Request, session store.Session) {
-	sample, err := s.agent.LiveTraffic(r.Context())
-	if err != nil || sample.Interface == "" {
-		metrics, storeErr := s.store.Metrics(1)
-		if storeErr != nil || len(metrics) == 0 {
-			writeError(w, http.StatusServiceUnavailable, "实时流量采样暂不可用")
-			return
-		}
-		latest := metrics[len(metrics)-1]
-		sample = model.LiveTraffic{Timestamp: latest.Timestamp, Interface: latest.Interface, RXBPS: latest.RXBPS, TXBPS: latest.TXBPS}
-	}
-	writeJSON(w, http.StatusOK, sample)
 }
 func (s *Server) endpoints(w http.ResponseWriter, r *http.Request, session store.Session) {
 	items, err := s.store.TopEndpoints(10)
