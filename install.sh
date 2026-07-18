@@ -101,6 +101,7 @@ sha256_file() {
 uninstall_panel() {
   purge=$1
   info "停止并卸载悟空面板"
+  if [ "$purge" = true ]; then disable_certificate_renewal; fi
   if using_systemd; then
     systemctl disable --now wukong-web.service wukong-agent.service 2>/dev/null || true
     rm -f /etc/systemd/system/wukong-web.service /etc/systemd/system/wukong-agent.service
@@ -221,8 +222,232 @@ backfill_panel_domain() {
   info "已记录面板域名：${panel_domain:-未配置域名}"
 }
 
+backfill_panel_tls() {
+  env_file=${1:-/etc/wukong-panel/env}
+  if [ "$#" -gt 0 ]; then shift; fi
+  [ -r "$env_file" ] || return 0
+  if grep -q '^WUKONG_TLS_CERT=[^[:space:]]' "$env_file" && grep -q '^WUKONG_TLS_KEY=[^[:space:]]' "$env_file"; then
+    return 0
+  fi
+  panel_domain=$(sed -n 's/^WUKONG_PANEL_DOMAIN=//p' "$env_file" | tail -1)
+  if [ "$#" -eq 0 ]; then
+    set -- /etc/nginx/conf.d/wukong-panel.conf /etc/nginx/http.d/wukong-panel.conf
+  fi
+  for nginx_config in "$@"; do
+    [ -r "$nginx_config" ] || continue
+    tls_cert=$(awk '$1 == "ssl_certificate" { value=$2; sub(/;$/, "", value); print value; exit }' "$nginx_config")
+    tls_key=$(awk '$1 == "ssl_certificate_key" { value=$2; sub(/;$/, "", value); print value; exit }' "$nginx_config")
+    [ -r "$tls_cert" ] && [ -r "$tls_key" ] || continue
+    openssl x509 -in "$tls_cert" -noout -checkend 0 >/dev/null 2>&1 || continue
+    if [ -n "$panel_domain" ]; then
+      openssl x509 -in "$tls_cert" -noout -checkhost "$panel_domain" >/dev/null 2>&1 || continue
+    fi
+    cert_public=$(openssl x509 -in "$tls_cert" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+    key_public=$(openssl pkey -in "$tls_key" -pubout -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+    [ -n "$cert_public" ] && [ "$cert_public" = "$key_public" ] || continue
+    printf '\nWUKONG_TLS_CERT=%s\nWUKONG_TLS_KEY=%s\n' "$tls_cert" "$tls_key" >> "$env_file"
+    info "已记录可信 TLS 证书：$tls_cert"
+    return 0
+  done
+  warn "未能从面板 Nginx 配置识别可复用的 TLS 证书；新建证书协议节点将继续使用自签名证书"
+}
+
+install_certificate_renewal_helpers() {
+  install -d -m 0755 /usr/local/sbin
+  reload_hook=/usr/local/sbin/wukong-cert-reload
+  cat > "$reload_hook" <<'EOF_WUKONG_CERT_RELOAD'
+#!/bin/sh
+set -eu
+
+env_file=${WUKONG_ENV_FILE:-/etc/wukong-panel/env}
+env_value() {
+  [ -r "$env_file" ] || return 0
+  sed -n "s/^$1=//p" "$env_file" | tail -1
+}
+
+tls_cert=$(env_value WUKONG_TLS_CERT)
+config_dir=$(env_value WUKONG_SINGBOX_CONFIG_DIR)
+singbox_bin=$(env_value WUKONG_SINGBOX_BIN)
+config_dir=${config_dir:-/etc/s-box}
+singbox_bin=${singbox_bin:-/etc/s-box/sing-box}
+[ -r "$tls_cert" ] || { printf 'Wukong TLS certificate is unavailable: %s\n' "$tls_cert" >&2; exit 1; }
+
+restarted=" "
+failed=0
+restart_systemd_config() {
+  config=$1
+  for unit_file in /etc/systemd/system/sing-box*.service /usr/lib/systemd/system/sing-box*.service /lib/systemd/system/sing-box*.service; do
+    [ -f "$unit_file" ] || continue
+    grep -F "$config" "$unit_file" >/dev/null 2>&1 || continue
+    unit=$(basename "$unit_file")
+    case "$restarted" in *" $unit "*) continue ;; esac
+    if systemctl is-active --quiet "$unit"; then systemctl restart "$unit" || failed=1; fi
+    restarted="$restarted$unit "
+  done
+}
+restart_openrc_config() {
+  config=$1
+  for init_script in /etc/init.d/sing-box*; do
+    [ -f "$init_script" ] || continue
+    grep -F "$config" "$init_script" >/dev/null 2>&1 || continue
+    service=$(basename "$init_script")
+    case "$restarted" in *" $service "*) continue ;; esac
+    if rc-service "$service" status >/dev/null 2>&1; then rc-service "$service" restart || failed=1; fi
+    restarted="$restarted$service "
+  done
+}
+
+for config in "$config_dir"/*.json; do
+  [ -f "$config" ] || continue
+  grep -F "$tls_cert" "$config" >/dev/null 2>&1 || continue
+  if ! "$singbox_bin" check -c "$config"; then
+    printf 'Refusing to restart invalid sing-box config: %s\n' "$config" >&2
+    failed=1
+    continue
+  fi
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    restart_systemd_config "$config"
+  elif command -v rc-service >/dev/null 2>&1; then
+    restart_openrc_config "$config"
+  fi
+done
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx.service; then
+    systemctl reload nginx.service || failed=1
+  elif command -v rc-service >/dev/null 2>&1 && rc-service nginx status >/dev/null 2>&1; then
+    rc-service nginx reload || failed=1
+  fi
+fi
+exit "$failed"
+EOF_WUKONG_CERT_RELOAD
+  chmod 0755 "$reload_hook"
+
+  renew_hook=/usr/local/sbin/wukong-cert-renew
+  cat > "$renew_hook" <<'EOF_WUKONG_CERT_RENEW'
+#!/bin/sh
+set -eu
+
+acme_home=${WUKONG_ACME_HOME:-/root/.acme.sh}
+acme="$acme_home/acme.sh"
+[ -x "$acme" ] || { printf 'acme.sh is unavailable: %s\n' "$acme" >&2; exit 1; }
+
+now=$(date +%s)
+standalone_due=false
+for conf in "$acme_home"/*/*.conf; do
+  [ -r "$conf" ] || continue
+  webroot=$(sed -n "s/^Le_Webroot='\(.*\)'/\1/p" "$conf" | tail -1)
+  next_renew=$(sed -n "s/^Le_NextRenewTime='\([0-9][0-9]*\)'/\1/p" "$conf" | tail -1)
+  case "$next_renew" in ''|*[!0-9]*) next_renew=0 ;; esac
+  if [ "$webroot" = "no" ] && { [ "$next_renew" -eq 0 ] || [ "$next_renew" -le "$now" ]; }; then
+    standalone_due=true
+    break
+  fi
+done
+
+nginx_manager=""
+if [ "$standalone_due" = true ]; then
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx.service; then
+    systemctl stop nginx.service
+    nginx_manager=systemd
+  elif command -v rc-service >/dev/null 2>&1 && rc-service nginx status >/dev/null 2>&1; then
+    rc-service nginx stop
+    nginx_manager=openrc
+  fi
+fi
+
+restore_nginx() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  case "$nginx_manager" in
+    systemd) systemctl start nginx.service || status=1 ;;
+    openrc) rc-service nginx start || status=1 ;;
+  esac
+  exit "$status"
+}
+trap restore_nginx EXIT HUP INT TERM
+"$acme" --cron --home "$acme_home"
+EOF_WUKONG_CERT_RENEW
+  chmod 0755 "$renew_hook"
+}
+
+configure_certificate_renewal() {
+  domain=$1
+  cert_file=$2
+  key_file=$3
+  [ -n "$domain" ] && [ -r "$cert_file" ] && [ -r "$key_file" ] || return 1
+  [ -x /root/.acme.sh/acme.sh ] || return 1
+  install_certificate_renewal_helpers
+  /root/.acme.sh/acme.sh --install-cert -d "$domain" --ecc --fullchain-file "$cert_file" --key-file "$key_file" --reloadcmd "/usr/local/sbin/wukong-cert-reload"
+  /root/.acme.sh/acme.sh --uninstall-cronjob >/dev/null 2>&1 || true
+  if using_systemd; then
+    cat > /etc/systemd/system/wukong-cert-renew.service <<'EOF'
+[Unit]
+Description=Renew Wukong Panel ACME certificates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wukong-cert-renew
+EOF
+    cat > /etc/systemd/system/wukong-cert-renew.timer <<'EOF'
+[Unit]
+Description=Daily Wukong Panel certificate renewal check
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=40m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now wukong-cert-renew.timer
+  else
+    install -d -m 0755 /etc/periodic/daily
+    cat > /etc/periodic/daily/wukong-cert-renew <<'EOF'
+#!/bin/sh
+exec /usr/local/sbin/wukong-cert-renew
+EOF
+    chmod 0755 /etc/periodic/daily/wukong-cert-renew
+    rc-update add crond default >/dev/null 2>&1 || true
+    rc-service crond status >/dev/null 2>&1 || rc-service crond start
+  fi
+  info "已启用 Let's Encrypt 每日自动续期与节点证书热更新"
+}
+
+backfill_certificate_renewal() {
+  env_file=/etc/wukong-panel/env
+  [ -r "$env_file" ] || return 0
+  domain=$(sed -n 's/^WUKONG_PANEL_DOMAIN=//p' "$env_file" | tail -1)
+  cert_file=$(sed -n 's/^WUKONG_TLS_CERT=//p' "$env_file" | tail -1)
+  key_file=$(sed -n 's/^WUKONG_TLS_KEY=//p' "$env_file" | tail -1)
+  [ -n "$domain" ] && [ -r "$cert_file" ] && [ -r "$key_file" ] || return 0
+  acme_conf="/root/.acme.sh/${domain}_ecc/${domain}.conf"
+  [ -r "$acme_conf" ] || return 0
+  installed_cert=$(sed -n "s/^Le_RealFullChainPath='\(.*\)'/\1/p" "$acme_conf" | tail -1)
+  [ "$installed_cert" = "$cert_file" ] || { warn "ACME 安装路径与面板证书路径不一致，跳过自动续期接管"; return 0; }
+  configure_certificate_renewal "$domain" "$cert_file" "$key_file"
+}
+
+disable_certificate_renewal() {
+  if using_systemd; then
+    systemctl disable --now wukong-cert-renew.timer >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/wukong-cert-renew.timer /etc/systemd/system/wukong-cert-renew.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  else
+    rm -f /etc/periodic/daily/wukong-cert-renew
+  fi
+  rm -f /usr/local/sbin/wukong-cert-renew /usr/local/sbin/wukong-cert-reload
+}
+
 update_panel() {
   backfill_panel_domain
+  backfill_panel_tls
+  backfill_certificate_renewal
   download_panel_binary
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_dir="/var/lib/wukong-panel/backups/update-$timestamp"
@@ -1164,6 +1389,10 @@ server {
 EOF
 nginx -t
 if [ "$INIT" = "systemd" ]; then systemctl enable --now nginx; systemctl reload nginx; else rc-update add nginx default >/dev/null 2>&1 || true; rc-service nginx restart; fi
+
+if [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; then
+  configure_certificate_renewal "$DOMAIN" "$TLS_CERT" "$TLS_KEY"
+fi
 
 IPV4_HOST=$(curl -4 -fsSL --max-time 4 https://api.ipify.org 2>/dev/null || true)
 if [ -z "$IPV4_HOST" ]; then IPV4_HOST=$(hostname -I 2>/dev/null | awk '{print $1}' || true); fi

@@ -1548,6 +1548,16 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		if stored.ID == node.ID {
 			runtimeRequest = request
 			storedCredentials.WebSocketPath = request.WebSocketPath
+		}
+		oldInbound := inboundByPort(inbounds, stored.ListenPort)
+		if oldInbound == nil {
+			return fmt.Errorf("inbound on port %d was not found", stored.ListenPort)
+		}
+		storedCredentials, err = credentialsForManagedEdit(stored.Protocol, storedCredentials, oldInbound)
+		if err != nil {
+			return fmt.Errorf("preserve credentials for %s: %w", stored.Name, err)
+		}
+		if stored.ID == node.ID {
 			encoded, encodeErr := encodeProtocolCredentials(storedCredentials)
 			if encodeErr != nil {
 				return encodeErr
@@ -1556,10 +1566,6 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 			if err != nil {
 				return err
 			}
-		}
-		oldInbound := inboundByPort(inbounds, stored.ListenPort)
-		if oldInbound == nil {
-			return fmt.Errorf("inbound on port %d was not found", stored.ListenPort)
 		}
 		certPath, keyPath := certificatePathsFromInbound(oldInbound)
 		if protocolUsesCertificate(stored.Protocol) && !certificatePairCoversDomain(certPath, keyPath, runtimeRequest.Domain) {

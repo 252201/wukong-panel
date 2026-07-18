@@ -232,6 +232,73 @@ func TestEditDeviceNodePreservesCredentialAndUpdatesSharedRuntime(t *testing.T) 
 	}
 }
 
+func TestEditRealityNodePreservesPrivateKeyFromConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "configs")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	vault, err := security.OpenVault(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeSingBox := filepath.Join(dir, "sing-box")
+	if err = os.WriteFile(fakeSingBox, []byte("#!/bin/sh\nif [ \"$1\" = version ]; then echo 'sing-box version 1.13.14'; fi\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(config.Config{ConfigDir: configDir, DataDir: dir, SecretDir: filepath.Join(dir, "secrets"), SingBoxBin: fakeSingBox}, database, vault)
+	credentials, err := generateProtocolCredentials(protocolVLESS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := model.NodeCreateRequest{Protocol: protocolVLESS, Name: "Reality", Mode: "prefer_v6", ListenPort: 44321, Server: "node.example.com", Domain: realityDefaultSNI, AutoBind: true}
+	payload, err := buildConfig(request, request.ListenPort, credentials, "", "", "1.13.14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "wukong-reality.json")
+	if err = os.WriteFile(configPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := encodeProtocolCredentials(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := vault.Encrypt(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{ID: "reality", Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: request.ListenPort, Server: request.Server, Domain: request.Domain, AutoBind: request.AutoBind, ServiceName: "unknown", ServiceManager: "systemd", ConfigPath: configPath, ConfigVersion: "1.13.14", Ownership: "managed", Status: "active"}
+	if err = database.UpsertNode(t.Context(), node, cipher); err != nil {
+		t.Fatal(err)
+	}
+	edit := model.NodeEditRequest{Name: "Reality Edited", Mode: "prefer_v6", ListenPort: request.ListenPort, Server: request.Server, Domain: realityDefaultSNI, AutoBind: true}
+	if err = manager.Edit(t.Context(), node.ID, edit); err != nil {
+		t.Fatal(err)
+	}
+	editedPayload, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(editedPayload, &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]any)[0].(map[string]any)
+	editedCredentials, err := credentialsFromInbound(protocolVLESS, inbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if editedCredentials.RealityPrivateKey != credentials.RealityPrivateKey || editedCredentials.UUID != credentials.UUID || editedCredentials.RealityShortID != credentials.RealityShortID {
+		t.Fatal("REALITY edit changed the node credentials")
+	}
+}
+
 func TestDemoProbeActionStoresSuccessfulRoundTrip(t *testing.T) {
 	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
