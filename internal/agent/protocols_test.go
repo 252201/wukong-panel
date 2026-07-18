@@ -66,6 +66,67 @@ func TestCredentialEnvelopeNeverStoresRealityPrivateKey(t *testing.T) {
 	}
 }
 
+func TestManagedEditRestoresRealityPrivateKeyFromExistingInbound(t *testing.T) {
+	credentials, err := generateProtocolCredentials(protocolVLESS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := baseRequest()
+	request.Protocol = protocolVLESS
+	request.Domain = realityDefaultSNI
+	inbound, err := buildProtocolInbound(request, 44321, credentials, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := encodeProtocolCredentials(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := decodeProtocolCredentials(protocolVLESS, encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RealityPrivateKey != "" {
+		t.Fatal("credential envelope unexpectedly contains the REALITY private key")
+	}
+	restored, err := credentialsForManagedEdit(protocolVLESS, stored, inbound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.RealityPrivateKey != credentials.RealityPrivateKey || restored.RealityPublicKey != credentials.RealityPublicKey || restored.RealityShortID != credentials.RealityShortID || restored.UUID != credentials.UUID {
+		t.Fatalf("REALITY credentials changed during edit recovery: %#v", restored)
+	}
+	rebuilt, err := buildProtocolInbound(request, 44322, restored, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reality := rebuilt["tls"].(map[string]any)["reality"].(map[string]any)
+	if reality["private_key"] != credentials.RealityPrivateKey {
+		t.Fatal("rebuilt REALITY inbound did not preserve its private key")
+	}
+}
+
+func TestManagedEditRejectsMismatchedRealityCredentials(t *testing.T) {
+	current, err := generateProtocolCredentials(protocolVLESS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := generateProtocolCredentials(protocolVLESS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := baseRequest()
+	request.Protocol = protocolVLESS
+	request.Domain = realityDefaultSNI
+	inbound, err := buildProtocolInbound(request, 44321, current, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = credentialsForManagedEdit(protocolVLESS, other, inbound); err == nil {
+		t.Fatal("mismatched REALITY credentials were accepted")
+	}
+}
+
 func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
 	if realityDefaultSNI != "www.cloudflare.com" {
 		t.Fatalf("unexpected REALITY default SNI: %s", realityDefaultSNI)

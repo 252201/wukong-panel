@@ -250,6 +250,38 @@ func credentialsFromInbound(protocol string, inbound map[string]any) (protocolCr
 	return credentials, nil
 }
 
+// credentialsForManagedEdit restores credential material that intentionally is
+// not duplicated in the database. A REALITY private key lives only in the
+// root-owned sing-box configuration, so an edit must inherit it from the
+// existing inbound before rebuilding the configuration.
+func credentialsForManagedEdit(protocol string, stored protocolCredentials, inbound map[string]any) (protocolCredentials, error) {
+	if normalizeProtocol(protocol) != protocolVLESS {
+		return stored, nil
+	}
+	current, err := credentialsFromInbound(protocol, inbound)
+	if err != nil {
+		return stored, err
+	}
+	publicKey := realityPublicKey(current.RealityPrivateKey)
+	if publicKey == "" {
+		return stored, errors.New("existing VLESS REALITY inbound has an invalid private key")
+	}
+	if stored.UUID != "" && stored.UUID != current.UUID {
+		return stored, errors.New("stored VLESS UUID does not match the running configuration")
+	}
+	if stored.RealityPublicKey != "" && stored.RealityPublicKey != publicKey {
+		return stored, errors.New("stored REALITY public key does not match the running configuration")
+	}
+	if stored.RealityShortID != "" && stored.RealityShortID != current.RealityShortID {
+		return stored, errors.New("stored REALITY short ID does not match the running configuration")
+	}
+	stored.UUID = current.UUID
+	stored.RealityPrivateKey = current.RealityPrivateKey
+	stored.RealityPublicKey = publicKey
+	stored.RealityShortID = current.RealityShortID
+	return stored, nil
+}
+
 func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath string) (map[string]any, error) {
 	protocol := normalizeProtocol(request.Protocol)
 	tag := protocolTagPrefix(protocol) + "-" + strings.TrimSpace(request.Name) + "-in"
