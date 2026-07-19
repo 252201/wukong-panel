@@ -852,7 +852,7 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 			return nil, err
 		}
 		for index, item := range prepared {
-			if item.request.Protocol != protocolVLESS && item.request.Protocol != protocolVLESSWSTunnel {
+			if item.request.Protocol != protocolVLESS && item.request.Protocol != protocolVLESSWSTunnel && item.request.Protocol != protocolAnyTLS {
 				continue
 			}
 			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, item.request.Protocol, item.node.ListenPort); probeErr != nil {
@@ -1019,6 +1019,15 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 					}
 					return model.Node{}, fmt.Errorf("Cloudflare Tunnel service installation failed: %w", err)
 				}
+			}
+		}
+		if request.Protocol == protocolAnyTLS {
+			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
+				cleanupErr := m.cleanupFailedCreate(ctx, identity, false)
+				if cleanupErr != nil {
+					return model.Node{}, fmt.Errorf("AnyTLS local preflight failed: %w (cleanup failed: %v)", probeErr, cleanupErr)
+				}
+				return model.Node{}, fmt.Errorf("AnyTLS local preflight failed: %w", probeErr)
 			}
 		}
 	}
@@ -2230,7 +2239,7 @@ func preferredCandidateName(tag, path string, index, port int, protocol string) 
 }
 func genericNodeName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in", "vless", "vless-in", "ss", "ss-in", "shadowsocks", "shadowsocks-in", "tuic", "tuic-in", "trojan", "trojan-in":
+	case "in", "inbound", "hy2", "hy2-in", "hysteria2-in", "vless", "vless-in", "ss", "ss-in", "shadowsocks", "shadowsocks-in", "tuic", "tuic-in", "trojan", "trojan-in", "anytls", "anytls-in":
 		return true
 	default:
 		return false

@@ -37,7 +37,7 @@ jobs:
           printf '%s  %s\n' "$SING_BOX_SHA256" "/tmp/${archive}" | sha256sum -c -
           tar -xzf "/tmp/${archive}" -C /tmp
           SING_BOX_TEST_BIN="/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box" \
-            go test -run '^(TestGeneratedConfigsPassRealSingBoxCheck|TestGeneratedVLESSRealityCompletesFullRoundTrip|TestGeneratedProbesPassRealSingBoxCheck)$' -v ./internal/agent ./internal/singboxconfig
+            go test -run '^(TestGeneratedConfigsPassRealSingBoxCheck|TestGeneratedVLESSRealityCompletesFullRoundTrip|TestGeneratedAnyTLSCompletesFullRoundTrip|TestGeneratedProbesPassRealSingBoxCheck)$' -v ./internal/agent ./internal/singboxconfig
       - run: go vet ./...
       - run: sh -n install.sh uninstall.sh compat/deploy-hy2.sh
       - run: sh scripts/test-install-acme-status.sh

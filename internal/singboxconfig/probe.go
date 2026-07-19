@@ -33,6 +33,7 @@ var probeableProtocols = map[string]bool{
 	"shadowsocks": true,
 	"tuic":        true,
 	"trojan":      true,
+	"anytls":      true,
 }
 
 func ProbeDirectory(ctx context.Context, binary, configDir, serverOverride, serverName string) ([]ProbeResult, error) {
@@ -263,6 +264,13 @@ func buildProtocolProbe(inbound map[string]any, serverOverride, serverName strin
 		password := stringValue(firstUser()["password"])
 		if password == "" {
 			return nil, errorsText("Trojan inbound has no probeable user password")
+		}
+		outbound["password"] = password
+		outbound["tls"] = probeTLS(server, serverName, insecure, false)
+	case "anytls":
+		password := stringValue(firstUser()["password"])
+		if password == "" {
+			return nil, errorsText("AnyTLS inbound has no probeable user password")
 		}
 		outbound["password"] = password
 		outbound["tls"] = probeTLS(server, serverName, insecure, false)

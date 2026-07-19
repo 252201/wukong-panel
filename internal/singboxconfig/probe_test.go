@@ -105,6 +105,7 @@ func TestBuildProbeForEverySupportedProtocol(t *testing.T) {
 		{"shadowsocks", map[string]any{"method": "2022-blake3-aes-128-gcm", "password": "QUJDREVGR0hJSktMTU5PUA=="}, "method"},
 		{"tuic", map[string]any{"users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "password": "secret"}}}, "congestion_control"},
 		{"trojan", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
+		{"anytls", map[string]any{"users": []any{map[string]any{"password": "secret"}}}, "password"},
 	}
 	for _, test := range tests {
 		t.Run(test.protocol, func(t *testing.T) {
@@ -169,6 +170,7 @@ func TestGeneratedProbesPassRealSingBoxCheck(t *testing.T) {
 		{"type": "shadowsocks", "listen": "::", "listen_port": float64(48002), "method": "2022-blake3-aes-128-gcm", "password": "QUJDREVGR0hJSktMTU5PUA=="},
 		{"type": "tuic", "listen": "::", "listen_port": float64(48003), "users": []any{map[string]any{"uuid": "d342d11e-d424-4583-b36e-524ab1f0afa4", "password": "secret"}}},
 		{"type": "trojan", "listen": "::", "listen_port": float64(48004), "users": []any{map[string]any{"password": "secret"}}},
+		{"type": "anytls", "listen": "::", "listen_port": float64(48005), "users": []any{map[string]any{"password": "secret"}}},
 	}
 	for _, inbound := range inbounds {
 		protocol := stringValue(inbound["type"])

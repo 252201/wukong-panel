@@ -272,7 +272,7 @@ func runNodeCLI(ctx context.Context, manager *agent.Manager, args []string) {
 		var request model.NodeCreateRequest
 		var domains, deviceNames, instance, publicIPv4, tunnelTokenFile string
 		flags.StringVar(&request.Name, "name", "Wukong-Node", "node display name")
-		flags.StringVar(&request.Protocol, "protocol", "hysteria2", "hysteria2, vless, vless-ws-tunnel, shadowsocks, tuic or trojan")
+		flags.StringVar(&request.Protocol, "protocol", "hysteria2", "hysteria2, vless, vless-ws-tunnel, shadowsocks, tuic, trojan or anytls")
 		flags.StringVar(&request.Mode, "mode", "prefer_v6", "prefer_v6, v4only or v6only")
 		flags.IntVar(&request.ListenPort, "port", 0, "listen port, zero selects a free protocol-compatible port")
 		flags.StringVar(&request.Server, "server", "", "advertised server domain or IP")
