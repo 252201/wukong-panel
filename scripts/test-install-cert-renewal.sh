@@ -38,6 +38,54 @@ grep -Fq 'RandomizedDelaySec=40m' "$ROOT/install.sh"
 grep -Fq '/etc/periodic/daily/wukong-cert-renew' "$ROOT/install.sh"
 grep -Fq -- '--uninstall-cronjob' "$ROOT/install.sh"
 grep -Fq 'backfill_certificate_renewal' "$ROOT/install.sh"
+grep -Fq 'if [ "$renewal_configured" != true ]; then' "$ROOT/install.sh"
+
+STATE_FUNCTION=$(awk '
+  /^certificate_renewal_is_configured\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}/ { exit }
+' "$ROOT/install.sh")
+[ -n "$STATE_FUNCTION" ] || { echo "certificate renewal state check missing" >&2; exit 1; }
+eval "$STATE_FUNCTION"
+
+mkdir -p "$TMP/state/acme/example.com_ecc" "$TMP/state/bin" "$TMP/state/systemd" "$TMP/state/periodic"
+printf 'certificate\n' > "$TMP/state/fullchain.cer"
+printf 'key\n' > "$TMP/state/private.key"
+cat > "$TMP/state/acme/example.com_ecc/example.com.conf" <<EOF
+Le_RealFullChainPath='$TMP/state/fullchain.cer'
+Le_RealKeyPath='$TMP/state/private.key'
+EOF
+for helper in wukong-cert-reload wukong-cert-renew; do
+  printf '#!/bin/sh\n' > "$TMP/state/bin/$helper"
+  chmod 0755 "$TMP/state/bin/$helper"
+done
+: > "$TMP/state/systemd/wukong-cert-renew.service"
+: > "$TMP/state/systemd/wukong-cert-renew.timer"
+using_systemd() { return 0; }
+WUKONG_ACME_HOME="$TMP/state/acme" \
+WUKONG_CERT_RELOAD_HOOK="$TMP/state/bin/wukong-cert-reload" \
+WUKONG_CERT_RENEW_HOOK="$TMP/state/bin/wukong-cert-renew" \
+WUKONG_SYSTEMD_DIR="$TMP/state/systemd" \
+certificate_renewal_is_configured example.com "$TMP/state/fullchain.cer" "$TMP/state/private.key"
+
+rm "$TMP/state/systemd/wukong-cert-renew.timer"
+if WUKONG_ACME_HOME="$TMP/state/acme" \
+  WUKONG_CERT_RELOAD_HOOK="$TMP/state/bin/wukong-cert-reload" \
+  WUKONG_CERT_RENEW_HOOK="$TMP/state/bin/wukong-cert-renew" \
+  WUKONG_SYSTEMD_DIR="$TMP/state/systemd" \
+  certificate_renewal_is_configured example.com "$TMP/state/fullchain.cer" "$TMP/state/private.key"; then
+  echo "missing renewal timer was treated as configured" >&2
+  exit 1
+fi
+
+using_systemd() { return 1; }
+printf '#!/bin/sh\n' > "$TMP/state/periodic/wukong-cert-renew"
+chmod 0755 "$TMP/state/periodic/wukong-cert-renew"
+WUKONG_ACME_HOME="$TMP/state/acme" \
+WUKONG_CERT_RELOAD_HOOK="$TMP/state/bin/wukong-cert-reload" \
+WUKONG_CERT_RENEW_HOOK="$TMP/state/bin/wukong-cert-renew" \
+WUKONG_PERIODIC_DIR="$TMP/state/periodic" \
+certificate_renewal_is_configured example.com "$TMP/state/fullchain.cer" "$TMP/state/private.key"
 
 mkdir -p "$TMP/bin" "$TMP/acme/example.com_ecc" "$TMP/configs"
 cat > "$TMP/bin/systemctl" <<'EOF'

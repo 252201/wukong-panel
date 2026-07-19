@@ -52,6 +52,8 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 		fmt.Fprintf(&builder, "    type: tuic\n    uuid: %q\n    password: %q\n    sni: %q\n    alpn: [h3]\n    udp-relay-mode: native\n    congestion-controller: bbr\n    reduce-rtt: false\n    skip-cert-verify: %t\n", parsed.User.Username(), password, node.Domain, insecure)
 	case "trojan":
 		fmt.Fprintf(&builder, "    type: trojan\n    password: %q\n    sni: %q\n    network: tcp\n    udp: true\n    skip-cert-verify: %t\n", parsed.User.Username(), node.Domain, insecure)
+	case "anytls":
+		fmt.Fprintf(&builder, "    type: anytls\n    password: %q\n    sni: %q\n    client-fingerprint: chrome\n    udp: true\n    idle-session-check-interval: 30\n    idle-session-timeout: 30\n    min-idle-session: 0\n    skip-cert-verify: %t\n", parsed.User.Username(), node.Domain, insecure)
 	default:
 		return "", fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}

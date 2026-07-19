@@ -16,7 +16,7 @@ import (
 )
 
 func TestGenerateProtocolCredentials(t *testing.T) {
-	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		t.Run(protocol, func(t *testing.T) {
 			credentials, err := generateProtocolCredentials(protocol, "")
 			if err != nil {
@@ -134,7 +134,7 @@ func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
 }
 
 func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
-	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		t.Run(protocol, func(t *testing.T) {
 			request := baseRequest()
 			request.Protocol = protocol
@@ -189,13 +189,17 @@ func TestBuildConfigForEverySupportedProtocol(t *testing.T) {
 				if inbound["tls"] == nil {
 					t.Fatal("Trojan TLS is missing")
 				}
+			case protocolAnyTLS:
+				if inbound["tls"] == nil || inbound["users"] == nil {
+					t.Fatal("AnyTLS credentials or TLS config is missing")
+				}
 			}
 		})
 	}
 }
 
 func TestShareURIForEverySupportedProtocol(t *testing.T) {
-	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		node := model.Node{Name: "测试节点", Protocol: protocol, Server: "node.example.com", Domain: "node.example.com", ListenPort: 45080 + index}
 		credentials, err := generateProtocolCredentials(protocol, "")
 		if err != nil {
@@ -222,6 +226,9 @@ func TestShareURIForEverySupportedProtocol(t *testing.T) {
 		}
 		if protocol == protocolVLESSWSTunnel && (parsed.Port() != "443" || parsed.Query().Get("security") != "tls" || parsed.Query().Get("type") != "ws" || parsed.Query().Get("path") != "/wukong-test" || parsed.Query().Get("sni") != node.Server || parsed.Query().Get("host") != node.Server) {
 			t.Fatalf("VLESS WebSocket Tunnel share fields missing: %s", share)
+		}
+		if protocol == protocolAnyTLS && (parsed.Scheme != "anytls" || parsed.User.Username() != credentials.Password || parsed.Query().Get("sni") != node.Domain) {
+			t.Fatalf("AnyTLS share fields missing: %s", share)
 		}
 	}
 }
@@ -310,7 +317,7 @@ func TestGeneratedConfigsPassRealSingBoxCheck(t *testing.T) {
 	if err := generateSelfSigned(keyPath, certPath, "node.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		t.Run(protocol, func(t *testing.T) {
 			request := baseRequest()
 			request.Protocol = protocol
@@ -346,8 +353,8 @@ func TestScanDiscoversEveryImportableProtocolAndSkipsWebSocketTunnel(t *testing.
 	if err := generateSelfSigned(keyPath, certPath, "node.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	inbounds := make([]any, 0, 5)
-	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	inbounds := make([]any, 0, 6)
+	for index, protocol := range []string{protocolHysteria2, protocolVLESS, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		request := baseRequest()
 		request.Protocol = protocol
 		request.Name = protocol
@@ -379,8 +386,8 @@ func TestScanDiscoversEveryImportableProtocolAndSkipsWebSocketTunnel(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 5 {
-		t.Fatalf("expected five protocol candidates, got %#v", candidates)
+	if len(candidates) != 6 {
+		t.Fatalf("expected six protocol candidates, got %#v", candidates)
 	}
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
@@ -416,7 +423,7 @@ func TestScanDiscoversEveryImportableProtocolAndSkipsWebSocketTunnel(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 5 {
+	if len(candidates) != 6 {
 		t.Fatalf("VLESS WebSocket inbound without Tunnel metadata was imported: %#v", candidates)
 	}
 }

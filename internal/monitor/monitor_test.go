@@ -195,6 +195,7 @@ func TestEndpointProtocolTransports(t *testing.T) {
 		"vless":           "tcp",
 		"vless-ws-tunnel": "tcp",
 		"trojan":          "tcp",
+		"anytls":          "tcp",
 		"unknown":         "",
 	}
 	for protocol, want := range tests {

@@ -209,7 +209,7 @@ func endpointTransports(protocol string) []string {
 		return []string{"udp"}
 	case "shadowsocks":
 		return []string{"udp", "tcp"}
-	case "vless", "vless-ws-tunnel", "trojan":
+	case "vless", "vless-ws-tunnel", "trojan", "anytls":
 		return []string{"tcp"}
 	default:
 		return nil

@@ -372,14 +372,43 @@ EOF_WUKONG_CERT_RENEW
   chmod 0755 "$renew_hook"
 }
 
+certificate_renewal_is_configured() {
+  renewal_domain=$1
+  renewal_cert_file=$2
+  renewal_key_file=$3
+  renewal_acme_home=${WUKONG_ACME_HOME:-/root/.acme.sh}
+  renewal_reload_hook=${WUKONG_CERT_RELOAD_HOOK:-/usr/local/sbin/wukong-cert-reload}
+  renewal_hook=${WUKONG_CERT_RENEW_HOOK:-/usr/local/sbin/wukong-cert-renew}
+  renewal_systemd_dir=${WUKONG_SYSTEMD_DIR:-/etc/systemd/system}
+  renewal_periodic_dir=${WUKONG_PERIODIC_DIR:-/etc/periodic/daily}
+  renewal_acme_conf="$renewal_acme_home/${renewal_domain}_ecc/${renewal_domain}.conf"
+
+  [ -x "$renewal_reload_hook" ] && [ -x "$renewal_hook" ] && [ -r "$renewal_acme_conf" ] || return 1
+  renewal_installed_cert=$(sed -n "s/^Le_RealFullChainPath='\(.*\)'/\1/p" "$renewal_acme_conf" | tail -1)
+  renewal_installed_key=$(sed -n "s/^Le_RealKeyPath='\(.*\)'/\1/p" "$renewal_acme_conf" | tail -1)
+  [ "$renewal_installed_cert" = "$renewal_cert_file" ] && [ "$renewal_installed_key" = "$renewal_key_file" ] || return 1
+
+  if using_systemd; then
+    [ -r "$renewal_systemd_dir/wukong-cert-renew.service" ] && [ -r "$renewal_systemd_dir/wukong-cert-renew.timer" ]
+  else
+    [ -x "$renewal_periodic_dir/wukong-cert-renew" ]
+  fi
+}
+
 configure_certificate_renewal() {
   domain=$1
   cert_file=$2
   key_file=$3
   [ -n "$domain" ] && [ -r "$cert_file" ] && [ -r "$key_file" ] || return 1
   [ -x /root/.acme.sh/acme.sh ] || return 1
+  renewal_configured=false
+  if certificate_renewal_is_configured "$domain" "$cert_file" "$key_file"; then
+    renewal_configured=true
+  fi
   install_certificate_renewal_helpers
-  /root/.acme.sh/acme.sh --install-cert -d "$domain" --ecc --fullchain-file "$cert_file" --key-file "$key_file" --reloadcmd "/usr/local/sbin/wukong-cert-reload"
+  if [ "$renewal_configured" != true ]; then
+    /root/.acme.sh/acme.sh --install-cert -d "$domain" --ecc --fullchain-file "$cert_file" --key-file "$key_file" --reloadcmd "/usr/local/sbin/wukong-cert-reload"
+  fi
   /root/.acme.sh/acme.sh --uninstall-cronjob >/dev/null 2>&1 || true
   if using_systemd; then
     cat > /etc/systemd/system/wukong-cert-renew.service <<'EOF'
@@ -405,7 +434,11 @@ Persistent=true
 WantedBy=timers.target
 EOF
     systemctl daemon-reload
-    systemctl enable --now wukong-cert-renew.timer
+    if systemctl is-enabled --quiet wukong-cert-renew.timer; then
+      systemctl restart wukong-cert-renew.timer >/dev/null
+    else
+      systemctl --quiet enable --now wukong-cert-renew.timer
+    fi
   else
     install -d -m 0755 /etc/periodic/daily
     cat > /etc/periodic/daily/wukong-cert-renew <<'EOF'
@@ -416,7 +449,11 @@ EOF
     rc-update add crond default >/dev/null 2>&1 || true
     rc-service crond status >/dev/null 2>&1 || rc-service crond start
   fi
-  info "已启用 Let's Encrypt 每日自动续期与节点证书热更新"
+  if [ "$renewal_configured" = true ]; then
+    info "Let's Encrypt 自动续期配置已确认"
+  else
+    info "已启用 Let's Encrypt 每日自动续期与节点证书热更新"
+  fi
 }
 
 backfill_certificate_renewal() {

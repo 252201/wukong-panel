@@ -23,12 +23,13 @@ const (
 	protocolShadowsocks   = "shadowsocks"
 	protocolTUIC          = "tuic"
 	protocolTrojan        = "trojan"
+	protocolAnyTLS        = "anytls"
 	shadowsocks2022       = "2022-blake3-aes-128-gcm"
 	realityDefaultSNI     = "www.cloudflare.com"
 )
 
 var supportedProtocols = map[string]bool{
-	protocolHysteria2: true, protocolVLESS: true, protocolVLESSWSTunnel: true, protocolShadowsocks: true, protocolTUIC: true, protocolTrojan: true,
+	protocolHysteria2: true, protocolVLESS: true, protocolVLESSWSTunnel: true, protocolShadowsocks: true, protocolTUIC: true, protocolTrojan: true, protocolAnyTLS: true,
 }
 
 type protocolCredentials struct {
@@ -56,6 +57,8 @@ func normalizeProtocol(value string) string {
 		return protocolTUIC
 	case protocolTrojan:
 		return protocolTrojan
+	case "any-tls", protocolAnyTLS:
+		return protocolAnyTLS
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
@@ -63,7 +66,7 @@ func normalizeProtocol(value string) string {
 
 func protocolUsesCertificate(protocol string) bool {
 	switch normalizeProtocol(protocol) {
-	case protocolHysteria2, protocolTUIC, protocolTrojan:
+	case protocolHysteria2, protocolTUIC, protocolTrojan, protocolAnyTLS:
 		return true
 	default:
 		return false
@@ -81,7 +84,7 @@ func protocolUsesUDP(protocol string) bool {
 
 func protocolUsesTCP(protocol string) bool {
 	switch normalizeProtocol(protocol) {
-	case protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTrojan:
+	case protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTrojan, protocolAnyTLS:
 		return true
 	default:
 		return false
@@ -103,7 +106,7 @@ func generateProtocolCredentials(protocol, explicit string) (protocolCredentials
 	protocol = normalizeProtocol(protocol)
 	credentials := protocolCredentials{}
 	switch protocol {
-	case protocolHysteria2, protocolTrojan:
+	case protocolHysteria2, protocolTrojan, protocolAnyTLS:
 		credentials.Password = strings.TrimSpace(explicit)
 		if credentials.Password == "" {
 			value, err := security.RandomToken(24)
@@ -211,7 +214,7 @@ func credentialsFromInbound(protocol string, inbound map[string]any) (protocolCr
 		return user
 	}
 	switch protocol {
-	case protocolHysteria2, protocolTrojan:
+	case protocolHysteria2, protocolTrojan, protocolAnyTLS:
 		credentials.Password = stringValue(firstUser()["password"])
 	case protocolTUIC:
 		user := firstUser()
@@ -324,6 +327,9 @@ func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials
 	case protocolTrojan:
 		inbound["users"] = []any{map[string]any{"name": "wukong", "password": credentials.Password}}
 		inbound["tls"] = certificateTLS(certPath, keyPath, false)
+	case protocolAnyTLS:
+		inbound["users"] = []any{map[string]any{"name": "wukong", "password": credentials.Password}}
+		inbound["tls"] = certificateTLS(certPath, keyPath, false)
 	default:
 		return nil, fmt.Errorf("unsupported protocol %q", protocol)
 	}
@@ -418,6 +424,12 @@ func buildShareURI(node model.Node, credentials protocolCredentials, insecure bo
 			query += "&allowInsecure=1"
 		}
 		return fmt.Sprintf("trojan://%s@%s:%d?%s#%s", urlEncode(credentials.Password), host, node.ListenPort, query, name), nil
+	case protocolAnyTLS:
+		query := "sni=" + sni
+		if insecure {
+			query += "&insecure=1"
+		}
+		return fmt.Sprintf("anytls://%s@%s:%d/?%s#%s", urlEncode(credentials.Password), host, node.ListenPort, query, name), nil
 	default:
 		return "", fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}

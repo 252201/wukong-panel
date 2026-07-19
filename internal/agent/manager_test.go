@@ -135,6 +135,9 @@ func TestPreferredCandidateName(t *testing.T) {
 	if got := preferredCandidateName("hy2-Mac mini-in", "/etc/s-box/node.json", 0, 45116, protocolHysteria2); got != "Mac mini" {
 		t.Fatalf("descriptive inbound tag changed: %q", got)
 	}
+	if got := preferredCandidateName("anytls-in", "/etc/s-box/external-anytls.json", 0, 45117, protocolAnyTLS); got != "external-anytls" {
+		t.Fatalf("generic AnyTLS inbound tag not replaced: %q", got)
+	}
 }
 
 func TestVirtualBindInterfaceFiltering(t *testing.T) {
@@ -359,7 +362,7 @@ func TestNormalizeModeBindingsDropsUnusedAddressFamily(t *testing.T) {
 }
 
 func TestCreateBatchSupportsEveryProtocol(t *testing.T) {
-	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan} {
+	for _, protocol := range []string{protocolHysteria2, protocolVLESS, protocolVLESSWSTunnel, protocolShadowsocks, protocolTUIC, protocolTrojan, protocolAnyTLS} {
 		t.Run(protocol, func(t *testing.T) {
 			manager, database := newDemoManager(t)
 			requests := make([]model.NodeCreateRequest, 2)

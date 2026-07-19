@@ -1,15 +1,15 @@
 # 悟空面板
 
-悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
+悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.6.11-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.7.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
 - 单机自治：每台 VPS 独立安装，无需中心服务器。
-- 六协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5 与 Trojan TLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
+- 七协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 与 AnyTLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
@@ -18,8 +18,8 @@
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
-- 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
-- 分享订阅：六种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
+- 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
+- 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
 - 东方科幻界面：桌面、平板和移动端响应式布局。
 
 ## 一键安装
@@ -78,7 +78,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.6.11 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.7.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -97,6 +97,10 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
 ```
 
 无域名时默认监听 HTTPS `9443` 并生成自签名证书。安装器不会修改 SSH、防火墙或云安全组，只会提示需要开放的端口。
+
+### AnyTLS
+
+AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书覆盖的域名。面板会优先复用安装时配置的可信证书，自动生成独立密码，并在部署完成前通过本机 AnyTLS 客户端闭环验证 TLS、认证与代理出站。客户端分享采用标准 `anytls://` URI；Clash/Mihomo 订阅会启用 UDP 隧道能力、Chrome 客户端指纹和保守的空闲会话参数。自签名环境会在分享与订阅中明确启用跳过证书校验，生产环境建议使用自动续期的 Let’s Encrypt 证书。
 
 ### VLESS + WebSocket + Cloudflare Tunnel
 
@@ -171,6 +175,8 @@ wukongctl node create --protocol shadowsocks --name "AC-SS2022" \
 wukongctl node create --protocol tuic --name "AC-TUIC" \
   --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node create --protocol trojan --name "AC-Trojan" \
+  --server node.example.com --domain node.example.com --mode prefer_v6
+wukongctl node create --protocol anytls --name "AC-AnyTLS" \
   --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node action --id NODE_ID --action restart
 wukongctl node action --id NODE_ID --action probe
