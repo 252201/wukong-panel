@@ -167,6 +167,40 @@ start_panel_services() {
   fi
 }
 
+start_panel_now() {
+  info "启动悟空面板"
+  install -d -o root -g wukong -m 0750 /run/wukong-panel
+  if using_systemd; then
+    systemctl start wukong-agent.service
+    systemctl start wukong-web.service
+  else
+    rc-service wukong-agent start
+    rc-service wukong-web start
+  fi
+  if ! health=$(wait_for_web); then
+    die "面板服务已尝试启动，但健康检查未通过；请检查 Web 与 Agent 日志"
+  fi
+  info "悟空面板已启动：$health"
+}
+
+stop_panel_now() {
+  info "关闭悟空面板"
+  if using_systemd; then
+    systemctl stop wukong-web.service
+    systemctl stop wukong-agent.service
+    if systemctl is-active --quiet wukong-web.service || systemctl is-active --quiet wukong-agent.service; then
+      die "面板服务未能完全停止"
+    fi
+  else
+    rc-service wukong-web stop
+    rc-service wukong-agent stop
+    if rc-service wukong-web status >/dev/null 2>&1 || rc-service wukong-agent status >/dev/null 2>&1; then
+      die "面板服务未能完全停止"
+    fi
+  fi
+  info "悟空面板已关闭；nginx 公网入口保持运行"
+}
+
 reset_panel_password() {
   database=/var/lib/wukong-panel/wukong.db
   [ -r "$database" ] || die "未找到面板数据库 $database，无法重置密码"
@@ -1003,8 +1037,10 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall
+  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall
   --update             等同于 --action update
+  --start-panel        启动面板 Web 与 Agent（也可使用 --start）
+  --stop-panel         关闭面板 Web 与 Agent（也可使用 --stop）
   --reset-password     重置 admin 密码、撤销会话并强制首次登录改密
   --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
   --rollback-sing-box  回退到上一次保留的 sing-box 版本
@@ -1032,6 +1068,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --action) ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --update) ACTION=update; HAS_CONFIG_ARGS=true; shift ;;
+    --start|--start-panel) ACTION=start; HAS_CONFIG_ARGS=true; shift ;;
+    --stop|--stop-panel) ACTION=stop; HAS_CONFIG_ARGS=true; shift ;;
     --reset-password) ACTION=reset-password; HAS_CONFIG_ARGS=true; shift ;;
     --update-sing-box) ACTION=singbox-update; HAS_CONFIG_ARGS=true; shift ;;
     --rollback-sing-box) ACTION=singbox-rollback; HAS_CONFIG_ARGS=true; shift ;;
@@ -1065,9 +1103,9 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 更新 sing-box（保留旧版，可回退）" "  3) 回退 sing-box 到上一版本" "  4) 卸载 sing-box（先完整备份节点）" "  5) 重置面板 admin 密码" "  6) 重新配置 / 修复安装" "  7) 卸载面板（保留配置和数据）" "  8) 完全卸载（删除面板配置和数据）" "  9) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|singbox-update) ACTION=singbox-update ;; 3|singbox-rollback) ACTION=singbox-rollback ;; 4|singbox-uninstall) ACTION=singbox-uninstall ;; 5|reset-password) ACTION=reset-password ;; 6|install|repair) ACTION=install ;; 7|uninstall) ACTION=uninstall ;; 8|purge) ACTION=uninstall; PURGE=true ;; 9|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
@@ -1081,7 +1119,7 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall) ;; *) die "--action 必须是 install、update、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall" ;; esac
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall" ;; esac
 
 if [ "$ACTION" = "uninstall" ]; then
   if [ "$INTERACTIVE_SESSION" = true ]; then
@@ -1094,7 +1132,12 @@ if [ "$ACTION" = "uninstall" ]; then
 fi
 
 case "$ACTION" in
-  update|reset-password|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
+  update|start|stop|reset-password|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
+esac
+
+case "$ACTION" in
+  start) start_panel_now; exit 0 ;;
+  stop) stop_panel_now; exit 0 ;;
 esac
 
 if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-uninstall" ]; then
@@ -1312,6 +1355,8 @@ EnvironmentFile=/etc/wukong-panel/env
 ExecStart=/usr/local/bin/wukong-panel agent
 Restart=on-failure
 RestartSec=3s
+RuntimeDirectory=wukong-panel
+RuntimeDirectoryMode=0750
 NoNewPrivileges=false
 
 [Install]
@@ -1364,6 +1409,9 @@ error_log="/var/log/wukong-agent.log"
 set -a
 . /etc/wukong-panel/env
 set +a
+start_pre() {
+  checkpath --directory --owner root:wukong --mode 0750 /run/wukong-panel
+}
 depend() { need net; }
 EOF
   cat > /etc/init.d/wukong-web <<'EOF'
@@ -1379,6 +1427,9 @@ error_log="/var/log/wukong-web.log"
 set -a
 . /etc/wukong-panel/env
 set +a
+start_pre() {
+  checkpath --directory --owner root:wukong --mode 0750 /run/wukong-panel
+}
 depend() { need net wukong-agent; }
 EOF
   chmod 0755 /etc/init.d/wukong-agent /etc/init.d/wukong-web
