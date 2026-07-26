@@ -47,16 +47,24 @@ jobs:
             echo "Invalid release version: $RELEASE_VERSION" >&2
             exit 1
           fi
-          git fetch origin main --tags
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git fetch origin --tags
+          remote_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$GITHUB_SHA" != "$remote_main" ]]; then
+            echo "Workflow commit $GITHUB_SHA is not current main $remote_main" >&2
+            exit 1
+          fi
           if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
             echo "Tag already exists: $RELEASE_VERSION" >&2
             exit 1
           fi
           plain_version="${RELEASE_VERSION#v}"
-          test "$(awk '/^VERSION[[:space:]]*\\?=/{print $3}' Makefile)" = "$plain_version"
-          test "$(node -p "require('./web/package.json').version")" = "$plain_version"
-          test "$(node -p "require('./web/package-lock.json').version")" = "$plain_version"
+          make_version="$(awk '$1 == "VERSION" && $2 == "?=" {print $3}' Makefile)"
+          package_version="$(node -p "require('./web/package.json').version")"
+          lock_version="$(node -p "require('./web/package-lock.json').version")"
+          if [[ "$make_version" != "$plain_version" || "$package_version" != "$plain_version" || "$lock_version" != "$plain_version" ]]; then
+            echo "Version mismatch: requested=$plain_version make=$make_version package=$package_version lock=$lock_version" >&2
+            exit 1
+          fi
           grep -Fq "version-v${plain_version}-" README.md
           grep -Fq -- "--version v${plain_version}" README.md
 
