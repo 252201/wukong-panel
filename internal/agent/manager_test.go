@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
@@ -161,6 +162,244 @@ func TestDeploymentDefaultsUsesPanelDomain(t *testing.T) {
 	}
 	if defaults.PanelDomain != "panel.example.com" || defaults.IPv4 == nil || defaults.IPv6 == nil {
 		t.Fatalf("unexpected deployment defaults: %#v", defaults)
+	}
+}
+
+func TestBindingReplacementTracksUniqueNewAddressAmongMultipleIPv6(t *testing.T) {
+	start := time.Unix(1_750_000_000, 0)
+	oldAddress := "2600:1700:b2c:e918:a::4747"
+	newAddress := "2600:1700:b2c:e91b:a::636"
+	initial := []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: "2600:1700:2bc1:409d:a::3188", Interface: "eth0"},
+		{Address: "2602:faa8:502:5a::a", Interface: "eth0"},
+	}
+	state := observeBindingAddresses(bindingAddressState{Version: bindingAddressStateVersion}, initial, start)
+	current := []model.BindAddress{
+		{Address: newAddress, Interface: "eth0"},
+		{Address: "2600:1700:2bc1:409d:a::3188", Interface: "eth0"},
+		{Address: "2602:faa8:502:5a::a", Interface: "eth0"},
+	}
+	state = observeBindingAddresses(state, current, start.Add(2*time.Minute))
+	replacement, candidates := bindingReplacement(oldAddress, current, state)
+	if replacement != newAddress || len(candidates) != 1 {
+		t.Fatalf("unexpected replacement %q candidates=%v", replacement, candidates)
+	}
+}
+
+func TestBindingReplacementHandlesAddressOverlapBetweenPolls(t *testing.T) {
+	start := time.Unix(1_750_000_000, 0)
+	oldAddress := "2001:db8:1::10"
+	newAddress := "2001:db8:2::20"
+	stableAddress := "2001:db8:ffff::1"
+	state := observeBindingAddresses(bindingAddressState{Version: bindingAddressStateVersion}, []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: stableAddress, Interface: "eth0"},
+	}, start)
+	state = observeBindingAddresses(state, []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: newAddress, Interface: "eth0"},
+		{Address: stableAddress, Interface: "eth0"},
+	}, start.Add(2*time.Minute))
+	current := []model.BindAddress{
+		{Address: newAddress, Interface: "eth0"},
+		{Address: stableAddress, Interface: "eth0"},
+	}
+	state = observeBindingAddresses(state, current, start.Add(4*time.Minute))
+	replacement, _ := bindingReplacement(oldAddress, current, state)
+	if replacement != newAddress {
+		t.Fatalf("overlapping transition selected %q, want %q", replacement, newAddress)
+	}
+}
+
+func TestBindingReplacementRefusesAmbiguousNewAddresses(t *testing.T) {
+	start := time.Unix(1_750_000_000, 0)
+	oldAddress := "2001:db8:1::10"
+	state := observeBindingAddresses(bindingAddressState{Version: bindingAddressStateVersion}, []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: "2001:db8:ffff::1", Interface: "eth0"},
+	}, start)
+	current := []model.BindAddress{
+		{Address: "2001:db8:2::20", Interface: "eth0"},
+		{Address: "2001:db8:3::30", Interface: "eth0"},
+		{Address: "2001:db8:ffff::1", Interface: "eth0"},
+		{Address: "2001:db8:4::40", Interface: "eth1"},
+	}
+	state = observeBindingAddresses(state, current, start.Add(2*time.Minute))
+	replacement, candidates := bindingReplacement(oldAddress, current, state)
+	if replacement != "" || len(candidates) != 2 {
+		t.Fatalf("ambiguous transition was not rejected: replacement=%q candidates=%v", replacement, candidates)
+	}
+}
+
+func TestReconcileBindingsUpdatesOnlyDisappearedAddress(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "configs")
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeSingBox := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(fakeSingBox, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	oldAddress := "2600:1700:b2c:e918:a::4747"
+	newAddress := "2600:1700:b2c:e91b:a::636"
+	configPath := filepath.Join(configDir, "node.json")
+	payload := fmt.Sprintf(`{"outbounds":[{"type":"direct","tag":"out-direct","inet6_bind_address":%q}]}`, oldAddress)
+	if err = os.WriteFile(configPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{
+		ID: "node-1", Name: "dynamic-v6", Protocol: protocolHysteria2, Mode: "v6only",
+		ListenPort: 45080, IPv6Bind: oldAddress, AutoBind: true,
+		ServiceName: "sing-box-node-1", ServiceManager: "systemd", ConfigPath: configPath,
+		ConfigVersion: "1.13.14", Ownership: "managed", Status: "active",
+	}
+	if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(config.Config{ConfigDir: configDir, DataDir: filepath.Join(dir, "data"), SingBoxBin: fakeSingBox}, database, nil)
+	start := time.Unix(1_750_000_000, 0)
+	initial := []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: "2600:1700:2bc1:409d:a::3188", Interface: "eth0"},
+		{Address: "2602:faa8:502:5a::a", Interface: "eth0"},
+	}
+	if err = manager.saveBindingAddressState(observeBindingAddresses(bindingAddressState{Version: bindingAddressStateVersion}, initial, start)); err != nil {
+		t.Fatal(err)
+	}
+	manager = NewManager(config.Config{ConfigDir: configDir, DataDir: filepath.Join(dir, "data"), SingBoxBin: fakeSingBox}, database, nil)
+	current := []model.BindAddress{
+		{Address: newAddress, Interface: "eth0"},
+		{Address: "2600:1700:2bc1:409d:a::3188", Interface: "eth0"},
+		{Address: "2602:faa8:502:5a::a", Interface: "eth0"},
+	}
+	if err = manager.reconcileBindings(t.Context(), current, start.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := database.Node(t.Context(), node.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IPv6Bind != newAddress {
+		t.Fatalf("database bind=%q, want %q", updated.IPv6Bind, newAddress)
+	}
+	updatedConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(updatedConfig), oldAddress) || !strings.Contains(string(updatedConfig), newAddress) {
+		t.Fatalf("configuration was not reconciled: %s", updatedConfig)
+	}
+	var auditCount int
+	if err = database.DB.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action='reconcile_bindings' AND target=?", node.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("reconcile audit count=%d err=%v", auditCount, err)
+	}
+}
+
+func TestReconcileBindingsReportsAmbiguityOnlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	oldAddress := "2001:db8:1::10"
+	node := model.Node{
+		ID: "node-1", Name: "ambiguous-v6", Protocol: protocolHysteria2, Mode: "v6only",
+		ListenPort: 45080, IPv6Bind: oldAddress, AutoBind: true,
+		ServiceName: "sing-box-node-1", ServiceManager: "systemd",
+		ConfigPath:    filepath.Join(dir, "configs", "node.json"),
+		ConfigVersion: "1.13.14", Ownership: "managed", Status: "active",
+	}
+	if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(config.Config{ConfigDir: filepath.Join(dir, "configs"), DataDir: filepath.Join(dir, "data")}, database, nil)
+	start := time.Unix(1_750_000_000, 0)
+	initial := []model.BindAddress{
+		{Address: oldAddress, Interface: "eth0"},
+		{Address: "2001:db8:ffff::1", Interface: "eth0"},
+	}
+	if err = manager.saveBindingAddressState(observeBindingAddresses(bindingAddressState{Version: bindingAddressStateVersion}, initial, start)); err != nil {
+		t.Fatal(err)
+	}
+	current := []model.BindAddress{
+		{Address: "2001:db8:2::20", Interface: "eth0"},
+		{Address: "2001:db8:3::30", Interface: "eth0"},
+		{Address: "2001:db8:ffff::1", Interface: "eth0"},
+	}
+	if err = manager.reconcileBindings(t.Context(), current, start.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.reconcileBindings(t.Context(), current, start.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var auditCount int
+	if err = database.DB.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action='reconcile_ambiguous' AND target=?", node.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("ambiguous audit count=%d err=%v", auditCount, err)
+	}
+}
+
+func TestRewriteBindingsRestoresConfigWhenRestartFails(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "configs")
+	binDir := filepath.Join(dir, "bin")
+	dataDir := filepath.Join(dir, "data")
+	for _, path := range []string{configDir, binDir, dataDir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeSingBox := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(fakeSingBox, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "restart-attempted")
+	systemctl := "#!/bin/sh\nif [ ! -e \"$WUKONG_TEST_RESTART_MARKER\" ]; then\n  touch \"$WUKONG_TEST_RESTART_MARKER\"\n  exit 1\nfi\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "systemctl"), []byte(systemctl), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("WUKONG_TEST_RESTART_MARKER", marker)
+
+	oldAddress := "2001:db8:1::10"
+	newAddress := "2001:db8:2::20"
+	configPath := filepath.Join(configDir, "node.json")
+	original := fmt.Sprintf(`{"outbounds":[{"type":"direct","inet6_bind_address":%q}]}`, oldAddress)
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{cfg: config.Config{ConfigDir: configDir, DataDir: dataDir, SingBoxBin: fakeSingBox}}
+	node := model.Node{ID: "node-1", Name: "dynamic-v6", IPv6Bind: oldAddress, ServiceName: "sing-box-node-1", ServiceManager: "systemd", ConfigPath: configPath}
+	err := manager.rewriteBindings(t.Context(), node, "", newAddress)
+	if err == nil || !strings.Contains(err.Error(), "previous configuration restored") {
+		t.Fatalf("restart failure did not report rollback: %v", err)
+	}
+	restored, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(restored) != original {
+		t.Fatalf("configuration was not restored: %s", restored)
+	}
+	backups, globErr := filepath.Glob(filepath.Join(dataDir, "backups", "*-"+node.ID, filepath.Base(configPath)))
+	if globErr != nil || len(backups) != 1 {
+		t.Fatalf("expected one verified backup, got %v err=%v", backups, globErr)
 	}
 }
 

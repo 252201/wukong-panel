@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -40,9 +41,30 @@ type Manager struct {
 	vault *security.Vault
 }
 
+const (
+	bindingAddressStateKey      = "binding_address_state_v1"
+	bindingAddressStateVersion  = 1
+	bindingAddressHistory       = 30 * 24 * time.Hour
+	bindingAddressReplaceWindow = 10 * time.Minute
+)
+
+type bindingAddressObservation struct {
+	Address       string `json:"address"`
+	Interface     string `json:"interface"`
+	FirstSeenUnix int64  `json:"firstSeenUnix"`
+	LastSeenUnix  int64  `json:"lastSeenUnix"`
+}
+
+type bindingAddressState struct {
+	Version           int                         `json:"version"`
+	Observations      []bindingAddressObservation `json:"observations"`
+	ReportedAmbiguous []string                    `json:"reportedAmbiguous,omitempty"`
+}
+
 func (m *Manager) RunReconciler(ctx context.Context) {
 	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileRuntimeVersion(ctx)
+	_ = m.ReconcileBindings(ctx)
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -243,22 +265,60 @@ func (m *Manager) ReconcileBindings(ctx context.Context) error {
 	if m.cfg.Demo {
 		return nil
 	}
-	v4s, v6s := globalAddresses()
+	return m.reconcileBindings(ctx, bindingAddressInventory(), time.Now())
+}
+
+func (m *Manager) reconcileBindings(ctx context.Context, current []model.BindAddress, now time.Time) error {
+	previous, initialized, err := m.loadBindingAddressState()
+	if err != nil {
+		_ = m.store.Audit("agent", "reconcile_state_failed", bindingAddressStateKey, err.Error())
+		previous = bindingAddressState{Version: bindingAddressStateVersion}
+		initialized = false
+	}
+	state := observeBindingAddresses(previous, current, now)
+	if !initialized {
+		if saveErr := m.saveBindingAddressState(state); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
+		return err
+	}
 	nodes, err := m.store.Nodes(ctx)
 	if err != nil {
 		return err
 	}
 	updatedConfigs := map[string]bool{}
+	failures := []error{}
+	ambiguous := map[string]bool{}
+	reportedAmbiguous := make(map[string]bool, len(previous.ReportedAmbiguous))
+	for _, key := range previous.ReportedAmbiguous {
+		reportedAmbiguous[key] = true
+	}
 	for _, node := range nodes {
 		if !node.AutoBind || node.Ownership == "unmanaged" {
 			continue
 		}
 		newV4, newV6 := node.IPv4Bind, node.IPv6Bind
-		if node.IPv4Bind != "" && !contains(v4s, node.IPv4Bind) && len(v4s) == 1 {
-			newV4 = v4s[0]
+		if replacement, candidates := bindingReplacement(node.IPv4Bind, current, state); replacement != "" {
+			newV4 = replacement
+		} else if len(candidates) > 1 {
+			key := node.IPv4Bind + "\x00" + strings.Join(candidates, ",")
+			if !ambiguous[key] {
+				if !reportedAmbiguous[key] {
+					_ = m.store.Audit("agent", "reconcile_ambiguous", node.ID, fmt.Sprintf("ipv4=%s candidates=%s", node.IPv4Bind, strings.Join(candidates, ",")))
+				}
+				ambiguous[key] = true
+			}
 		}
-		if node.IPv6Bind != "" && !contains(v6s, node.IPv6Bind) && len(v6s) == 1 {
-			newV6 = v6s[0]
+		if replacement, candidates := bindingReplacement(node.IPv6Bind, current, state); replacement != "" {
+			newV6 = replacement
+		} else if len(candidates) > 1 {
+			key := node.IPv6Bind + "\x00" + strings.Join(candidates, ",")
+			if !ambiguous[key] {
+				if !reportedAmbiguous[key] {
+					_ = m.store.Audit("agent", "reconcile_ambiguous", node.ID, fmt.Sprintf("ipv6=%s candidates=%s", node.IPv6Bind, strings.Join(candidates, ",")))
+				}
+				ambiguous[key] = true
+			}
 		}
 		if newV4 == node.IPv4Bind && newV6 == node.IPv6Bind {
 			continue
@@ -266,12 +326,54 @@ func (m *Manager) ReconcileBindings(ctx context.Context) error {
 		if !updatedConfigs[node.ConfigPath] {
 			if err := m.rewriteBindings(ctx, node, newV4, newV6); err != nil {
 				_ = m.store.Audit("agent", "reconcile_failed", node.ID, err.Error())
+				failures = append(failures, fmt.Errorf("%s: %w", node.Name, err))
 				continue
 			}
 			updatedConfigs[node.ConfigPath] = true
 		}
-		_ = m.store.UpdateNodeBinds(node.ID, newV4, newV6)
+		if err := m.store.UpdateNodeBinds(node.ID, newV4, newV6); err != nil {
+			_ = m.store.Audit("agent", "reconcile_failed", node.ID, err.Error())
+			failures = append(failures, fmt.Errorf("%s metadata: %w", node.Name, err))
+			continue
+		}
 		_ = m.store.Audit("agent", "reconcile_bindings", node.ID, fmt.Sprintf("ipv4=%s ipv6=%s", newV4, newV6))
+	}
+	state.ReportedAmbiguous = make([]string, 0, len(ambiguous))
+	for key := range ambiguous {
+		state.ReportedAmbiguous = append(state.ReportedAmbiguous, key)
+	}
+	sort.Strings(state.ReportedAmbiguous)
+	if err := m.saveBindingAddressState(state); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
+func (m *Manager) loadBindingAddressState() (bindingAddressState, bool, error) {
+	raw, err := m.store.Setting(bindingAddressStateKey)
+	if errors.Is(err, sql.ErrNoRows) || strings.TrimSpace(raw) == "" {
+		return bindingAddressState{Version: bindingAddressStateVersion}, false, nil
+	}
+	if err != nil {
+		return bindingAddressState{}, false, err
+	}
+	var state bindingAddressState
+	if err = json.Unmarshal([]byte(raw), &state); err != nil {
+		return bindingAddressState{}, false, fmt.Errorf("decode binding address state: %w", err)
+	}
+	if state.Version != bindingAddressStateVersion {
+		return bindingAddressState{}, false, fmt.Errorf("unsupported binding address state version %d", state.Version)
+	}
+	return state, true, nil
+}
+
+func (m *Manager) saveBindingAddressState(state bindingAddressState) error {
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err = m.store.SetSetting(bindingAddressStateKey, string(payload)); err != nil {
+		return fmt.Errorf("save binding address state: %w", err)
 	}
 	return nil
 }
@@ -288,11 +390,19 @@ func (m *Manager) rewriteBindings(ctx context.Context, node model.Node, newV4, n
 		return err
 	}
 	text := string(data)
-	if node.IPv4Bind != "" && newV4 != "" {
-		text = strings.ReplaceAll(text, `"`+node.IPv4Bind+`"`, `"`+newV4+`"`)
+	if node.IPv4Bind != "" && newV4 != "" && node.IPv4Bind != newV4 {
+		oldToken := `"` + node.IPv4Bind + `"`
+		if !strings.Contains(text, oldToken) {
+			return fmt.Errorf("stored IPv4 bind %s is absent from configuration", node.IPv4Bind)
+		}
+		text = strings.ReplaceAll(text, oldToken, `"`+newV4+`"`)
 	}
-	if node.IPv6Bind != "" && newV6 != "" {
-		text = strings.ReplaceAll(text, `"`+node.IPv6Bind+`"`, `"`+newV6+`"`)
+	if node.IPv6Bind != "" && newV6 != "" && node.IPv6Bind != newV6 {
+		oldToken := `"` + node.IPv6Bind + `"`
+		if !strings.Contains(text, oldToken) {
+			return fmt.Errorf("stored IPv6 bind %s is absent from configuration", node.IPv6Bind)
+		}
+		text = strings.ReplaceAll(text, oldToken, `"`+newV6+`"`)
 	}
 	tmp := node.ConfigPath + ".reconcile.tmp"
 	if err = os.WriteFile(tmp, []byte(text), 0o600); err != nil {
@@ -305,7 +415,22 @@ func (m *Manager) rewriteBindings(ctx context.Context, node model.Node, newV4, n
 	if err = os.Rename(tmp, node.ConfigPath); err != nil {
 		return err
 	}
-	return m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName)
+	if err = m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); err == nil {
+		return nil
+	}
+	restartErr := err
+	rollback := node.ConfigPath + ".reconcile.rollback.tmp"
+	if rollbackErr := os.WriteFile(rollback, data, 0o600); rollbackErr != nil {
+		return errors.Join(restartErr, fmt.Errorf("write rollback configuration: %w", rollbackErr))
+	}
+	defer os.Remove(rollback)
+	if rollbackErr := os.Rename(rollback, node.ConfigPath); rollbackErr != nil {
+		return errors.Join(restartErr, fmt.Errorf("restore previous configuration: %w", rollbackErr))
+	}
+	if rollbackErr := m.serviceCommand(ctx, node.ServiceManager, "restart", node.ServiceName); rollbackErr != nil {
+		return errors.Join(restartErr, fmt.Errorf("restart restored service: %w", rollbackErr))
+	}
+	return fmt.Errorf("restart updated service failed; previous configuration restored: %w", restartErr)
 }
 
 func NewManager(cfg config.Config, s *store.Store, vault *security.Vault) *Manager {
@@ -2274,7 +2399,8 @@ func urlEncode(value string) string {
 	return strings.NewReplacer("%", "%25", " ", "%20", "#", "%23", "@", "%40", ":", "%3A", "/", "%2F").Replace(value)
 }
 
-func globalAddresses() (v4s, v6s []string) {
+func bindingAddressInventory() []model.BindAddress {
+	result := []model.BindAddress{}
 	interfaces, _ := net.Interfaces()
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -2287,16 +2413,129 @@ func globalAddresses() (v4s, v6s []string) {
 			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 				continue
 			}
-			if ip.To4() != nil {
-				v4s = append(v4s, ip.String())
-			} else if ip.IsGlobalUnicast() {
-				v6s = append(v6s, ip.String())
+			if ip.To4() != nil || ip.IsGlobalUnicast() {
+				result = append(result, model.BindAddress{Address: ip.String(), Interface: iface.Name})
 			}
 		}
 	}
-	sort.Strings(v4s)
-	sort.Strings(v6s)
-	return unique(v4s), unique(v6s)
+	sortBindAddresses(result)
+	return uniqueBindingAddressInventory(result)
+}
+
+func uniqueBindingAddressInventory(addresses []model.BindAddress) []model.BindAddress {
+	result := make([]model.BindAddress, 0, len(addresses))
+	seen := make(map[string]bool, len(addresses))
+	for _, address := range addresses {
+		key := bindingAddressKey(address.Interface, address.Address)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, address)
+	}
+	return result
+}
+
+func observeBindingAddresses(previous bindingAddressState, current []model.BindAddress, now time.Time) bindingAddressState {
+	observations := make(map[string]bindingAddressObservation, len(previous.Observations)+len(current))
+	for _, item := range previous.Observations {
+		if net.ParseIP(item.Address) == nil || strings.TrimSpace(item.Interface) == "" {
+			continue
+		}
+		observations[bindingAddressKey(item.Interface, item.Address)] = item
+	}
+	currentKeys := make(map[string]bool, len(current))
+	for _, item := range current {
+		ip := net.ParseIP(item.Address)
+		if ip == nil || strings.TrimSpace(item.Interface) == "" {
+			continue
+		}
+		key := bindingAddressKey(item.Interface, ip.String())
+		currentKeys[key] = true
+		observation, exists := observations[key]
+		if !exists {
+			observation = bindingAddressObservation{Address: ip.String(), Interface: item.Interface, FirstSeenUnix: now.Unix()}
+		}
+		observation.LastSeenUnix = now.Unix()
+		observations[key] = observation
+	}
+	cutoff := now.Add(-bindingAddressHistory).Unix()
+	result := bindingAddressState{Version: bindingAddressStateVersion, Observations: make([]bindingAddressObservation, 0, len(observations))}
+	for key, observation := range observations {
+		if !currentKeys[key] && observation.LastSeenUnix < cutoff {
+			continue
+		}
+		result.Observations = append(result.Observations, observation)
+	}
+	sort.Slice(result.Observations, func(i, j int) bool {
+		if result.Observations[i].Interface == result.Observations[j].Interface {
+			return result.Observations[i].Address < result.Observations[j].Address
+		}
+		return result.Observations[i].Interface < result.Observations[j].Interface
+	})
+	return result
+}
+
+func bindingReplacement(oldAddress string, current []model.BindAddress, state bindingAddressState) (string, []string) {
+	oldIP := net.ParseIP(strings.TrimSpace(oldAddress))
+	if oldIP == nil {
+		return "", nil
+	}
+	oldObservations := []bindingAddressObservation{}
+	for _, item := range state.Observations {
+		if item.Address == oldIP.String() {
+			oldObservations = append(oldObservations, item)
+		}
+	}
+	if len(oldObservations) != 1 {
+		return "", nil
+	}
+	old := oldObservations[0]
+	if bindAddressPresent(current, old.Interface, oldIP.String()) {
+		return "", nil
+	}
+	oldIPv4 := oldIP.To4() != nil
+	firstSeenAfter := old.LastSeenUnix - int64(bindingAddressReplaceWindow/time.Second)
+	candidates := []string{}
+	for _, address := range current {
+		ip := net.ParseIP(address.Address)
+		if ip == nil || address.Interface != old.Interface || (ip.To4() != nil) != oldIPv4 {
+			continue
+		}
+		observation, found := bindingObservation(state, address.Interface, ip.String())
+		if !found || observation.FirstSeenUnix <= old.FirstSeenUnix || observation.FirstSeenUnix < firstSeenAfter {
+			continue
+		}
+		candidates = append(candidates, ip.String())
+	}
+	sort.Strings(candidates)
+	candidates = unique(candidates)
+	if len(candidates) == 1 {
+		return candidates[0], candidates
+	}
+	return "", candidates
+}
+
+func bindingObservation(state bindingAddressState, iface, address string) (bindingAddressObservation, bool) {
+	for _, item := range state.Observations {
+		if item.Interface == iface && item.Address == address {
+			return item, true
+		}
+	}
+	return bindingAddressObservation{}, false
+}
+
+func bindAddressPresent(addresses []model.BindAddress, iface, needle string) bool {
+	for _, item := range addresses {
+		if item.Interface == iface && item.Address == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func bindingAddressKey(iface, address string) string {
+	return iface + "\x00" + address
 }
 
 func bindAddressOptions() (v4, v6 []model.BindAddress) {
@@ -2380,15 +2619,6 @@ func unique(values []string) []string {
 	}
 	return result
 }
-func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *Manager) validateManagedNode(node model.Node) error {
 	clean := filepath.Clean(node.ConfigPath)
 	root := filepath.Clean(m.cfg.ConfigDir) + string(os.PathSeparator)
