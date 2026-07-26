@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.7.1-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.7.2-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -12,6 +12,7 @@
 - 七协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 与 AnyTLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
+- 动态出站绑定：Agent 持久记录每个网卡的地址变化；固定绑定的 IPv4/IPv6 消失且同网卡能唯一识别对应新增地址时，先备份并校验 sing-box 配置，再切换绑定和重启服务。服务器同时存在多个静态或动态地址时不会按列表顺序误选；候选不唯一会保留原配置并写入审计，重启失败会自动恢复。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
@@ -86,7 +87,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.7.1 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.7.2 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \

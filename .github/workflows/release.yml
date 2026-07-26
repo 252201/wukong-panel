@@ -1,8 +1,16 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example v0.7.2)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -10,25 +18,110 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.5"
+          cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci && npm run build
+
+      - name: Validate release request
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "Release workflow must run from main, got: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          git fetch origin main --tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
+            echo "Tag already exists: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          plain_version="${RELEASE_VERSION#v}"
+          test "$(awk '/^VERSION[[:space:]]*\\?=/{print $3}' Makefile)" = "$plain_version"
+          test "$(node -p "require('./web/package.json').version")" = "$plain_version"
+          test "$(node -p "require('./web/package-lock.json').version")" = "$plain_version"
+          grep -Fq "version-v${plain_version}-" README.md
+          grep -Fq -- "--version v${plain_version}" README.md
+
+      - name: Test backend
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build web application
+        run: npm ci && npm run build
         working-directory: web
-      - run: ./scripts/build-release.sh "${GITHUB_REF_NAME#v}"
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            release/wukong-panel-linux-amd64
-            release/wukong-panel-linux-arm64
-            release/SHA256SUMS
-            release/install.sh
+
+      - name: Build and verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          plain_version="${RELEASE_VERSION#v}"
+          ./scripts/build-release.sh "$plain_version"
+          (
+            cd release
+            sha256sum -c SHA256SUMS
+          )
+          file release/wukong-panel-linux-amd64 | grep -Eq 'x86-64|x86_64'
+          file release/wukong-panel-linux-arm64 | grep -Eq 'ARM aarch64|aarch64'
+          go version -m release/wukong-panel-linux-amd64 | grep -Fq "main.version=$plain_version"
+          go version -m release/wukong-panel-linux-arm64 | grep -Fq "main.version=$plain_version"
+
+      - name: Create annotated tag and GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "252201"
+          git config user.email "114610855+252201@users.noreply.github.com"
+          git tag -a "$RELEASE_VERSION" -m "Wukong Panel $RELEASE_VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$RELEASE_VERSION"
+          gh release create "$RELEASE_VERSION" \
+            --verify-tag \
+            --title "$RELEASE_VERSION" \
+            --generate-notes \
+            release/wukong-panel-linux-amd64 \
+            release/wukong-panel-linux-arm64 \
+            release/SHA256SUMS \
+            release/install.sh \
             release/uninstall.sh
+
+      - name: Verify published release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_dir="$(mktemp -d)"
+          trap 'rm -rf "$download_dir"' EXIT
+          gh release download "$RELEASE_VERSION" --dir "$download_dir"
+          (
+            cd "$download_dir"
+            sha256sum -c SHA256SUMS
+          )
+          for asset in \
+            wukong-panel-linux-amd64 \
+            wukong-panel-linux-arm64 \
+            SHA256SUMS \
+            install.sh \
+            uninstall.sh
+          do
+            cmp "release/$asset" "$download_dir/$asset"
+          done
+          test "$(gh release view "$RELEASE_VERSION" --json tagName --jq .tagName)" = "$RELEASE_VERSION"
+          test "$(gh release view "$RELEASE_VERSION" --json isDraft --jq .isDraft)" = "false"
+          test "$(gh release view "$RELEASE_VERSION" --json isPrerelease --jq .isPrerelease)" = "false"
