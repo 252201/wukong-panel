@@ -89,8 +89,12 @@ jobs:
           )
           file release/wukong-panel-linux-amd64 | grep -Eq 'x86-64|x86_64'
           file release/wukong-panel-linux-arm64 | grep -Eq 'ARM aarch64|aarch64'
-          go version -m release/wukong-panel-linux-amd64 | grep -Fq "main.version=$plain_version"
-          go version -m release/wukong-panel-linux-arm64 | grep -Fq "main.version=$plain_version"
+          for binary in release/wukong-panel-linux-amd64 release/wukong-panel-linux-arm64
+          do
+            strings "$binary" | grep -Fx "$plain_version" >/dev/null
+            go version -m "$binary" | grep -F "vcs.revision=$GITHUB_SHA" >/dev/null
+            go version -m "$binary" | grep -F "vcs.modified=false" >/dev/null
+          done
 
       - name: Create annotated tag and GitHub Release
         shell: bash
