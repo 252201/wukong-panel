@@ -258,7 +258,7 @@ func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
 
 func (m *Manager) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
 	v4, v6 := bindAddressOptions()
-	return model.NodeDeploymentDefaults{PanelDomain: strings.TrimSpace(m.cfg.PanelDomain), IPv4: v4, IPv6: v6}, nil
+	return model.NodeDeploymentDefaults{PanelDomain: strings.TrimSpace(m.cfg.PanelDomain), IPv4: v4, IPv6: v6, ResidentialExitReady: m.residentialExitConfigured()}, nil
 }
 
 func (m *Manager) ReconcileBindings(ctx context.Context) error {
@@ -778,7 +778,7 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 		if server == "" {
 			server = candidate.Domain
 		}
-		node := model.Node{ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol, Mode: candidate.Mode, ListenPort: candidate.ListenPort, Server: server, Domain: candidate.Domain, IPv4Bind: candidate.IPv4Bind, IPv6Bind: candidate.IPv6Bind, AutoBind: true, ServiceName: candidate.ServiceName, ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath, ConfigVersion: candidate.ConfigVersion, Ownership: "imported", SharedGroup: candidate.SharedGroup, Status: status}
+		node := model.Node{ID: candidate.Fingerprint, Name: candidate.Name, Protocol: candidate.Protocol, Mode: candidate.Mode, Egress: "direct", ListenPort: candidate.ListenPort, Server: server, Domain: candidate.Domain, IPv4Bind: candidate.IPv4Bind, IPv6Bind: candidate.IPv6Bind, AutoBind: true, ServiceName: candidate.ServiceName, ServiceManager: candidate.ServiceManager, ConfigPath: candidate.ConfigPath, ConfigVersion: candidate.ConfigVersion, Ownership: "imported", SharedGroup: candidate.SharedGroup, Status: status}
 		if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 			return count, err
 		}
@@ -792,6 +792,9 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	request, err := prepareCreateRequest(request)
 	if err != nil {
 		return model.Node{}, err
+	}
+	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
+		return model.Node{}, errors.New("住宅出口尚未完成配置")
 	}
 	return m.createPrepared(ctx, request, "", true)
 }
@@ -811,6 +814,9 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 		value, err := prepareCreateRequest(item)
 		if err != nil {
 			return nil, fmt.Errorf("device %d: %w", index+1, err)
+		}
+		if value.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
+			return nil, fmt.Errorf("device %d: 住宅出口尚未完成配置", index+1)
 		}
 		if protocol == "" {
 			protocol = value.Protocol
@@ -859,7 +865,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 }
 
 func sameBatchRuntimeSettings(a, b model.NodeCreateRequest) bool {
-	if a.Mode != b.Mode || a.IPv4Bind != b.IPv4Bind || a.IPv6Bind != b.IPv6Bind || a.AutoBind != b.AutoBind || len(a.V6OnlyDomains) != len(b.V6OnlyDomains) {
+	if a.Mode != b.Mode || a.Egress != b.Egress || a.IPv4Bind != b.IPv4Bind || a.IPv6Bind != b.IPv6Bind || a.AutoBind != b.AutoBind || len(a.V6OnlyDomains) != len(b.V6OnlyDomains) {
 		return false
 	}
 	for index := range a.V6OnlyDomains {
@@ -931,7 +937,7 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 				return nil, fmt.Errorf("device %d: %w", index+1, err)
 			}
 		}
-		node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
+		node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, Egress: request.Egress, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
 		prepared = append(prepared, preparedDeviceNode{node: node, request: request, credentials: credentials, cipher: cipher, certPath: certPath, keyPath: keyPath, generateCert: generateCertificate})
 	}
 	identity := prepared[0].node
@@ -1168,7 +1174,7 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 	if m.cfg.Demo {
 		version = "1.14-demo"
 	}
-	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
+	node := model.Node{ID: id, Name: request.Name, Protocol: request.Protocol, Mode: request.Mode, Egress: request.Egress, ListenPort: port, Server: request.Server, Domain: request.Domain, PreferredServer: request.PreferredServer, WebSocketPath: request.WebSocketPath, IPv4Bind: request.IPv4Bind, IPv6Bind: request.IPv6Bind, AutoBind: request.AutoBind, ServiceName: service, ServiceManager: manager, ConfigPath: configPath, ConfigVersion: version, Ownership: "managed", SharedGroup: group, Status: "active"}
 	if err = m.store.UpsertNode(ctx, node, cipher); err != nil {
 		if !m.cfg.Demo {
 			_ = m.cleanupFailedCreate(ctx, node, request.Protocol == protocolVLESSWSTunnel && installTunnelConnector)
@@ -1180,6 +1186,17 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 }
 
 func normalizeModeBindings(request model.NodeCreateRequest) model.NodeCreateRequest {
+	if request.Egress == "" {
+		request.Egress = "direct"
+	}
+	if request.Egress == "residential" {
+		request.Mode = "v4only"
+		request.IPv4Bind = ""
+		request.IPv6Bind = ""
+		request.AutoBind = false
+		request.V6OnlyDomains = nil
+		return request
+	}
 	switch request.Mode {
 	case "v4only":
 		request.IPv6Bind = ""
@@ -1509,6 +1526,15 @@ func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
 	if err != nil {
 		return fail(result, fmt.Errorf("full proxy round trip failed: %w", err))
 	}
+	if node.Egress == "residential" {
+		state, stateErr := m.loadResidentialExit()
+		if stateErr != nil {
+			return fail(result, fmt.Errorf("read residential exit state: %w", stateErr))
+		}
+		if state.ExpectedExitIP != "" && result.ExitIP != state.ExpectedExitIP {
+			return fail(result, fmt.Errorf("residential exit IP mismatch: got %s, want %s", result.ExitIP, state.ExpectedExitIP))
+		}
+	}
 	if err = m.store.SetNodeProbeResult(node.ID, "success", result.LatencyMS, result.ExitIP, result.Target, "", time.Now()); err != nil {
 		return err
 	}
@@ -1591,7 +1617,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		return err
 	}
 	request := model.NodeCreateRequest{
-		Protocol: node.Protocol, Name: edit.Name, Mode: edit.Mode, ListenPort: edit.ListenPort,
+		Protocol: node.Protocol, Name: edit.Name, Mode: edit.Mode, Egress: edit.Egress, ListenPort: edit.ListenPort,
 		Server: edit.Server, Domain: edit.Domain, PreferredServer: edit.PreferredServer,
 		WebSocketPath: edit.WebSocketPath, IPv4Bind: edit.IPv4Bind, IPv6Bind: edit.IPv6Bind,
 		AutoBind: edit.AutoBind, V6OnlyDomains: normalizeDomainList(edit.V6OnlyDomains),
@@ -1600,6 +1626,9 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 	request, err = prepareCreateRequest(request)
 	if err != nil {
 		return err
+	}
+	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
+		return errors.New("住宅出口尚未完成配置")
 	}
 	if request.ListenPort == 0 {
 		request.ListenPort, err = freeProtocolPort(node.Protocol)
@@ -1676,6 +1705,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		}
 		runtimeRequest := requestFromNode(stored, request.V6OnlyDomains)
 		runtimeRequest.Mode = request.Mode
+		runtimeRequest.Egress = request.Egress
 		runtimeRequest.IPv4Bind = request.IPv4Bind
 		runtimeRequest.IPv6Bind = request.IPv6Bind
 		runtimeRequest.AutoBind = request.AutoBind
@@ -1764,6 +1794,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 
 func editedNode(node model.Node, request model.NodeCreateRequest) model.Node {
 	node.Name, node.Mode, node.ListenPort = strings.TrimSpace(request.Name), request.Mode, request.ListenPort
+	node.Egress = request.Egress
 	node.Server, node.Domain = request.Server, request.Domain
 	node.PreferredServer, node.WebSocketPath = request.PreferredServer, request.WebSocketPath
 	node.IPv4Bind, node.IPv6Bind, node.AutoBind = request.IPv4Bind, request.IPv6Bind, request.AutoBind
@@ -1771,7 +1802,7 @@ func editedNode(node model.Node, request model.NodeCreateRequest) model.Node {
 }
 
 func requestFromNode(node model.Node, domains []string) model.NodeCreateRequest {
-	return model.NodeCreateRequest{Protocol: node.Protocol, Name: node.Name, Mode: node.Mode, ListenPort: node.ListenPort, Server: node.Server, Domain: node.Domain, PreferredServer: node.PreferredServer, WebSocketPath: node.WebSocketPath, IPv4Bind: node.IPv4Bind, IPv6Bind: node.IPv6Bind, AutoBind: node.AutoBind, V6OnlyDomains: domains}
+	return model.NodeCreateRequest{Protocol: node.Protocol, Name: node.Name, Mode: node.Mode, Egress: node.Egress, ListenPort: node.ListenPort, Server: node.Server, Domain: node.Domain, PreferredServer: node.PreferredServer, WebSocketPath: node.WebSocketPath, IPv4Bind: node.IPv4Bind, IPv6Bind: node.IPv6Bind, AutoBind: node.AutoBind, V6OnlyDomains: domains}
 }
 
 func normalizeDomainList(values []string) []string {
@@ -1941,6 +1972,9 @@ func buildConfigWithInbounds(request model.NodeCreateRequest, inbounds []any, ve
 	rules := []any{}
 	direct := func(tag, strategy string) map[string]any {
 		o := map[string]any{"type": "direct", "tag": tag}
+		if request.Egress == "residential" {
+			o["routing_mark"] = residentialRouteMark
+		}
 		if request.IPv4Bind != "" {
 			o["inet4_bind_address"] = request.IPv4Bind
 		}
@@ -2095,6 +2129,12 @@ func validateCreate(r model.NodeCreateRequest) error {
 	}
 	if r.Mode != "prefer_v6" && r.Mode != "v4only" && r.Mode != "v6only" {
 		return errors.New("invalid outbound mode")
+	}
+	if r.Egress != "" && r.Egress != "direct" && r.Egress != "residential" {
+		return errors.New("invalid egress")
+	}
+	if r.Egress == "residential" && (r.Mode != "v4only" || r.IPv4Bind != "" || r.IPv6Bind != "" || r.AutoBind) {
+		return errors.New("residential egress must use automatic IPv4 routing without address binding")
 	}
 	protocol := normalizeProtocol(r.Protocol)
 	if !supportedProtocols[protocol] {

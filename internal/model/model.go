@@ -9,6 +9,7 @@ type Node struct {
 	Name            string    `json:"name"`
 	Protocol        string    `json:"protocol"`
 	Mode            string    `json:"mode"`
+	Egress          string    `json:"egress"`
 	ListenPort      int       `json:"listenPort"`
 	Server          string    `json:"server"`
 	Domain          string    `json:"domain"`
@@ -56,6 +57,7 @@ type NodeCreateRequest struct {
 	Protocol        string   `json:"protocol"`
 	Name            string   `json:"name"`
 	Mode            string   `json:"mode"`
+	Egress          string   `json:"egress"`
 	ListenPort      int      `json:"listenPort"`
 	Server          string   `json:"server"`
 	Domain          string   `json:"domain"`
@@ -81,9 +83,10 @@ type BindAddress struct {
 }
 
 type NodeDeploymentDefaults struct {
-	PanelDomain string        `json:"panelDomain"`
-	IPv4        []BindAddress `json:"ipv4"`
-	IPv6        []BindAddress `json:"ipv6"`
+	PanelDomain          string        `json:"panelDomain"`
+	IPv4                 []BindAddress `json:"ipv4"`
+	IPv6                 []BindAddress `json:"ipv6"`
+	ResidentialExitReady bool          `json:"residentialExitReady"`
 }
 
 type NodeActionRequest struct {
@@ -104,6 +107,7 @@ type NodeRenameRequest struct {
 type NodeEditRequest struct {
 	Name            string   `json:"name"`
 	Mode            string   `json:"mode"`
+	Egress          string   `json:"egress"`
 	ListenPort      int      `json:"listenPort"`
 	Server          string   `json:"server"`
 	Domain          string   `json:"domain"`
@@ -118,6 +122,34 @@ type NodeEditRequest struct {
 type NodeEditDetails struct {
 	Node          Node     `json:"node"`
 	V6OnlyDomains []string `json:"v6OnlyDomains"`
+}
+
+type ResidentialExit struct {
+	Configured      bool   `json:"configured"`
+	Active          bool   `json:"active"`
+	Interface       string `json:"interface"`
+	Endpoint        string `json:"endpoint"`
+	ListenPort      int    `json:"listenPort"`
+	PublicKey       string `json:"publicKey,omitempty"`
+	PeerPublicKey   string `json:"peerPublicKey,omitempty"`
+	TunnelAddress   string `json:"tunnelAddress"`
+	PeerAddress     string `json:"peerAddress"`
+	ExpectedExitIP  string `json:"expectedExitIp,omitempty"`
+	LatestHandshake string `json:"latestHandshake,omitempty"`
+	RXBytes         int64  `json:"rxBytes,omitempty"`
+	TXBytes         int64  `json:"txBytes,omitempty"`
+	InstallScript   string `json:"installScript,omitempty"`
+}
+
+type ResidentialExitRequest struct {
+	Endpoint       string `json:"endpoint"`
+	ListenPort     int    `json:"listenPort"`
+	PeerPublicKey  string `json:"peerPublicKey,omitempty"`
+	ExpectedExitIP string `json:"expectedExitIp,omitempty"`
+}
+
+type ResidentialExitDeleteRequest struct {
+	Confirm string `json:"confirm"`
 }
 
 type Share struct {

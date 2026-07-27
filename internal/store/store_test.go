@@ -131,6 +131,31 @@ func TestDemoSeedIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestNodeResidentialEgressRoundTrip(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	node := model.Node{
+		ID: "residential-node", Name: "Home", Protocol: "hysteria2",
+		Mode: "v4only", Egress: "residential", ListenPort: 45123,
+		Server: "node.example.com", ServiceName: "sing-box-home",
+		ServiceManager: "systemd", ConfigPath: "/etc/s-box/home.json",
+		ConfigVersion: "1.13.14", Ownership: "managed", Status: "active",
+	}
+	if err = s.UpsertNode(t.Context(), node, "cipher"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Node(t.Context(), node.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Egress != "residential" {
+		t.Fatalf("egress was not persisted: %#v", stored)
+	}
+}
+
 func TestActiveDevicesAggregatesRecentNodeTraffic(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -281,7 +306,7 @@ func TestPreferredServerRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLegacyNodesSchemaAddsPreferredServer(t *testing.T) {
+func TestLegacyNodesSchemaAddsCurrentColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy-nodes.db")
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -312,6 +337,9 @@ func TestLegacyNodesSchemaAddsPreferredServer(t *testing.T) {
 	var count int
 	if err = s.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('nodes') WHERE name='preferred_server'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("preferred_server migration missing: count=%d err=%v", count, err)
+	}
+	if err = s.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('nodes') WHERE name='egress'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("egress migration missing: count=%d err=%v", count, err)
 	}
 }
 

@@ -60,6 +60,9 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("POST /nodes/{id}/action", s.authorize(s.action))
 	mux.HandleFunc("GET /nodes/{id}/share", s.authorize(s.share))
 	mux.HandleFunc("GET /sing-box/migration-plan", s.authorize(s.migrationPlan))
+	mux.HandleFunc("GET /residential-exit", s.authorize(s.residentialExit))
+	mux.HandleFunc("PUT /residential-exit", s.authorize(s.configureResidentialExit))
+	mux.HandleFunc("DELETE /residential-exit", s.authorize(s.removeResidentialExit))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -208,6 +211,37 @@ func (s *Server) migrationPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, plan)
 }
+func (s *Server) residentialExit(w http.ResponseWriter, r *http.Request) {
+	result, err := s.manager.ResidentialExit(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+func (s *Server) configureResidentialExit(w http.ResponseWriter, r *http.Request) {
+	var request model.ResidentialExitRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	result, err := s.manager.ConfigureResidentialExit(r.Context(), request)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+func (s *Server) removeResidentialExit(w http.ResponseWriter, r *http.Request) {
+	var request model.ResidentialExitDeleteRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	if err := s.manager.RemoveResidentialExit(r.Context(), request.Confirm); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
 
 type Client struct {
 	http  *http.Client
@@ -305,6 +339,19 @@ func (c *Client) MigrationPlan(ctx context.Context, target string) (singboxconfi
 	var plan singboxconfig.Plan
 	err := c.request(ctx, "GET", "/sing-box/migration-plan?target="+url.QueryEscape(target), nil, &plan)
 	return plan, err
+}
+func (c *Client) ResidentialExit(ctx context.Context) (model.ResidentialExit, error) {
+	var result model.ResidentialExit
+	err := c.request(ctx, "GET", "/residential-exit", nil, &result)
+	return result, err
+}
+func (c *Client) ConfigureResidentialExit(ctx context.Context, request model.ResidentialExitRequest) (model.ResidentialExit, error) {
+	var result model.ResidentialExit
+	err := c.request(ctx, "PUT", "/residential-exit", request, &result)
+	return result, err
+}
+func (c *Client) RemoveResidentialExit(ctx context.Context, request model.ResidentialExitDeleteRequest) error {
+	return c.request(ctx, "DELETE", "/residential-exit", request, nil)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
