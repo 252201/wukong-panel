@@ -504,6 +504,34 @@ backfill_certificate_renewal() {
   configure_certificate_renewal "$domain" "$cert_file" "$key_file"
 }
 
+ensure_residential_exit_dependencies() {
+  [ "$SKIP_PACKAGES" != true ] || return 0
+  if command -v wg >/dev/null 2>&1 &&
+     command -v wg-quick >/dev/null 2>&1 &&
+     command -v ip >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "安装住宅出口依赖（wireguard-tools / iproute2）"
+  case "$FAMILY" in
+    apt)
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools iproute2 >/dev/null
+      ;;
+    dnf)
+      dnf install -y -q wireguard-tools iproute >/dev/null
+      ;;
+    apk)
+      apk add -q wireguard-tools iproute2
+      ;;
+  esac
+
+  for dependency_binary in wg wg-quick ip; do
+    command -v "$dependency_binary" >/dev/null 2>&1 ||
+      die "住宅出口依赖安装不完整：缺少 $dependency_binary"
+  done
+}
+
 disable_certificate_renewal() {
   if using_systemd; then
     systemctl disable --now wukong-cert-renew.timer >/dev/null 2>&1 || true
@@ -1222,6 +1250,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 if [ "$ACTION" = "update" ]; then
+  ensure_residential_exit_dependencies
   update_panel
   exit 0
 fi
@@ -1250,6 +1279,7 @@ if [ "$SKIP_PACKAGES" != true ]; then
     apk) apk add -q ca-certificates curl openssl nginx tcpdump tar ;;
   esac
 fi
+ensure_residential_exit_dependencies
 
 install -d -m 0755 /usr/local/bin /etc/wukong-panel /etc/wukong-panel/tls
 if ! grep -q '^wukong:' /etc/group 2>/dev/null; then

@@ -243,9 +243,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .edit-impact-note.shared b { color: var(--jade); }
 .edit-impact-note p { margin: 5px 0 0; color: var(--muted); font: 500 8px/1.65 "IBM Plex Mono", monospace; }
 .protocol-choice select:disabled { opacity: .72; cursor: not-allowed; }
-.residential-panel { display: grid; gap: 20px; }
+.residential-panel { display: grid; gap: 20px; margin-top: 17px; padding: 22px; }
 .residential-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
-.residential-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.residential-grid label { display: grid; align-self: start; align-content: start; gap: 7px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .residential-grid input { width: 100%; }
 .residential-grid small { font-weight: 400; line-height: 1.5; }
 .residential-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
