@@ -5,6 +5,7 @@ export interface NodeItem {
   name: string
   protocol: string
   mode: 'prefer_v6' | 'v4only' | 'v6only'
+  egress: 'direct' | 'residential'
   listenPort: number
   server: string
   domain: string
@@ -107,7 +108,24 @@ export interface Candidate {
 }
 
 export interface BindAddress { address: string; interface: string }
-export interface NodeDeploymentDefaults { panelDomain: string; ipv4: BindAddress[]; ipv6: BindAddress[] }
+export interface NodeDeploymentDefaults { panelDomain: string; ipv4: BindAddress[]; ipv6: BindAddress[]; residentialExitReady: boolean }
+
+export interface ResidentialExit {
+  configured: boolean
+  active: boolean
+  interface: string
+  endpoint: string
+  listenPort: number
+  publicKey?: string
+  peerPublicKey?: string
+  tunnelAddress: string
+  peerAddress: string
+  expectedExitIp?: string
+  latestHandshake?: string
+  rxBytes?: number
+  txBytes?: number
+  installScript?: string
+}
 
 export interface Settings {
   language: string
@@ -166,6 +184,9 @@ export const api = {
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
   singBoxMigration: async (target = '1.13.14') => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
+  residentialExit: () => request<ResidentialExit>('system/residential-exit'),
+  configureResidentialExit: (data: {endpoint: string; listenPort: number; peerPublicKey?: string; expectedExitIp?: string}) => request<ResidentialExit>('system/residential-exit', { method: 'PUT', body: JSON.stringify(data) }),
+  removeResidentialExit: (confirm: string) => request<{ok: boolean}>('system/residential-exit', { method: 'DELETE', body: JSON.stringify({ confirm }) }),
   nodes: () => request<NodeItem[]>('nodes'),
   nodeDeploymentDefaults: () => request<NodeDeploymentDefaults>('nodes/deployment-defaults'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),
