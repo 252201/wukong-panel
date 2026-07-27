@@ -47,6 +47,7 @@ jobs:
       - run: sh -n install.sh uninstall.sh compat/deploy-hy2.sh
       - run: sh scripts/test-install-acme-status.sh
       - run: sh scripts/test-install-actions.sh
+      - run: sh scripts/test-install-residential-dependencies.sh
       - run: sh scripts/test-singbox-lifecycle.sh
       - run: |
           for arch in amd64 arm64; do
