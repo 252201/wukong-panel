@@ -78,6 +78,14 @@ panel_installed() {
   [ -x /usr/local/bin/wukong-panel ] && [ -r /etc/wukong-panel/env ]
 }
 
+residential_peer_installed() {
+  peer_config="/etc/wireguard/wukong-exit.conf"
+  [ -r "$peer_config" ] &&
+    grep -Eq '^Address[[:space:]]*=[[:space:]]*10\.77\.0\.2/30[[:space:]]*$' "$peer_config" &&
+    grep -Eq '^AllowedIPs[[:space:]]*=[[:space:]]*10\.77\.0\.1/32[[:space:]]*$' "$peer_config" &&
+    grep -Fq -- '-s 10.77.0.0/30 -j MASQUERADE' "$peer_config"
+}
+
 resolve_auto_action() {
   installed=$1
   reconfigure=$2
@@ -126,6 +134,58 @@ uninstall_panel() {
     info "已保留 /var/lib/wukong-panel 与 /etc/wukong-panel，重新安装可恢复数据"
   fi
   info "悟空面板已卸载；sing-box 节点、节点配置和节点服务未改动"
+}
+
+remove_residential_peer() {
+  peer_interface="wukong-exit"
+  peer_config="/etc/wireguard/$peer_interface.conf"
+  residential_peer_installed ||
+    die "未检测到悟空生成的 B 机住宅出口配置，或配置签名不匹配；已拒绝删除"
+
+  info "停止并移除 B 机住宅出口配置"
+  if using_systemd; then
+    systemctl disable --now "wg-quick@$peer_interface.service" >/dev/null 2>&1 || true
+  else
+    if command -v rc-service >/dev/null 2>&1; then
+      rc-service "$peer_interface" stop >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if command -v wg-quick >/dev/null 2>&1 &&
+     command -v ip >/dev/null 2>&1 &&
+     ip link show "$peer_interface" >/dev/null 2>&1; then
+    wg-quick down "$peer_interface" >/dev/null 2>&1 || true
+  fi
+
+  if command -v iptables >/dev/null 2>&1; then
+    while iptables -C FORWARD -i "$peer_interface" -j ACCEPT >/dev/null 2>&1; do
+      iptables -D FORWARD -i "$peer_interface" -j ACCEPT >/dev/null 2>&1 || break
+    done
+    while iptables -C FORWARD -o "$peer_interface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT >/dev/null 2>&1; do
+      iptables -D FORWARD -o "$peer_interface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT >/dev/null 2>&1 || break
+    done
+    peer_out_interface=$(ip -4 route show default 2>/dev/null | awk 'NR == 1 {print $5}')
+    if [ -n "$peer_out_interface" ]; then
+      while iptables -t nat -C POSTROUTING -o "$peer_out_interface" -s 10.77.0.0/30 -j MASQUERADE >/dev/null 2>&1; do
+        iptables -t nat -D POSTROUTING -o "$peer_out_interface" -s 10.77.0.0/30 -j MASQUERADE >/dev/null 2>&1 || break
+      done
+    fi
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip link delete "$peer_interface" >/dev/null 2>&1 || true
+  fi
+  if command -v rc-update >/dev/null 2>&1; then
+    rc-update del "$peer_interface" default >/dev/null 2>&1 || true
+  fi
+
+  rm -f "/etc/init.d/$peer_interface" "$peer_config" /etc/sysctl.d/99-wukong-exit.conf
+  if using_systemd; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+
+  if command -v ip >/dev/null 2>&1 && ip link show "$peer_interface" >/dev/null 2>&1; then
+    die "B 机配置文件已移除，但接口 $peer_interface 仍然存在，请人工检查"
+  fi
+  info "B 机住宅出口配置已移除；WireGuard 软件和当前 IPv4 转发状态保持不变"
 }
 
 download_panel_binary() {
@@ -1065,7 +1125,7 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall
+  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall 或 residential-peer-remove
   --update             等同于 --action update
   --start-panel        启动面板 Web 与 Agent（也可使用 --start）
   --stop-panel         关闭面板 Web 与 Agent（也可使用 --stop）
@@ -1073,6 +1133,7 @@ usage() {
   --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
   --rollback-sing-box  回退到上一次保留的 sing-box 版本
   --uninstall-sing-box 备份后卸载 sing-box 二进制、JSON 配置和节点服务
+  --remove-residential-peer  安全停止并移除本机的 B 机住宅出口配置
   --sing-box-version VERSION  指定悟空支持的 sing-box 版本
   --uninstall          等同于 --action uninstall
   --purge              卸载时同时删除面板配置和数据
@@ -1089,6 +1150,9 @@ usage() {
 
 NAT/受限端口 VPS 示例：
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --port 你的可用TCP端口
+
+B 机住宅出口移除：
+  curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --remove-residential-peer
 EOF
 }
 
@@ -1102,6 +1166,7 @@ while [ "$#" -gt 0 ]; do
     --update-sing-box) ACTION=singbox-update; HAS_CONFIG_ARGS=true; shift ;;
     --rollback-sing-box) ACTION=singbox-rollback; HAS_CONFIG_ARGS=true; shift ;;
     --uninstall-sing-box) ACTION=singbox-uninstall; HAS_CONFIG_ARGS=true; shift ;;
+    --remove-residential-peer) ACTION=residential-peer-remove; HAS_CONFIG_ARGS=true; shift ;;
     --sing-box-version) ACTION=singbox-update; SINGBOX_VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --uninstall) ACTION=uninstall; HAS_CONFIG_ARGS=true; shift ;;
     --purge) ACTION=uninstall; PURGE=true; HAS_CONFIG_ARGS=true; shift ;;
@@ -1131,13 +1196,19 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机住宅出口配置" " 12) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
-      printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
-      action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|install) ACTION=install ;; 2|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      if residential_peer_installed; then
+        printf '%s\n' "检测到本机 B 机住宅出口配置，请选择操作：" "  1) 安装悟空面板" "  2) 移除 B 机住宅出口配置" "  3) 取消" >"$PROMPT_TTY"
+        action_choice=$(prompt_value "选择" "1")
+        case "$action_choice" in 1|install) ACTION=install ;; 2|residential-peer-remove) ACTION=residential-peer-remove ;; 3|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      else
+        printf '%s\n' "请选择操作：" "  1) 安装悟空面板" "  2) 取消" >"$PROMPT_TTY"
+        action_choice=$(prompt_value "选择" "1")
+        case "$action_choice" in 1|install) ACTION=install ;; 2|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      fi
     fi
   fi
 fi
@@ -1147,7 +1218,16 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback 或 singbox-uninstall" ;; esac
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-remove) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall 或 residential-peer-remove" ;; esac
+
+if [ "$ACTION" = "residential-peer-remove" ]; then
+  if [ "$INTERACTIVE_SESSION" = true ]; then
+    confirm_peer_remove=$(prompt_value "确认停止隧道并移除本机 B 机住宅出口配置？(y/N)" "N")
+    case "$confirm_peer_remove" in Y|y|yes|YES|Yes) ;; *) info "已取消"; exit 0 ;; esac
+  fi
+  remove_residential_peer
+  exit 0
+fi
 
 if [ "$ACTION" = "uninstall" ]; then
   if [ "$INTERACTIVE_SESSION" = true ]; then

@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.7.4-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.7.5-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -79,6 +79,10 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall-sing-box
 
+# 在 B 机安全停止隧道并移除住宅出口配置；保留 WireGuard 软件与系统转发状态
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --remove-residential-peer
+
 # 卸载面板并保留配置、数据库和 sing-box 节点
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall
@@ -88,7 +92,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.7.4 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.7.5 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -140,6 +144,8 @@ AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书�
 A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/IPv6 `unreachable default`，WireGuard 在线时只用更低 metric 的隧道路由覆盖 IPv4；因此隧道停止、握手失效或 B 机离线时，住宅节点连接会失败而不是经 A 机默认路由直出。移除住宅出口前，面板会拒绝操作直到所有住宅节点都已切回本机直出。
 
 面板不保存 B 的 SSH 密码、SSH 私钥或 WireGuard 私钥。A 的 WireGuard 私钥只保存在 `WUKONG_SECRET_DIR` 和 `/etc/wireguard/wukong-exit.conf` 的 `0600` 文件中。需要在云防火墙放行 A 机所选 WireGuard UDP 端口；安装器本身不会修改云安全组。
+
+不再使用住宅出口时，先在 A 机把相关节点切回本机直出并从系统页移除住宅出口，再在 B 机运行 `install.sh --remove-residential-peer`。安装器只接受带 `10.77.0.2/30`、A 端 peer 地址和悟空 NAT 规则签名的 B 机配置，避免误删 A 机或其他 WireGuard 接口；清理后保留 `wireguard-tools`、`iproute2` 和当前全局 IPv4 转发状态。
 
 ### sing-box 安全更新与回退
 

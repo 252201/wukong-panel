@@ -31,7 +31,7 @@ const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
 const language = ref<'zh-CN' | 'en-US'>('zh-CN')
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | null>(null)
 const candidates = ref<Candidate[]>([])
 const selectedCandidates = ref<string[]>([])
 const candidateDeleteTarget = ref<Candidate | null>(null)
@@ -40,6 +40,7 @@ const selectedNode = ref<NodeItem | null>(null)
 const shareURI = ref('')
 const shareQR = ref('')
 const deleteConfirm = ref('')
+const residentialRemoveConfirm = ref('')
 const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deviceMode = computed(() => modal.value === 'device-create')
 const isEditing = computed(() => modal.value === 'edit')
@@ -108,6 +109,7 @@ const timelineTooltipLeft = computed(() => {
   return `${Math.min(86, Math.max(14, (index + .5) / Math.max(1, timelineBuckets.value.length) * 100))}%`
 })
 const activeJobs = computed(() => jobs.value.filter(job => job.status === 'running' || job.status === 'queued').length)
+const residentialNodesInUse = computed(() => nodes.value.filter(node => node.egress === 'residential'))
 const protocolCatalog = {
   hysteria2: { badge: 'HY2', label: 'Hysteria2', transport: 'UDP', domainLabel: 'TLS 域名', note: 'QUIC 高速节点，适合弱网与高延迟链路。' },
   vless: { badge: 'VLESS', label: 'VLESS + REALITY', transport: 'TCP', domainLabel: 'REALITY 伪装域名', note: 'TCP 备用线路；域名必须是本机可访问的真实 TLS 站点。' },
@@ -434,14 +436,20 @@ async function configureResidentialExit() {
   } catch (error) { notify(error instanceof Error ? error.message : '住宅出口配置失败') }
   finally { residentialBusy.value = false }
 }
+function stageResidentialExitRemoval() {
+  residentialRemoveConfirm.value = ''
+  modal.value = 'residential-remove'
+}
 async function removeResidentialExit() {
-  if (window.prompt('确认移除住宅出口？请先把所有节点切回本机直出，然后输入 REMOVE') !== 'REMOVE') return
+  if (residentialRemoveConfirm.value !== 'REMOVE' || residentialNodesInUse.value.length) return
   residentialBusy.value = true
   try {
     await api.removeResidentialExit('REMOVE')
     residentialExit.value = await api.residentialExit()
     Object.assign(residentialForm, { endpoint: '', listenPort: 51820, peerPublicKey: '', expectedExitIp: '' })
     deploymentDefaults.value.residentialExitReady = false
+    modal.value = null
+    residentialRemoveConfirm.value = ''
     notify('住宅出口已移除')
   } catch (error) { notify(error instanceof Error ? error.message : '住宅出口移除失败') }
   finally { residentialBusy.value = false }
@@ -568,7 +576,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <label>B 机公钥<input v-model="residentialForm.peerPublicKey" placeholder="先留空生成 B 机脚本"><small>B 私钥只在 B 机本地生成，面板不会接收</small></label>
             <label>预期住宅 IPv4（可选）<input v-model="residentialForm.expectedExitIp" placeholder="用于人工核对出口"></label>
           </div>
-          <div class="residential-actions"><button class="primary" :disabled="residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="residentialBusy" @click="removeResidentialExit">移除住宅出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
+          <div class="residential-actions"><button class="primary" :disabled="residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="residentialBusy" @click="stageResidentialExitRemoval">移除住宅出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
           <div v-if="residentialExit?.installScript" class="residential-script"><div><b>B 机一键安装命令</b><button @click="copy(residentialExit?.installScript || '')">复制脚本</button></div><textarea :value="residentialExit.installScript" readonly spellcheck="false"></textarea><p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方。A/B 私钥不会跨机传输。</p></div>
           <p class="help-text">选用住宅出口的节点被强制为 IPv4，并通过 fwmark {{ 102 }} 进入独立路由表；隧道中断时策略表保留 unreachable 默认路由，不会泄漏到 A 机公网。</p>
         </section>
@@ -602,10 +610,10 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <p v-if="isEditing" class="form-hint edit-safety-hint">保存前会建立配置快照并校验；重启失败自动恢复原配置。协议与凭据不会在编辑中改变。</p>
       <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
       <div class="form-grid">
-        <label v-if="!deviceMode">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
-        <div v-else class="span-2 device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据 · 一个 sing-box 进程</small></div></div>
-        <label class="protocol-choice">节点协议<select v-model="createForm.protocol" :disabled="isEditing"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option><option value="anytls">AnyTLS · TCP / TLS</option></select><small>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</small></label>
+        <div v-if="deviceMode" class="span-2 device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据 · 一个 sing-box 进程</small></div></div>
         <label class="span-2">出口位置<select v-model="createForm.egress"><option value="direct">A 机本地直出</option><option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机住宅 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option></select><small v-if="createForm.egress === 'residential'">WireGuard 断线时拒绝联网，不回退到 A 机</small></label>
+        <label v-if="!deviceMode">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
+        <label class="protocol-choice">节点协议<select v-model="createForm.protocol" :disabled="isEditing"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option><option value="anytls">AnyTLS · TCP / TLS</option></select><small>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</small></label>
         <label>出站策略<select v-model="createForm.mode" :disabled="createForm.egress === 'residential'"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
         <label v-if="!deviceMode">{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
         <label v-if="!isTunnelProtocol || !deviceMode">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
@@ -626,6 +634,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
     </form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。彻底删除会先建立校验快照。</p><div class="candidate-list"><div v-for="item in candidates" :key="item.fingerprint" class="candidate-row" :class="{ deleting: candidateDeleteTarget?.fingerprint === item.fingerprint }"><label class="candidate-select"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><button type="button" class="candidate-purge" title="从服务器彻底删除此候选节点" @click="stageCandidateDelete(item)">彻底删除</button></div><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><section v-if="candidateDeleteTarget" class="candidate-delete-confirm" role="alert"><header><span>险</span><div><b>彻底删除 {{ candidateDeleteTarget.name }}？</b><small>{{ candidateDeleteTarget.configPath }}</small></div></header><p v-if="candidateDeleteTarget.sharedGroup">系统会先建立 SHA-256 快照，只从共享配置移除端口 {{ candidateDeleteTarget.listenPort }} 的 inbound；其他节点与共享服务会保留。配置校验或重启失败将自动恢复。</p><p v-else>系统会先建立 SHA-256 快照，再停止并删除 {{ candidateDeleteTarget.serviceName === 'unknown' ? '对应配置文件' : '对应服务与配置文件' }}。此操作不可从面板撤销。</p><label>输入完整节点名称确认<input v-model="candidateDeleteConfirm" autocomplete="off" :placeholder="candidateDeleteTarget.name"></label><div><button type="button" class="secondary" @click="cancelCandidateDelete">保留节点</button><button type="button" class="danger-button" :disabled="busy || candidateDeleteConfirm !== candidateDeleteTarget.name" @click="deleteCandidate">{{ busy ? '正在创建任务…' : '确认彻底删除' }}</button></div></section><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
+    <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除住宅出口？</h2><p>这会停止 A 机的住宅出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用住宅出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留住宅出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></transition>

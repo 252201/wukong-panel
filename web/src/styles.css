@@ -210,6 +210,17 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .preferred-endpoint-field > span { display: flex; align-items: center; justify-content: space-between; }
 .preferred-endpoint-field em { padding: 3px 6px; border: 1px solid rgba(82,182,144,.25); color: var(--jade); font: 500 6px "IBM Plex Mono", monospace; font-style: normal; letter-spacing: .12em; }
 .preferred-endpoint-field input { border-color: rgba(212,173,87,.24); }
+.residential-remove-impact { display: grid; gap: 8px; margin: 20px 0; }
+.residential-remove-impact article { display: grid; grid-template-columns: 42px minmax(0,1fr); align-items: center; gap: 12px; padding: 12px 13px; border: 1px solid rgba(196,70,53,.18); background: rgba(196,70,53,.035); }
+.residential-remove-impact b { color: #df796b; font: 600 8px "IBM Plex Mono", monospace; letter-spacing: .08em; }
+.residential-remove-impact span { color: #aaa198; font-size: 8px; line-height: 1.6; }
+.residential-remove-impact code, .residential-remove-modal label code { color: var(--gold); font: 600 8px "IBM Plex Mono", monospace; }
+.residential-remove-blocked { display: grid; gap: 5px; margin: 18px 0 !important; padding: 13px 14px; border-left: 3px solid var(--cinnabar); background: rgba(196,70,53,.08); }
+.residential-remove-blocked b { color: #ec8172; font-size: 9px; }
+.residential-remove-blocked span { color: #b5a59d; font-size: 8px; line-height: 1.65; overflow-wrap: anywhere; }
+.residential-remove-modal label { display: grid; gap: 8px; color: #c9b9ad; font-size: 9px; }
+.residential-remove-modal input { border-color: rgba(196,70,53,.35); }
+.residential-remove-modal input:focus { border-color: var(--cinnabar); box-shadow: inset 3px 0 var(--cinnabar); }
 .device-mode-summary { align-self: start; display: flex; align-items: center; gap: 15px; min-height: 76px; margin: 15px 0; padding: 13px 16px; border: 1px solid rgba(82,182,144,.22); background: linear-gradient(105deg, rgba(82,182,144,.07), rgba(212,173,87,.025)); }
 .device-mode-summary > span { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 auto; border: 1px solid rgba(82,182,144,.38); color: var(--jade); font-family: "STKaiti", serif; font-size: 17px; }
 .device-mode-summary b, .device-mode-summary small { display: block; }.device-mode-summary b { color: #d8ddd5; font-size: 11px; }.device-mode-summary small { margin-top: 5px; color: var(--muted); font: 500 8px "IBM Plex Mono", monospace; }

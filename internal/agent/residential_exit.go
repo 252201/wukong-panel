@@ -401,7 +401,7 @@ AllowedIPs = 10.77.0.1/32
 PersistentKeepalive = 25
 EOF
 printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-wukong-exit.conf
-sysctl --system >/dev/null
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable --now wg-quick@wukong-exit.service
 elif command -v rc-update >/dev/null 2>&1; then
@@ -419,5 +419,6 @@ fi
 echo
 echo "B_PUBLIC_KEY=$PUBLIC_KEY"
 echo "只把上面的 B_PUBLIC_KEY 粘贴回悟空面板；不要发送私钥。"
+echo "不再使用时：curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --remove-residential-peer"
 `, residentialTunnelB, state.PublicKey, peerEndpoint(state))
 }
