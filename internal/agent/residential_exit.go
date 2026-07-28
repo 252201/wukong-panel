@@ -27,6 +27,7 @@ const (
 	residentialTunnelA    = "10.77.0.1/30"
 	residentialTunnelB    = "10.77.0.2/30"
 	residentialStateFile  = "residential-exit.json"
+	residentialRPFilter   = "sysctl -w net.ipv4.conf.%i.rp_filter=2 >/dev/null"
 )
 
 type residentialExitState struct {
@@ -77,6 +78,66 @@ func (m *Manager) saveResidentialExit(state residentialExitState) error {
 	return os.Chmod(m.residentialStatePath(), 0o600)
 }
 
+func ensureResidentialRPFilterPostUp(config string) (string, bool, error) {
+	if strings.Contains(config, residentialRPFilter) {
+		return config, false, nil
+	}
+	lines := strings.Split(config, "\n")
+	for index, line := range lines {
+		if !strings.HasPrefix(line, "PostUp = ") {
+			continue
+		}
+		lines[index] = "PostUp = " + residentialRPFilter + "; " + strings.TrimPrefix(line, "PostUp = ")
+		return strings.Join(lines, "\n"), true, nil
+	}
+	return config, false, errors.New("wukong-exit 配置缺少 PostUp，无法安全补齐反向路径校验")
+}
+
+func (m *Manager) ReconcileResidentialExit(ctx context.Context) error {
+	if m.cfg.Demo {
+		return nil
+	}
+	state, err := m.loadResidentialExit()
+	if errors.Is(err, os.ErrNotExist) || (err == nil && state.PeerPublicKey == "") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	configPath := "/etc/wireguard/" + residentialInterface + ".conf"
+	data, err := os.ReadFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	updated, changed, err := ensureResidentialRPFilterPostUp(string(data))
+	if err != nil {
+		return err
+	}
+	if changed {
+		tmp := configPath + ".rp-filter.tmp"
+		if err = os.WriteFile(tmp, []byte(updated), 0o600); err != nil {
+			return err
+		}
+		defer os.Remove(tmp)
+		if err = os.Rename(tmp, configPath); err != nil {
+			return err
+		}
+		if err = os.Chmod(configPath, 0o600); err != nil {
+			return err
+		}
+		_ = m.store.Audit("agent", "residential_exit_migrate", residentialInterface, "added interface-scoped loose reverse-path filtering")
+	}
+	if exec.CommandContext(ctx, "ip", "link", "show", residentialInterface).Run() == nil {
+		if err = command(ctx, "sysctl", "-w", "net.ipv4.conf."+residentialInterface+".rp_filter=2"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func wireGuardKeyPair() (privateKey, publicKey string, err error) {
 	private := make([]byte, curve25519.ScalarSize)
 	if _, err = rand.Read(private); err != nil {
@@ -114,7 +175,7 @@ func validateResidentialRequest(request model.ResidentialExitRequest) (model.Res
 	if request.ExpectedExitIP != "" {
 		ip := net.ParseIP(request.ExpectedExitIP)
 		if ip == nil || ip.To4() == nil {
-			return request, errors.New("预期住宅出口必须是 IPv4 地址")
+			return request, errors.New("预期落地出口必须是 IPv4 地址")
 		}
 	}
 	return request, nil
@@ -259,7 +320,7 @@ func (m *Manager) installResidentialExit(ctx context.Context, state residentialE
 
 func (m *Manager) RemoveResidentialExit(ctx context.Context, confirm string) error {
 	if confirm != "REMOVE" {
-		return errors.New("请输入 REMOVE 确认移除住宅出口")
+		return errors.New("请输入 REMOVE 确认移除落地出口")
 	}
 	nodes, err := m.store.Nodes(ctx)
 	if err != nil {
@@ -267,7 +328,7 @@ func (m *Manager) RemoveResidentialExit(ctx context.Context, confirm string) err
 	}
 	for _, node := range nodes {
 		if node.Egress == "residential" {
-			return fmt.Errorf("节点 %s 仍在使用住宅出口，请先切换为本机直出", node.Name)
+			return fmt.Errorf("节点 %s 仍在使用落地出口，请先切换为本机直出", node.Name)
 		}
 	}
 	if !m.cfg.Demo {
@@ -301,13 +362,13 @@ PrivateKey = %s
 Address = %s
 ListenPort = %d
 Table = off
-PostUp = ip -4 route replace default dev %%i table %d metric 100
+PostUp = %s; ip -4 route replace default dev %%i table %d metric 100
 PreDown = ip -4 route del default dev %%i table %d metric 100 || true
 
 [Peer]
 PublicKey = %s
 AllowedIPs = 0.0.0.0/0
-`, state.PrivateKey, residentialTunnelA, state.ListenPort, residentialRouteTable, residentialRouteTable, state.PeerPublicKey)
+`, state.PrivateKey, residentialTunnelA, state.ListenPort, residentialRPFilter, residentialRouteTable, residentialRouteTable, state.PeerPublicKey)
 }
 
 func renderResidentialGuardScript() string {
@@ -375,50 +436,9 @@ func peerEndpoint(state residentialExitState) string {
 }
 
 func renderResidentialPeerScript(state residentialExitState) string {
-	return fmt.Sprintf(`#!/bin/sh
-set -eu
-if [ "$(id -u)" -ne 0 ]; then echo "请以 root 运行"; exit 1; fi
-if command -v apk >/dev/null 2>&1; then apk add --no-cache wireguard-tools iptables
-elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y wireguard-tools iptables
-elif command -v dnf >/dev/null 2>&1; then dnf install -y wireguard-tools iptables
-else echo "不支持的包管理器，请手动安装 wireguard-tools 与 iptables"; exit 1; fi
-umask 077
-mkdir -p /etc/wireguard
-PRIVATE_KEY="$(wg genkey)"
-PUBLIC_KEY="$(printf '%%s' "$PRIVATE_KEY" | wg pubkey)"
-cat > /etc/wireguard/wukong-exit.conf <<EOF
-[Interface]
-PrivateKey = $PRIVATE_KEY
-Address = %s
-Table = off
-PostUp = sysctl -w net.ipv4.ip_forward=1; OUT_IF="\$(ip -4 route show default | awk 'NR==1 {print \$5}')"; iptables -A FORWARD -i %%i -j ACCEPT; iptables -A FORWARD -o %%i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -o "\$OUT_IF" -s 10.77.0.0/30 -j MASQUERADE
-PostDown = OUT_IF="\$(ip -4 route show default | awk 'NR==1 {print \$5}')"; iptables -D FORWARD -i %%i -j ACCEPT || true; iptables -D FORWARD -o %%i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true; iptables -t nat -D POSTROUTING -o "\$OUT_IF" -s 10.77.0.0/30 -j MASQUERADE || true
-
-[Peer]
-PublicKey = %s
-Endpoint = %s
-AllowedIPs = 10.77.0.1/32
-PersistentKeepalive = 25
-EOF
-printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-wukong-exit.conf
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now wg-quick@wukong-exit.service
-elif command -v rc-update >/dev/null 2>&1; then
-  cat > /etc/init.d/wukong-exit <<'EOF'
-#!/sbin/openrc-run
-description="Wukong residential exit peer"
-depend() { need net; }
-start() { wg-quick up wukong-exit; }
-stop() { wg-quick down wukong-exit; }
-EOF
-  chmod 0755 /etc/init.d/wukong-exit
-  rc-update add wukong-exit default
-  rc-service wukong-exit restart
-fi
-echo
-echo "B_PUBLIC_KEY=$PUBLIC_KEY"
-echo "只把上面的 B_PUBLIC_KEY 粘贴回悟空面板；不要发送私钥。"
-echo "不再使用时：curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --remove-residential-peer"
-`, residentialTunnelB, state.PublicKey, peerEndpoint(state))
+	return fmt.Sprintf(
+		"curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sh -s -- --install-residential-peer --residential-endpoint '%s' --residential-public-key '%s'",
+		peerEndpoint(state),
+		state.PublicKey,
+	)
 }
