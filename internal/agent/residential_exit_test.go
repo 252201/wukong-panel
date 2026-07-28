@@ -54,10 +54,16 @@ func TestResidentialPeerScriptKeepsPeerPrivateKeyLocal(t *testing.T) {
 	if strings.Contains(script, privateKey) {
 		t.Fatal("A private key leaked into the B install script")
 	}
-	for _, want := range []string{"PRIVATE_KEY=\"$(wg genkey)\"", "B_PUBLIC_KEY=$PUBLIC_KEY", "Endpoint = a.example.com:51820", "PublicKey = " + publicKey, "MASQUERADE"} {
+	for _, want := range []string{"PRIVATE_KEY=\"$(wg genkey)\"", "B_PUBLIC_KEY=$PUBLIC_KEY", "Endpoint = a.example.com:51820", "PublicKey = " + publicKey, "MASQUERADE", "--remove-residential-peer"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("B install script is missing %q", want)
 		}
+	}
+	if !strings.Contains(script, "sysctl -w net.ipv4.ip_forward=1") {
+		t.Fatal("B install script does not apply the required IPv4 forwarding setting directly")
+	}
+	if strings.Contains(script, "sysctl --system") {
+		t.Fatal("B install script loads unrelated sysctl settings")
 	}
 	if !strings.Contains(script, `OUT_IF="\$(ip -4 route`) || !strings.Contains(script, `"\$OUT_IF"`) {
 		t.Fatal("B script would expand the NAT interface variables while writing its WireGuard config")
