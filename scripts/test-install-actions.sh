@@ -27,6 +27,7 @@ assert_action install true true
 [ "$(grep -c -- '--reset-password)' "$ROOT/install.sh")" -eq 1 ] || { echo "reset password flag missing" >&2; exit 1; }
 grep -q -- '--start|--start-panel) ACTION=start' "$ROOT/install.sh" || { echo "start panel flag missing" >&2; exit 1; }
 grep -q -- '--stop|--stop-panel) ACTION=stop' "$ROOT/install.sh" || { echo "stop panel flag missing" >&2; exit 1; }
+grep -q -- '--install-residential-peer) ACTION=residential-peer-install' "$ROOT/install.sh" || { echo "residential peer install flag missing" >&2; exit 1; }
 grep -q -- '--remove-residential-peer) ACTION=residential-peer-remove' "$ROOT/install.sh" || { echo "residential peer removal flag missing" >&2; exit 1; }
 grep -q '2|start) ACTION=start' "$ROOT/install.sh" || { echo "start panel menu action missing" >&2; exit 1; }
 grep -q '3|stop) ACTION=stop' "$ROOT/install.sh" || { echo "stop panel menu action missing" >&2; exit 1; }

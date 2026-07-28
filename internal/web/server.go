@@ -420,7 +420,7 @@ func (s *Server) singBoxMigration(w http.ResponseWriter, r *http.Request, sessio
 func (s *Server) residentialExit(w http.ResponseWriter, r *http.Request, session store.Session) {
 	agent, ok := s.agent.(residentialExitAgent)
 	if !ok {
-		writeError(w, 501, "住宅出口功能不可用")
+		writeError(w, 501, "落地出口功能不可用")
 		return
 	}
 	result, err := agent.ResidentialExit(r.Context())
@@ -437,7 +437,7 @@ func (s *Server) configureResidentialExit(w http.ResponseWriter, r *http.Request
 	}
 	agent, ok := s.agent.(residentialExitAgent)
 	if !ok {
-		writeError(w, 501, "住宅出口功能不可用")
+		writeError(w, 501, "落地出口功能不可用")
 		return
 	}
 	result, err := agent.ConfigureResidentialExit(r.Context(), request)
@@ -455,7 +455,7 @@ func (s *Server) removeResidentialExit(w http.ResponseWriter, r *http.Request, s
 	}
 	agent, ok := s.agent.(residentialExitAgent)
 	if !ok {
-		writeError(w, 501, "住宅出口功能不可用")
+		writeError(w, 501, "落地出口功能不可用")
 		return
 	}
 	if err := agent.RemoveResidentialExit(r.Context(), request); err != nil {

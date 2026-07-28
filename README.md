@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.7.5-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.7.6-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -13,7 +13,7 @@
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
 - 动态出站绑定：Agent 持久记录每个网卡的地址变化；固定绑定的 IPv4/IPv6 消失且同网卡能唯一识别对应新增地址时，先备份并校验 sing-box 配置，再切换绑定和重启服务。服务器同时存在多个静态或动态地址时不会按列表顺序误选；候选不唯一会保留原配置并写入审计，重启失败会自动恢复。
-- 双 VPS 住宅出口：A 机继续承载代理入站，指定节点通过系统级 WireGuard 和独立策略路由从 B 机住宅 IPv4 NAT 出站。面板不接收 B 机 SSH 凭据或私钥；隧道断线时带标记流量命中 `unreachable` 路由，不会回退并泄漏到 A 机公网。
+- 双 VPS 落地出口：A 机继续承载代理入站，指定节点通过系统级 WireGuard 和独立策略路由从 B 机落地 IPv4 NAT 出站。面板不接收 B 机 SSH 凭据或私钥；隧道断线时带标记流量命中 `unreachable` 路由，不会回退并泄漏到 A 机公网。
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
@@ -79,7 +79,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --uninstall-sing-box
 
-# 在 B 机安全停止隧道并移除住宅出口配置；保留 WireGuard 软件与系统转发状态
+# 在 B 机安全停止隧道并移除落地出口配置；保留 WireGuard 软件与系统转发状态
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- --remove-residential-peer
 
@@ -92,7 +92,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.7.5 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.7.6 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -132,20 +132,20 @@ AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书�
 
 首次部署时，面板会按固定 SHA-256 下载并安装官方 `cloudflared 2026.7.1`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备编队的启动、停止和重启按整组执行，删除单台设备只会从共享配置移除对应 inbound 并重启组进程，删除最后一台设备时才移除共享 sing-box 与 Tunnel 连接器。升级后的 Agent 会自动把旧版多进程设备编队校验并合并为单进程，失败时恢复旧服务。节点“检测”仍按单台设备的端口和凭据验证完整代理链路。
 
-### 双 VPS 住宅 IP 出口
+### 双 VPS 落地 IP 出口
 
-系统页的“住宅 IP 出口”用于把 A 机上的指定代理节点，经 WireGuard 转发到 B 机住宅 IPv4 出口：
+系统页的“落地 IP 出口”用于把 A 机上的指定代理节点，经 WireGuard 转发到 B 机落地 IPv4 出口：
 
 1. 在 A 机面板填写 A 的公网 IP/域名和 UDP 监听端口，先不填 B 公钥，生成 B 机安装脚本。
-2. 在 B 机以 root 运行脚本。脚本在 B 本地生成私钥、启用 IPv4 转发并配置 NAT，只输出可以公开的 `B_PUBLIC_KEY`。
+2. 复制面板生成的一行命令，在 B 机以 root 运行。统一安装器会静默补齐依赖，在 B 本地生成私钥、启用 IPv4 转发并配置 NAT；成功后主要输出可以公开的 `B_PUBLIC_KEY`。
 3. 把 `B_PUBLIC_KEY` 粘贴回 A 机面板并保存。Agent 写入 root-only WireGuard 配置并为 systemd/OpenRC 设置开机启动。
-4. 创建或编辑节点，把“出口位置”切换为“B 机住宅 IP”。住宅出口节点会被强制为纯 IPv4，取消本机地址绑定和动态地址跟随。
+4. 创建或编辑节点，把“出口位置”切换为“B 机落地 IP”。落地出口节点会被强制为纯 IPv4，取消本机地址绑定和动态地址跟随。
 
-A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/IPv6 `unreachable default`，WireGuard 在线时只用更低 metric 的隧道路由覆盖 IPv4；因此隧道停止、握手失效或 B 机离线时，住宅节点连接会失败而不是经 A 机默认路由直出。移除住宅出口前，面板会拒绝操作直到所有住宅节点都已切回本机直出。
+A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/IPv6 `unreachable default`，WireGuard 在线时只用更低 metric 的隧道路由覆盖 IPv4；因此隧道停止、握手失效或 B 机离线时，落地节点连接会失败而不是经 A 机默认路由直出。移除落地出口前，面板会拒绝操作直到所有落地节点都已切回本机直出。
 
 面板不保存 B 的 SSH 密码、SSH 私钥或 WireGuard 私钥。A 的 WireGuard 私钥只保存在 `WUKONG_SECRET_DIR` 和 `/etc/wireguard/wukong-exit.conf` 的 `0600` 文件中。需要在云防火墙放行 A 机所选 WireGuard UDP 端口；安装器本身不会修改云安全组。
 
-不再使用住宅出口时，先在 A 机把相关节点切回本机直出并从系统页移除住宅出口，再在 B 机运行 `install.sh --remove-residential-peer`。安装器只接受带 `10.77.0.2/30`、A 端 peer 地址和悟空 NAT 规则签名的 B 机配置，避免误删 A 机或其他 WireGuard 接口；清理后保留 `wireguard-tools`、`iproute2` 和当前全局 IPv4 转发状态。
+不再使用落地出口时，先在 A 机把相关节点切回本机直出并从系统页移除落地出口，再在 B 机运行 `install.sh --remove-residential-peer`。安装器只接受带 `10.77.0.2/30`、A 端 peer 地址和悟空 NAT 规则签名的 B 机配置，避免误删 A 机或其他 WireGuard 接口；清理后保留 `wireguard-tools`、`iproute2` 和当前全局 IPv4 转发状态。
 
 ### sing-box 安全更新与回退
 
@@ -171,7 +171,7 @@ flowchart LR
   W -->|"类型化请求 / Unix Socket"| A["wukong-agent\nroot"]
   A --> S["sing-box / systemd / OpenRC\n设备编队单进程多 inbound"]
   S -->|"fwmark 102 / table 166"| G["WireGuard wukong-exit\nfail-closed"]
-  G --> R["B 机住宅 IPv4 NAT"]
+  G --> R["B 机落地 IPv4 NAT"]
   C["Cloudflare Edge :443"] --> F["cloudflared\n独立节点服务"]
   F -->|"127.0.0.1 Origin"| S
   A --> F

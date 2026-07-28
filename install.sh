@@ -26,6 +26,8 @@ FORCE_INTERACTIVE=false
 PURGE=false
 PROMPT_TTY="/dev/tty"
 RECONFIGURE_ARGS=false
+RESIDENTIAL_ENDPOINT=""
+RESIDENTIAL_PUBLIC_KEY=""
 SINGBOX_TRANSACTION_ROOT="${WUKONG_SINGBOX_TRANSACTION_ROOT:-/var/lib/wukong-panel/backups/sing-box/transaction}"
 SINGBOX_BACKUP_ROOT="${WUKONG_SINGBOX_BACKUP_ROOT:-/var/lib/wukong-panel/backups/sing-box}"
 SINGBOX_TRANSACTION_ACTIVE=false
@@ -35,6 +37,16 @@ SINGBOX_RUNTIME_CONFIG_DIR=""
 info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[失败]\033[0m %s\n' "$*" >&2; exit 1; }
+run_quiet() {
+  quiet_log=$(mktemp)
+  if "$@" >"$quiet_log" 2>&1; then
+    rm -f "$quiet_log"
+    return 0
+  fi
+  cat "$quiet_log" >&2
+  rm -f "$quiet_log"
+  return 1
+}
 
 detect_prompt_tty() {
   detected="/dev/tty"
@@ -84,6 +96,120 @@ residential_peer_installed() {
     grep -Eq '^Address[[:space:]]*=[[:space:]]*10\.77\.0\.2/30[[:space:]]*$' "$peer_config" &&
     grep -Eq '^AllowedIPs[[:space:]]*=[[:space:]]*10\.77\.0\.1/32[[:space:]]*$' "$peer_config" &&
     grep -Fq -- '-s 10.77.0.0/30 -j MASQUERADE' "$peer_config"
+}
+
+install_residential_peer() {
+  [ -n "$RESIDENTIAL_ENDPOINT" ] || die "缺少 --residential-endpoint"
+  [ -n "$RESIDENTIAL_PUBLIC_KEY" ] || die "缺少 --residential-public-key"
+  printf '%s\n' "$RESIDENTIAL_ENDPOINT" |
+    grep -Eq '^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]+$' ||
+    die "A 机 WireGuard Endpoint 格式无效"
+  residential_port=${RESIDENTIAL_ENDPOINT##*:}
+  [ "$residential_port" -ge 1 ] 2>/dev/null &&
+    [ "$residential_port" -le 65535 ] 2>/dev/null ||
+    die "A 机 WireGuard Endpoint 端口必须是 1-65535"
+  printf '%s\n' "$RESIDENTIAL_PUBLIC_KEY" |
+    grep -Eq '^[A-Za-z0-9+/]{43}=$' ||
+    die "A 机 WireGuard 公钥格式无效"
+
+  peer_interface="wukong-exit"
+  peer_config="/etc/wireguard/$peer_interface.conf"
+  if [ -e "$peer_config" ] && ! residential_peer_installed; then
+    die "$peer_config 已存在但不是悟空生成的 B 机配置，已拒绝覆盖"
+  fi
+
+  dependencies_ready=true
+  for dependency_binary in wg wg-quick ip iptables; do
+    command -v "$dependency_binary" >/dev/null 2>&1 ||
+      dependencies_ready=false
+  done
+  if [ "$dependencies_ready" = true ]; then
+    info "B 机落地出口依赖已就绪"
+  else
+    info "静默安装 B 机落地出口依赖"
+    if command -v apk >/dev/null 2>&1; then
+      run_quiet apk add --no-cache -q wireguard-tools iproute2 iptables ||
+        die "依赖安装失败"
+    elif command -v apt-get >/dev/null 2>&1; then
+      run_quiet apt-get update -qq || die "软件源更新失败"
+      run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools iproute2 iptables ||
+        die "依赖安装失败"
+    elif command -v dnf >/dev/null 2>&1; then
+      run_quiet dnf install -y -q wireguard-tools iproute iptables ||
+        die "依赖安装失败"
+    else
+      die "不支持的包管理器，请手动安装 wireguard-tools、iproute2 与 iptables"
+    fi
+  fi
+  for dependency_binary in wg wg-quick ip iptables; do
+    command -v "$dependency_binary" >/dev/null 2>&1 ||
+      die "落地出口依赖安装不完整：缺少 $dependency_binary"
+  done
+
+  if residential_peer_installed; then
+    info "更新现有 B 机落地出口配置"
+    if using_systemd; then
+      systemctl stop "wg-quick@$peer_interface.service" >/dev/null 2>&1 || true
+    elif command -v rc-service >/dev/null 2>&1; then
+      rc-service "$peer_interface" stop >/dev/null 2>&1 || true
+    fi
+    ip link show "$peer_interface" >/dev/null 2>&1 &&
+      wg-quick down "$peer_interface" >/dev/null 2>&1 || true
+  elif ip link show "$peer_interface" >/dev/null 2>&1; then
+    die "接口 $peer_interface 已存在但没有可验证的悟空配置，已拒绝覆盖"
+  fi
+
+  info "写入并启动 WireGuard 配置"
+  umask 077
+  mkdir -p /etc/wireguard
+  PRIVATE_KEY=$(wg genkey)
+  PUBLIC_KEY=$(printf '%s' "$PRIVATE_KEY" | wg pubkey)
+  cat >"$peer_config" <<EOF
+[Interface]
+PrivateKey = $PRIVATE_KEY
+Address = 10.77.0.2/30
+Table = off
+PostUp = sysctl -w net.ipv4.ip_forward=1; OUT_IF="\$(ip -4 route show default | awk 'NR==1 {print \$5}')"; iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -o "\$OUT_IF" -s 10.77.0.0/30 -j MASQUERADE
+PostDown = OUT_IF="\$(ip -4 route show default | awk 'NR==1 {print \$5}')"; iptables -D FORWARD -i %i -j ACCEPT || true; iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true; iptables -t nat -D POSTROUTING -o "\$OUT_IF" -s 10.77.0.0/30 -j MASQUERADE || true
+
+[Peer]
+PublicKey = $RESIDENTIAL_PUBLIC_KEY
+Endpoint = $RESIDENTIAL_ENDPOINT
+AllowedIPs = 10.77.0.1/32
+PersistentKeepalive = 25
+EOF
+  printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/99-wukong-exit.conf
+  sysctl -w net.ipv4.ip_forward=1 >/dev/null
+
+  if using_systemd; then
+    run_quiet systemctl enable "wg-quick@$peer_interface.service" ||
+      die "无法启用 B 机落地出口服务"
+    run_quiet systemctl restart "wg-quick@$peer_interface.service" ||
+      die "无法启动 B 机落地出口服务"
+  elif command -v rc-update >/dev/null 2>&1; then
+    cat >"/etc/init.d/$peer_interface" <<'EOF'
+#!/sbin/openrc-run
+description="Wukong landing exit peer"
+depend() { need net; }
+start() { wg-quick up wukong-exit; }
+stop() { wg-quick down wukong-exit; }
+EOF
+    chmod 0755 "/etc/init.d/$peer_interface"
+    run_quiet rc-update add "$peer_interface" default ||
+      die "无法启用 B 机落地出口服务"
+    run_quiet rc-service "$peer_interface" restart ||
+      die "无法启动 B 机落地出口服务"
+  else
+    run_quiet wg-quick up "$peer_interface" ||
+      die "无法启动 B 机落地出口接口"
+    warn "未识别 systemd/OpenRC，接口已启动但未配置开机自启"
+  fi
+  wg show "$peer_interface" >/dev/null 2>&1 ||
+    die "B 机落地出口接口启动后未通过状态检查"
+
+  printf '\nB_PUBLIC_KEY=%s\n' "$PUBLIC_KEY"
+  printf '%s\n' "只把上面的 B_PUBLIC_KEY 粘贴回悟空面板；不要发送私钥。"
+  printf '%s\n' "移除命令：curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sh -s -- --remove-residential-peer"
 }
 
 resolve_auto_action() {
@@ -140,9 +266,9 @@ remove_residential_peer() {
   peer_interface="wukong-exit"
   peer_config="/etc/wireguard/$peer_interface.conf"
   residential_peer_installed ||
-    die "未检测到悟空生成的 B 机住宅出口配置，或配置签名不匹配；已拒绝删除"
+    die "未检测到悟空生成的 B 机落地出口配置，或配置签名不匹配；已拒绝删除"
 
-  info "停止并移除 B 机住宅出口配置"
+  info "停止并移除 B 机落地出口配置"
   if using_systemd; then
     systemctl disable --now "wg-quick@$peer_interface.service" >/dev/null 2>&1 || true
   else
@@ -185,7 +311,7 @@ remove_residential_peer() {
   if command -v ip >/dev/null 2>&1 && ip link show "$peer_interface" >/dev/null 2>&1; then
     die "B 机配置文件已移除，但接口 $peer_interface 仍然存在，请人工检查"
   fi
-  info "B 机住宅出口配置已移除；WireGuard 软件和当前 IPv4 转发状态保持不变"
+  info "B 机落地出口配置已移除；WireGuard 软件和当前 IPv4 转发状态保持不变"
 }
 
 download_panel_binary() {
@@ -572,7 +698,7 @@ ensure_residential_exit_dependencies() {
     return 0
   fi
 
-  info "安装住宅出口依赖（wireguard-tools / iproute2）"
+  info "安装落地出口依赖（wireguard-tools / iproute2）"
   case "$FAMILY" in
     apt)
       apt-get update -qq
@@ -588,7 +714,7 @@ ensure_residential_exit_dependencies() {
 
   for dependency_binary in wg wg-quick ip; do
     command -v "$dependency_binary" >/dev/null 2>&1 ||
-      die "住宅出口依赖安装不完整：缺少 $dependency_binary"
+      die "落地出口依赖安装不完整：缺少 $dependency_binary"
   done
 }
 
@@ -1125,7 +1251,7 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall 或 residential-peer-remove
+  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install 或 residential-peer-remove
   --update             等同于 --action update
   --start-panel        启动面板 Web 与 Agent（也可使用 --start）
   --stop-panel         关闭面板 Web 与 Agent（也可使用 --stop）
@@ -1133,7 +1259,10 @@ usage() {
   --update-sing-box    更新到悟空验证过的 sing-box 稳定版本
   --rollback-sing-box  回退到上一次保留的 sing-box 版本
   --uninstall-sing-box 备份后卸载 sing-box 二进制、JSON 配置和节点服务
-  --remove-residential-peer  安全停止并移除本机的 B 机住宅出口配置
+  --install-residential-peer  配置并启动本机的 B 机落地出口
+  --remove-residential-peer  安全停止并移除本机的 B 机落地出口配置
+  --residential-endpoint ENDPOINT  A 机 WireGuard 地址与端口
+  --residential-public-key KEY     A 机 WireGuard 公钥
   --sing-box-version VERSION  指定悟空支持的 sing-box 版本
   --uninstall          等同于 --action uninstall
   --purge              卸载时同时删除面板配置和数据
@@ -1151,7 +1280,7 @@ usage() {
 NAT/受限端口 VPS 示例：
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --port 你的可用TCP端口
 
-B 机住宅出口移除：
+B 机落地出口移除：
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --remove-residential-peer
 EOF
 }
@@ -1166,7 +1295,10 @@ while [ "$#" -gt 0 ]; do
     --update-sing-box) ACTION=singbox-update; HAS_CONFIG_ARGS=true; shift ;;
     --rollback-sing-box) ACTION=singbox-rollback; HAS_CONFIG_ARGS=true; shift ;;
     --uninstall-sing-box) ACTION=singbox-uninstall; HAS_CONFIG_ARGS=true; shift ;;
+    --install-residential-peer) ACTION=residential-peer-install; HAS_CONFIG_ARGS=true; shift ;;
     --remove-residential-peer) ACTION=residential-peer-remove; HAS_CONFIG_ARGS=true; shift ;;
+    --residential-endpoint) RESIDENTIAL_ENDPOINT="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --residential-public-key) RESIDENTIAL_PUBLIC_KEY="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --sing-box-version) ACTION=singbox-update; SINGBOX_VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --uninstall) ACTION=uninstall; HAS_CONFIG_ARGS=true; shift ;;
     --purge) ACTION=uninstall; PURGE=true; HAS_CONFIG_ARGS=true; shift ;;
@@ -1196,12 +1328,12 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机住宅出口配置" " 12) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机落地出口配置" " 12) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
       case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       if residential_peer_installed; then
-        printf '%s\n' "检测到本机 B 机住宅出口配置，请选择操作：" "  1) 安装悟空面板" "  2) 移除 B 机住宅出口配置" "  3) 取消" >"$PROMPT_TTY"
+        printf '%s\n' "检测到本机 B 机落地出口配置，请选择操作：" "  1) 安装悟空面板" "  2) 移除 B 机落地出口配置" "  3) 取消" >"$PROMPT_TTY"
         action_choice=$(prompt_value "选择" "1")
         case "$action_choice" in 1|install) ACTION=install ;; 2|residential-peer-remove) ACTION=residential-peer-remove ;; 3|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
       else
@@ -1218,11 +1350,16 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-remove) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall 或 residential-peer-remove" ;; esac
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install 或 residential-peer-remove" ;; esac
+
+if [ "$ACTION" = "residential-peer-install" ]; then
+  install_residential_peer
+  exit 0
+fi
 
 if [ "$ACTION" = "residential-peer-remove" ]; then
   if [ "$INTERACTIVE_SESSION" = true ]; then
-    confirm_peer_remove=$(prompt_value "确认停止隧道并移除本机 B 机住宅出口配置？(y/N)" "N")
+    confirm_peer_remove=$(prompt_value "确认停止隧道并移除本机 B 机落地出口配置？(y/N)" "N")
     case "$confirm_peer_remove" in Y|y|yes|YES|Yes) ;; *) info "已取消"; exit 0 ;; esac
   fi
   remove_residential_peer

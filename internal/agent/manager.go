@@ -65,6 +65,7 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileRuntimeVersion(ctx)
 	_ = m.ReconcileBindings(ctx)
+	_ = m.ReconcileResidentialExit(ctx)
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -75,6 +76,7 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 			_ = m.ReconcileDeviceGroups(ctx)
 			_ = m.ReconcileRuntimeVersion(ctx)
 			_ = m.ReconcileBindings(ctx)
+			_ = m.ReconcileResidentialExit(ctx)
 		}
 	}
 }
@@ -794,7 +796,7 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 		return model.Node{}, err
 	}
 	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
-		return model.Node{}, errors.New("住宅出口尚未完成配置")
+		return model.Node{}, errors.New("落地出口尚未完成配置")
 	}
 	return m.createPrepared(ctx, request, "", true)
 }
@@ -816,7 +818,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 			return nil, fmt.Errorf("device %d: %w", index+1, err)
 		}
 		if value.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
-			return nil, fmt.Errorf("device %d: 住宅出口尚未完成配置", index+1)
+			return nil, fmt.Errorf("device %d: 落地出口尚未完成配置", index+1)
 		}
 		if protocol == "" {
 			protocol = value.Protocol
@@ -1628,7 +1630,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		return err
 	}
 	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
-		return errors.New("住宅出口尚未完成配置")
+		return errors.New("落地出口尚未完成配置")
 	}
 	if request.ListenPort == 0 {
 		request.ListenPort, err = freeProtocolPort(node.Protocol)

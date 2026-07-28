@@ -3,9 +3,6 @@ package agent
 import (
 	"encoding/base64"
 	"encoding/json"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -54,26 +51,21 @@ func TestResidentialPeerScriptKeepsPeerPrivateKeyLocal(t *testing.T) {
 	if strings.Contains(script, privateKey) {
 		t.Fatal("A private key leaked into the B install script")
 	}
-	for _, want := range []string{"PRIVATE_KEY=\"$(wg genkey)\"", "B_PUBLIC_KEY=$PUBLIC_KEY", "Endpoint = a.example.com:51820", "PublicKey = " + publicKey, "MASQUERADE", "--remove-residential-peer"} {
+	for _, want := range []string{
+		"curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh",
+		"--install-residential-peer",
+		"--residential-endpoint 'a.example.com:51820'",
+		"--residential-public-key '" + publicKey + "'",
+	} {
 		if !strings.Contains(script, want) {
-			t.Fatalf("B install script is missing %q", want)
+			t.Fatalf("B install command is missing %q", want)
 		}
 	}
-	if !strings.Contains(script, "sysctl -w net.ipv4.ip_forward=1") {
-		t.Fatal("B install script does not apply the required IPv4 forwarding setting directly")
+	if strings.Contains(script, "\n") {
+		t.Fatalf("B install command is not a single line: %q", script)
 	}
-	if strings.Contains(script, "sysctl --system") {
-		t.Fatal("B install script loads unrelated sysctl settings")
-	}
-	if !strings.Contains(script, `OUT_IF="\$(ip -4 route`) || !strings.Contains(script, `"\$OUT_IF"`) {
-		t.Fatal("B script would expand the NAT interface variables while writing its WireGuard config")
-	}
-	path := filepath.Join(t.TempDir(), "install-peer.sh")
-	if err = os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if output, syntaxErr := exec.Command("sh", "-n", path).CombinedOutput(); syntaxErr != nil {
-		t.Fatalf("B install script has invalid shell syntax: %v\n%s", syntaxErr, output)
+	if strings.Contains(script, "PRIVATE_KEY") || strings.Contains(script, "MASQUERADE") {
+		t.Fatalf("B install command still embeds the implementation: %q", script)
 	}
 }
 
@@ -95,6 +87,39 @@ func TestResidentialGuardIsFailClosed(t *testing.T) {
 	})
 	if !strings.Contains(local, "Table = off") || !strings.Contains(local, "route replace default dev %i table 166 metric 100") {
 		t.Fatalf("local WireGuard config does not use the guarded policy table: %s", local)
+	}
+	if !strings.Contains(local, "sysctl -w net.ipv4.conf.%i.rp_filter=2") {
+		t.Fatalf("local WireGuard config does not allow marked asymmetric return traffic: %s", local)
+	}
+	if strings.Contains(local, "net.ipv4.conf.all.rp_filter") {
+		t.Fatalf("local WireGuard config weakens global reverse-path filtering: %s", local)
+	}
+}
+
+func TestResidentialRPFilterMigrationPreservesManualConfig(t *testing.T) {
+	legacy := `[Interface]
+PrivateKey = secret
+Address = 10.77.0.1/30
+MTU = 1310
+Table = off
+PostUp = ip -4 route replace default dev %i table 166 metric 100
+`
+	updated, changed, err := ensureResidentialRPFilterPostUp(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || !strings.Contains(updated, residentialRPFilter) {
+		t.Fatalf("legacy config was not migrated: %s", updated)
+	}
+	if !strings.Contains(updated, "MTU = 1310") {
+		t.Fatalf("manual MTU was not preserved: %s", updated)
+	}
+	if strings.Count(updated, residentialRPFilter) != 1 {
+		t.Fatalf("reverse-path filter command count is not one: %s", updated)
+	}
+	second, changedAgain, err := ensureResidentialRPFilterPostUp(updated)
+	if err != nil || changedAgain || second != updated {
+		t.Fatalf("migration is not idempotent: changed=%v err=%v", changedAgain, err)
 	}
 }
 

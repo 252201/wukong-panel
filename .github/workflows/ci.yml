@@ -48,6 +48,7 @@ jobs:
       - run: sh scripts/test-install-acme-status.sh
       - run: sh scripts/test-install-actions.sh
       - run: sh scripts/test-install-residential-dependencies.sh
+      - run: sh scripts/test-install-residential-peer-install.sh
       - run: sh scripts/test-install-residential-peer-remove.sh
       - run: sh scripts/test-singbox-lifecycle.sh
       - run: |
