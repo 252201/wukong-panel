@@ -48,6 +48,12 @@ type residentialExitAgent interface {
 	RemoveResidentialExit(context.Context, model.ResidentialExitDeleteRequest) error
 }
 
+type socksExitAgent interface {
+	SOCKSExit(context.Context) (model.SOCKSExit, error)
+	ConfigureSOCKSExit(context.Context, model.SOCKSExitRequest) (model.SOCKSExit, error)
+	RemoveSOCKSExit(context.Context, model.SOCKSExitDeleteRequest) error
+}
+
 type Server struct {
 	cfg           config.Config
 	store         *store.Store
@@ -86,6 +92,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/system/residential-exit", s.auth(s.residentialExit, false))
 	mux.HandleFunc("PUT /api/v1/system/residential-exit", s.auth(s.configureResidentialExit, true))
 	mux.HandleFunc("DELETE /api/v1/system/residential-exit", s.auth(s.removeResidentialExit, true))
+	mux.HandleFunc("GET /api/v1/system/socks-exit", s.auth(s.socksExit, false))
+	mux.HandleFunc("PUT /api/v1/system/socks-exit", s.auth(s.configureSOCKSExit, true))
+	mux.HandleFunc("DELETE /api/v1/system/socks-exit", s.auth(s.removeSOCKSExit, true))
 	mux.HandleFunc("POST /api/v1/imports/confirm", s.auth(s.confirmImport, true))
 	mux.HandleFunc("GET /api/v1/jobs", s.auth(s.jobs, false))
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.auth(s.job, false))
@@ -463,6 +472,54 @@ func (s *Server) removeResidentialExit(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	_ = s.store.Audit(session.Username, "residential_exit_remove", "system", "requested through web")
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+func (s *Server) socksExit(w http.ResponseWriter, r *http.Request, session store.Session) {
+	agent, ok := s.agent.(socksExitAgent)
+	if !ok {
+		writeError(w, 501, "SOCKS 出站功能不可用")
+		return
+	}
+	result, err := agent.SOCKSExit(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+func (s *Server) configureSOCKSExit(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request model.SOCKSExitRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	agent, ok := s.agent.(socksExitAgent)
+	if !ok {
+		writeError(w, 501, "SOCKS 出站功能不可用")
+		return
+	}
+	result, err := agent.ConfigureSOCKSExit(r.Context(), request)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	_ = s.store.Audit(session.Username, "socks_exit_configure", "system", "requested through web")
+	writeJSON(w, 200, result)
+}
+func (s *Server) removeSOCKSExit(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request model.SOCKSExitDeleteRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	agent, ok := s.agent.(socksExitAgent)
+	if !ok {
+		writeError(w, 501, "SOCKS 出站功能不可用")
+		return
+	}
+	if err := agent.RemoveSOCKSExit(r.Context(), request); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	_ = s.store.Audit(session.Username, "socks_exit_remove", "system", "requested through web")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) confirmImport(w http.ResponseWriter, r *http.Request, session store.Session) {

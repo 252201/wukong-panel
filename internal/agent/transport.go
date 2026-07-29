@@ -63,6 +63,9 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /residential-exit", s.authorize(s.residentialExit))
 	mux.HandleFunc("PUT /residential-exit", s.authorize(s.configureResidentialExit))
 	mux.HandleFunc("DELETE /residential-exit", s.authorize(s.removeResidentialExit))
+	mux.HandleFunc("GET /socks-exit", s.authorize(s.socksExit))
+	mux.HandleFunc("PUT /socks-exit", s.authorize(s.configureSOCKSExit))
+	mux.HandleFunc("DELETE /socks-exit", s.authorize(s.removeSOCKSExit))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -242,6 +245,37 @@ func (s *Server) removeResidentialExit(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
+func (s *Server) socksExit(w http.ResponseWriter, r *http.Request) {
+	result, err := s.manager.SOCKSExit(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+func (s *Server) configureSOCKSExit(w http.ResponseWriter, r *http.Request) {
+	var request model.SOCKSExitRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	result, err := s.manager.ConfigureSOCKSExit(r.Context(), request)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
+}
+func (s *Server) removeSOCKSExit(w http.ResponseWriter, r *http.Request) {
+	var request model.SOCKSExitDeleteRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	if err := s.manager.RemoveSOCKSExit(r.Context(), request.Confirm); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
 
 type Client struct {
 	http  *http.Client
@@ -352,6 +386,19 @@ func (c *Client) ConfigureResidentialExit(ctx context.Context, request model.Res
 }
 func (c *Client) RemoveResidentialExit(ctx context.Context, request model.ResidentialExitDeleteRequest) error {
 	return c.request(ctx, "DELETE", "/residential-exit", request, nil)
+}
+func (c *Client) SOCKSExit(ctx context.Context) (model.SOCKSExit, error) {
+	var result model.SOCKSExit
+	err := c.request(ctx, "GET", "/socks-exit", nil, &result)
+	return result, err
+}
+func (c *Client) ConfigureSOCKSExit(ctx context.Context, request model.SOCKSExitRequest) (model.SOCKSExit, error) {
+	var result model.SOCKSExit
+	err := c.request(ctx, "PUT", "/socks-exit", request, &result)
+	return result, err
+}
+func (c *Client) RemoveSOCKSExit(ctx context.Context, request model.SOCKSExitDeleteRequest) error {
+	return c.request(ctx, "DELETE", "/socks-exit", request, nil)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {

@@ -70,6 +70,15 @@ func (d directAgent) Share(ctx context.Context, id string) (model.Share, error) 
 func (d directAgent) MigrationPlan(ctx context.Context, target string) (singboxconfig.Plan, error) {
 	return d.manager.MigrationPlan(ctx, target)
 }
+func (d directAgent) SOCKSExit(ctx context.Context) (model.SOCKSExit, error) {
+	return d.manager.SOCKSExit(ctx)
+}
+func (d directAgent) ConfigureSOCKSExit(ctx context.Context, r model.SOCKSExitRequest) (model.SOCKSExit, error) {
+	return d.manager.ConfigureSOCKSExit(ctx, r)
+}
+func (d directAgent) RemoveSOCKSExit(ctx context.Context, r model.SOCKSExitDeleteRequest) error {
+	return d.manager.RemoveSOCKSExit(ctx, r.Confirm)
+}
 
 func main() {
 	cfg := config.Parse(version)

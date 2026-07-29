@@ -5,7 +5,7 @@ export interface NodeItem {
   name: string
   protocol: string
   mode: 'prefer_v6' | 'v4only' | 'v6only'
-  egress: 'direct' | 'residential'
+  egress: 'direct' | 'residential' | 'socks'
   listenPort: number
   server: string
   domain: string
@@ -108,7 +108,7 @@ export interface Candidate {
 }
 
 export interface BindAddress { address: string; interface: string }
-export interface NodeDeploymentDefaults { panelDomain: string; ipv4: BindAddress[]; ipv6: BindAddress[]; residentialExitReady: boolean }
+export interface NodeDeploymentDefaults { panelDomain: string; ipv4: BindAddress[]; ipv6: BindAddress[]; residentialExitReady: boolean; socksExitReady: boolean }
 
 export interface ResidentialExit {
   configured: boolean
@@ -125,6 +125,20 @@ export interface ResidentialExit {
   rxBytes?: number
   txBytes?: number
   installScript?: string
+}
+
+export interface SOCKSExit {
+  configured: boolean
+  server: string
+  port: number
+  version: '4' | '4a' | '5'
+  username?: string
+  hasPassword: boolean
+  network: 'both' | 'tcp'
+  expectedExitIp?: string
+  probeExitIp?: string
+  probeLatencyMs?: number
+  probeCheckedAt?: string
 }
 
 export interface Settings {
@@ -187,6 +201,9 @@ export const api = {
   residentialExit: () => request<ResidentialExit>('system/residential-exit'),
   configureResidentialExit: (data: {endpoint: string; listenPort: number; peerPublicKey?: string; expectedExitIp?: string}) => request<ResidentialExit>('system/residential-exit', { method: 'PUT', body: JSON.stringify(data) }),
   removeResidentialExit: (confirm: string) => request<{ok: boolean}>('system/residential-exit', { method: 'DELETE', body: JSON.stringify({ confirm }) }),
+  socksExit: () => request<SOCKSExit>('system/socks-exit'),
+  configureSOCKSExit: (data: {server: string; port: number; version: string; username?: string; password?: string; clearPassword?: boolean; network: string; expectedExitIp?: string}) => request<SOCKSExit>('system/socks-exit', { method: 'PUT', body: JSON.stringify(data) }),
+  removeSOCKSExit: (confirm: string) => request<{ok: boolean}>('system/socks-exit', { method: 'DELETE', body: JSON.stringify({ confirm }) }),
   nodes: () => request<NodeItem[]>('nodes'),
   nodeDeploymentDefaults: () => request<NodeDeploymentDefaults>('nodes/deployment-defaults'),
   createNode: (data: Record<string, unknown>) => request<{jobId: string}>('nodes', { method: 'POST', body: JSON.stringify(data) }),

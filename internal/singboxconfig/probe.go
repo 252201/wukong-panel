@@ -164,6 +164,40 @@ func executeProtocolProbe(ctx context.Context, binary, probePath string, probe [
 	return result
 }
 
+// ProbeOutbound verifies an outbound with sing-box itself and performs a real
+// HTTPS round trip. Callers are responsible for omitting secrets from errors
+// and logs; sing-box receives the generated configuration through a root-only
+// temporary file.
+func ProbeOutbound(ctx context.Context, binary, protocol string, outbound map[string]any, dns map[string]any) (ProbeResult, error) {
+	result := ProbeResult{Protocol: strings.ToLower(strings.TrimSpace(protocol))}
+	if result.Protocol == "" {
+		return result, errorsText("outbound protocol is required")
+	}
+	tempDir, err := os.MkdirTemp("", "wukong-outbound-probe-")
+	if err != nil {
+		return result, err
+	}
+	defer os.RemoveAll(tempDir)
+	root := map[string]any{
+		"log":       map[string]any{"level": "error"},
+		"outbounds": []any{outbound},
+		"route":     map[string]any{"final": stringValue(outbound["tag"])},
+	}
+	if dns != nil {
+		root["dns"] = dns
+	}
+	payload, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return result, err
+	}
+	result.Config = filepath.Join(tempDir, "probe.json")
+	result = executeProtocolProbe(ctx, binary, result.Config, payload, result)
+	if !result.OK {
+		return result, errorsText(result.Error)
+	}
+	return result, nil
+}
+
 func probeTargetName(value string) string {
 	parsed, err := url.Parse(value)
 	if err == nil && parsed.Hostname() != "" {

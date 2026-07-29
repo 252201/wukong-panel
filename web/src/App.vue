@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 
 type Page = 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -26,13 +26,17 @@ const residentialExit = ref<ResidentialExit | null>(null)
 const residentialForm = reactive({ endpoint: '', listenPort: 51820, peerPublicKey: '', expectedExitIp: '' })
 const residentialFormHydrated = ref(false)
 const residentialBusy = ref(false)
+const socksExit = ref<SOCKSExit | null>(null)
+const socksForm = reactive({ server: '', port: 1080, version: '5', username: '', password: '', clearPassword: false, network: 'both', expectedExitIp: '' })
+const socksFormHydrated = ref(false)
+const socksBusy = ref(false)
 const timelineRange = ref<'today' | 'billing'>('today')
 const activeTimelineBucket = ref<number | null>(null)
 const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
 const language = ref<'zh-CN' | 'en-US'>('zh-CN')
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | null>(null)
 const candidates = ref<Candidate[]>([])
 const selectedCandidates = ref<string[]>([])
 const candidateDeleteTarget = ref<Candidate | null>(null)
@@ -42,12 +46,13 @@ const shareURI = ref('')
 const shareQR = ref('')
 const deleteConfirm = ref('')
 const residentialRemoveConfirm = ref('')
+const socksRemoveConfirm = ref('')
 const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deviceMode = computed(() => modal.value === 'device-create')
 const isEditing = computed(() => modal.value === 'edit')
 const deviceSequence = ref(0)
 const deviceNodes = reactive<DeviceDraft[]>([])
-const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [], residentialExitReady: false })
+const deploymentDefaults = ref<NodeDeploymentDefaults>({ panelDomain: '', ipv4: [], ipv6: [], residentialExitReady: false, socksExitReady: false })
 const bindChoice = reactive({ ipv4: '', ipv6: '' })
 const defaultsLoading = ref(false)
 const formHydrating = ref(false)
@@ -111,6 +116,12 @@ const timelineTooltipLeft = computed(() => {
 })
 const activeJobs = computed(() => jobs.value.filter(job => job.status === 'running' || job.status === 'queued').length)
 const residentialNodesInUse = computed(() => nodes.value.filter(node => node.egress === 'residential'))
+const socksNodesInUse = computed(() => nodes.value.filter(node => node.egress === 'socks'))
+function outboundLabel(node: NodeItem) {
+  if (node.egress === 'residential') return '落地出口'
+  if (node.egress === 'socks') return 'SOCKS 出站'
+  return modeLabel(node.mode)
+}
 const protocolCatalog = {
   hysteria2: { badge: 'HY2', label: 'Hysteria2', transport: 'UDP', domainLabel: 'TLS 域名', note: 'QUIC 高速节点，适合弱网与高延迟链路。' },
   vless: { badge: 'VLESS', label: 'VLESS + REALITY', transport: 'TCP', domainLabel: 'REALITY 伪装域名', note: 'TCP 备用线路；域名必须是本机可访问的真实 TLS 站点。' },
@@ -202,12 +213,21 @@ async function changePassword() {
 }
 async function logout() { try { await api.logout() } finally { authenticated.value = false; overview.value = null } }
 async function refreshAll() {
-  const [overviewData, nodeData, jobData, settingData, endpointData, timelineData, exitData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline(), api.residentialExit().catch(() => null)])
+  const [overviewData, nodeData, jobData, settingData, endpointData, timelineData, exitData, socksData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline(), api.residentialExit().catch(() => null), api.socksExit().catch(() => null)])
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; settings.value = settingData; endpoints.value = endpointData; timeline.value = timelineData; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
   residentialExit.value = exitData
   if (exitData && !residentialFormHydrated.value) {
     Object.assign(residentialForm, { endpoint: exitData.endpoint || '', listenPort: exitData.listenPort || 51820, peerPublicKey: exitData.peerPublicKey || '', expectedExitIp: exitData.expectedExitIp || '' })
     residentialFormHydrated.value = true
+  }
+  socksExit.value = socksData
+  if (socksData && !socksFormHydrated.value) {
+    Object.assign(socksForm, {
+      server: socksData.server || '', port: socksData.port || 1080, version: socksData.version || '5',
+      username: socksData.username || '', password: '', clearPassword: false, network: socksData.network || 'both',
+      expectedExitIp: socksData.expectedExitIp || '',
+    })
+    socksFormHydrated.value = true
   }
 }
 async function showJobLog() {
@@ -274,10 +294,19 @@ function syncBindingsToMode() {
 }
 watch(() => createForm.mode, syncBindingsToMode)
 watch(() => createForm.egress, egress => {
-  if (egress !== 'residential') return
+  if (egress !== 'residential' && egress !== 'socks') return
   createForm.mode = 'v4only'
   createForm.ipv4Bind = ''; createForm.ipv6Bind = ''; createForm.autoBind = false
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
+})
+watch(() => socksForm.version, version => {
+  if (version === '5') {
+    socksForm.clearPassword = false
+    return
+  }
+  socksForm.network = 'tcp'
+  socksForm.password = ''
+  socksForm.clearPassword = true
 })
 watch(() => createForm.protocol, (protocol, previous) => {
   if (formHydrating.value) return
@@ -298,13 +327,13 @@ async function openNodeForm(kind: 'create' | 'device-create') {
   modal.value = kind; defaultsLoading.value = true
   try {
     const defaults = await api.nodeDeploymentDefaults()
-    deploymentDefaults.value = { panelDomain: defaults.panelDomain || '', ipv4: defaults.ipv4 || [], ipv6: defaults.ipv6 || [], residentialExitReady: !!defaults.residentialExitReady }
+    deploymentDefaults.value = { panelDomain: defaults.panelDomain || '', ipv4: defaults.ipv4 || [], ipv6: defaults.ipv6 || [], residentialExitReady: !!defaults.residentialExitReady, socksExitReady: !!defaults.socksExitReady }
     createForm.server = deploymentDefaults.value.panelDomain
     createForm.domain = deploymentDefaults.value.panelDomain
     if (deploymentDefaults.value.ipv4.length === 1) { bindChoice.ipv4 = deploymentDefaults.value.ipv4[0].address; applyBindChoice('ipv4') }
     if (deploymentDefaults.value.ipv6.length === 1) { bindChoice.ipv6 = deploymentDefaults.value.ipv6[0].address; applyBindChoice('ipv6') }
   } catch (error) {
-    deploymentDefaults.value = { panelDomain: '', ipv4: [], ipv6: [], residentialExitReady: false }
+    deploymentDefaults.value = { panelDomain: '', ipv4: [], ipv6: [], residentialExitReady: false, socksExitReady: false }
     notify(error instanceof Error ? `无法读取部署默认值：${error.message}` : '无法读取部署默认值，请手动填写')
   } finally { defaultsLoading.value = false }
 }
@@ -318,7 +347,7 @@ async function openEdit(node: NodeItem) {
   formHydrating.value = true
   try {
     const [defaults, details] = await Promise.all([api.nodeDeploymentDefaults(), api.nodeEditDetails(node.id)])
-    deploymentDefaults.value = { panelDomain: defaults.panelDomain || '', ipv4: defaults.ipv4 || [], ipv6: defaults.ipv6 || [], residentialExitReady: !!defaults.residentialExitReady }
+    deploymentDefaults.value = { panelDomain: defaults.panelDomain || '', ipv4: defaults.ipv4 || [], ipv6: defaults.ipv6 || [], residentialExitReady: !!defaults.residentialExitReady, socksExitReady: !!defaults.socksExitReady }
     const current = details.node
     Object.assign(createForm, {
       protocol: current.protocol, name: current.name, mode: current.mode, egress: current.egress || 'direct', listenPort: current.listenPort,
@@ -458,6 +487,45 @@ async function removeResidentialExit() {
   } catch (error) { notify(error instanceof Error ? error.message : '落地出口移除失败') }
   finally { residentialBusy.value = false }
 }
+async function configureSOCKSExit() {
+  socksBusy.value = true
+  try {
+    const result = await api.configureSOCKSExit({
+      server: socksForm.server.trim(),
+      port: socksForm.port,
+      version: socksForm.version,
+      username: socksForm.username.trim(),
+      password: socksForm.password,
+      clearPassword: socksForm.clearPassword,
+      network: socksForm.network,
+      expectedExitIp: socksForm.expectedExitIp.trim(),
+    })
+    socksExit.value = result
+    socksForm.password = ''
+    socksForm.clearPassword = false
+    deploymentDefaults.value.socksExitReady = result.configured
+    notify(`SOCKS 出站预检通过${result.probeExitIp ? ` · 出口 ${result.probeExitIp}` : ''}`)
+  } catch (error) { notify(error instanceof Error ? error.message : 'SOCKS 出站配置失败') }
+  finally { socksBusy.value = false }
+}
+function stageSOCKSExitRemoval() {
+  socksRemoveConfirm.value = ''
+  modal.value = 'socks-remove'
+}
+async function removeSOCKSExit() {
+  if (socksRemoveConfirm.value !== 'REMOVE' || socksNodesInUse.value.length) return
+  socksBusy.value = true
+  try {
+    await api.removeSOCKSExit('REMOVE')
+    socksExit.value = await api.socksExit()
+    Object.assign(socksForm, { server: '', port: 1080, version: '5', username: '', password: '', clearPassword: false, network: 'both', expectedExitIp: '' })
+    deploymentDefaults.value.socksExitReady = false
+    modal.value = null
+    socksRemoveConfirm.value = ''
+    notify('SOCKS 出站已移除')
+  } catch (error) { notify(error instanceof Error ? error.message : 'SOCKS 出站移除失败') }
+  finally { socksBusy.value = false }
+}
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
@@ -534,7 +602,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
             <div v-if="node.protocol === 'vless-ws-tunnel' && node.preferredServer" class="preferred-route"><span><small>优选接入</small><code>{{ node.preferredServer }}</code></span><i>→</i><span><small>SNI · WS HOST</small><code>{{ node.server }}</code></span></div>
             <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-origin"><span><small>Cloudflare Service</small><code>{{ tunnelOrigin(node) }}</code></span><button type="button" title="复制 Cloudflare Service URL" @click="copy(tunnelOrigin(node))">复制</button></div>
-            <div class="node-specs"><span><small>出站策略</small><b>{{ node.egress === 'residential' ? '落地出口' : modeLabel(node.mode) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
+            <div class="node-specs"><span><small>出站策略</small><b>{{ outboundLabel(node) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ {{ node.ownership === 'managed' ? (node.protocol === 'vless-ws-tunnel' ? '设备编队 · 独立入站，共享 sing-box 与 Tunnel 连接器' : '设备编队 · 独立入站，共享一个 sing-box 进程') : '与同配置内其他端点共享生命周期' }}</p>
             <div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div>
             <div class="node-actions"><button @click="revealShare(node)">分享</button><button class="probe-button" :disabled="node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div>
@@ -581,8 +649,23 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <label>预期落地 IPv4（可选）<input v-model="residentialForm.expectedExitIp" placeholder="用于人工核对出口"></label>
           </div>
           <div class="residential-actions"><button class="primary" :disabled="residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="residentialBusy" @click="stageResidentialExitRemoval">移除落地出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
-          <div v-if="residentialExit?.installScript" class="residential-script"><div><b>B 机一键安装命令</b><button @click="copy(residentialExit?.installScript || '')">复制脚本</button></div><textarea :value="residentialExit.installScript" readonly spellcheck="false"></textarea><p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方。A/B 私钥不会跨机传输。</p></div>
+          <div v-if="residentialExit?.installScript" class="residential-script"><div><b>B 机一键安装命令</b><button @click="copy(residentialExit?.installScript || '')">复制脚本</button></div><textarea :value="residentialExit.installScript" readonly spellcheck="false" wrap="off"></textarea><p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方。A/B 私钥不会跨机传输。</p></div>
           <p class="help-text">选用落地出口的节点被强制为 IPv4，并通过 fwmark {{ 102 }} 进入独立路由表；隧道中断时策略表保留 unreachable 默认路由，不会泄漏到 A 机公网。</p>
+        </section>
+        <section class="panel-card residential-panel socks-panel">
+          <div class="card-head"><div><span class="section-mark">袜</span><div><h3>自定义 SOCKS 出站</h3><p>节点流量经上游 SOCKS 代理 · 密码加密保存 · 失败不回退直连</p></div></div><span class="live-badge" :class="{ muted: !socksExit?.configured }"><i></i>{{ socksExit?.configured ? '预检通过' : '未配置' }}</span></div>
+          <div class="socks-grid">
+            <label>SOCKS 服务器<input v-model="socksForm.server" placeholder="proxy.example.com"></label>
+            <label>端口<input v-model.number="socksForm.port" type="number" min="1" max="65535"></label>
+            <label>版本<select v-model="socksForm.version"><option value="5">SOCKS5</option><option value="4a">SOCKS4a</option><option value="4">SOCKS4</option></select></label>
+            <label>承载网络<select v-model="socksForm.network" :disabled="socksForm.version !== '5'"><option value="both">TCP + UDP</option><option value="tcp">仅 TCP</option></select><small v-if="socksForm.version !== '5'">SOCKS4/4a 仅支持 TCP</small></label>
+            <label>用户名（可选）<input v-model="socksForm.username" autocomplete="off"></label>
+            <label v-if="socksForm.version === '5'">密码（可选）<input v-model="socksForm.password" type="password" autocomplete="new-password" :placeholder="socksExit?.hasPassword ? '已保存；留空保持不变' : '无认证可留空'"></label>
+            <label>预期出口 IP（可选）<input v-model="socksForm.expectedExitIp" placeholder="用于真实代理核对"></label>
+            <label v-if="socksExit?.hasPassword && socksForm.version === '5'" class="toggle-row socks-clear-password"><span><b>清除已保存密码</b><small>保存后改为无密码认证</small></span><span class="switch"><input v-model="socksForm.clearPassword" type="checkbox"><i></i></span></label>
+          </div>
+          <div class="residential-actions"><button class="primary" :disabled="socksBusy || !socksForm.server" @click="configureSOCKSExit">{{ socksBusy ? '正在真实代理预检…' : socksExit?.configured ? '重新预检并保存' : '预检并保存' }}</button><button v-if="socksExit?.configured" class="danger-button" :disabled="socksBusy" @click="stageSOCKSExitRemoval">移除 SOCKS 出站</button><span v-if="socksExit?.probeCheckedAt">出口 {{ socksExit.probeExitIp || '已连通' }} · {{ socksExit.probeLatencyMs }} ms · {{ new Date(socksExit.probeCheckedAt).toLocaleString(language) }}</span></div>
+          <p class="help-text">保存前会通过上游 SOCKS 完成真实 HTTPS 闭环。配置正被节点使用时禁止修改或删除，请先将引用节点切回其他出口；SOCKS4/4a 只承载 TCP，SOCKS5 的 UDP 流量要求上游支持 UDP ASSOCIATE。</p>
         </section>
         <section class="panel-card migration-panel">
           <div class="card-head"><div><span class="section-mark">迁</span><div><h3>sing-box 升级预检</h3><p>目标稳定版 1.13.14 · 只读扫描，不修改配置</p></div></div><button class="secondary" :disabled="migrationLoading" @click="scanSingBoxMigration">{{ migrationLoading ? '扫描中…' : '扫描兼容性' }}</button></div>
@@ -615,10 +698,10 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
       <div class="form-grid">
         <div v-if="deviceMode" class="span-2 device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据 · 一个 sing-box 进程</small></div></div>
-        <label class="span-2">出口位置<select v-model="createForm.egress"><option value="direct">A 机本地直出</option><option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机落地 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option></select><small v-if="createForm.egress === 'residential'">WireGuard 断线时拒绝联网，不回退到 A 机</small></label>
+        <label class="span-2">出口位置<select v-model="createForm.egress"><option value="direct">A 机本地直出</option><option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机落地 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option><option value="socks" :disabled="!deploymentDefaults.socksExitReady">自定义 SOCKS{{ deploymentDefaults.socksExitReady ? '' : '（请先配置）' }}</option></select><small v-if="createForm.egress === 'residential'">WireGuard 断线时拒绝联网，不回退到 A 机</small><small v-else-if="createForm.egress === 'socks'">全部流量只经 SOCKS 出站；代理不可用时连接失败，不回退直连</small></label>
         <label v-if="!deviceMode">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
         <label class="protocol-choice">节点协议<select v-model="createForm.protocol" :disabled="isEditing"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option><option value="anytls">AnyTLS · TCP / TLS</option></select><small>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</small></label>
-        <label>出站策略<select v-model="createForm.mode" :disabled="createForm.egress === 'residential'"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
+        <label>出站策略<input v-if="createForm.egress === 'socks'" value="由 SOCKS 代理接管" disabled><select v-else v-model="createForm.mode" :disabled="createForm.egress === 'residential'"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
         <label v-if="!deviceMode">{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
         <label v-if="!isTunnelProtocol || !deviceMode">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
         <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label>
@@ -628,17 +711,18 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <div v-if="isTunnelProtocol && !isEditing" class="span-2 tunnel-guide"><span>隧</span><div><b>{{ deviceMode ? '一个 Tunnel，多条设备路由' : 'Cloudflare 侧需要做两步' }}</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li v-if="deviceMode">为下方每台设备添加一条 Published application，分别把独立主机名路由到部署后卡片显示的 <code>http://127.0.0.1:端口</code>。</li><li v-else>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>VPS 无需开放 Origin 端口；设备组共享一个 sing-box 进程和一个 cloudflared 服务。</p></div></div>
         <div v-if="isTunnelProtocol && isEditing" class="span-2 edit-impact-note"><b>Cloudflare 路由需要同步</b><p>若修改公开主机名或 Origin 端口，请同时更新 Zero Trust 的 Published application；现有 Tunnel Token 与连接器保持不变。</p></div>
         <section v-if="deviceMode" class="span-2 device-fleet"><div class="device-fleet-head"><div><span>DEVICE FLEET</span><b>设备清单</b><small>2–20 台；端口填 0 自动分配</small></div><button type="button" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button></div><article v-for="(device, index) in deviceNodes" :key="device.key" class="device-draft"><header><span>{{ String(index + 1).padStart(2, '0') }}</span><b>{{ device.name || `设备 ${index + 1}` }}</b><button type="button" :disabled="deviceNodes.length <= 2" title="移除设备" @click="removeDevice(index)">×</button></header><div class="device-draft-grid"><label>设备名称<input v-model="device.name" maxlength="80" placeholder="例如：iPhone" required></label><label>{{ isTunnelProtocol ? '本地 Origin 端口' : '监听端口' }}<input v-model.number="device.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label v-if="isTunnelProtocol">Cloudflare 公开主机名<input v-model="device.server" placeholder="iphone.example.com" required><small>Published application 使用此独立主机名</small></label><label v-if="isTunnelProtocol"><span class="device-field-title">优选连接域名 / IP <em>可选</em></span><input v-model="device.preferredServer" placeholder="cf-best.example.com"></label><label v-if="isTunnelProtocol" class="span-2"><span class="device-field-title">WebSocket 路径 <em>可选</em></span><input v-model="device.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128"></label></div></article></section>
-        <label :class="{ 'disabled-field': createForm.mode === 'v6only' || createForm.egress === 'residential' }">IPv4 出站绑定<input v-if="createForm.egress === 'residential'" value="落地出口使用策略路由" disabled><input v-else-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length && createForm.egress !== 'residential'">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>
-        <label :class="{ 'disabled-field': createForm.mode === 'v4only' || createForm.egress === 'residential' }">IPv6 出站绑定<input v-if="createForm.mode === 'v4only' || createForm.egress === 'residential'" value="当前出口不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label>
-        <label v-if="createForm.egress !== 'residential'" class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label>
+        <label :class="{ 'disabled-field': createForm.mode === 'v6only' || createForm.egress !== 'direct' }">IPv4 出站绑定<input v-if="createForm.egress === 'residential'" value="落地出口使用策略路由" disabled><input v-else-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机地址绑定" disabled><input v-else-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>
+        <label :class="{ 'disabled-field': createForm.mode === 'v4only' || createForm.egress !== 'direct' }">IPv6 出站绑定<input v-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机地址绑定" disabled><input v-else-if="createForm.mode === 'v4only' || createForm.egress === 'residential'" value="当前出口不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label>
+        <label v-if="createForm.egress === 'direct'" class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label>
       </div>
       <div v-if="isEditing && selectedNode?.sharedGroup" class="edit-impact-note shared"><b>共享进程影响范围</b><p>节点名称、端口与入站参数只修改当前设备；出站策略、IPv4/IPv6 绑定和强制 IPv6 域名会同步应用到整个设备编队。</p></div>
-      <label v-if="createForm.egress !== 'residential'" class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label>
+      <label v-if="createForm.egress === 'direct'" class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label>
       <div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}</button></div>
     </form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。彻底删除会先建立校验快照。</p><div class="candidate-list"><div v-for="item in candidates" :key="item.fingerprint" class="candidate-row" :class="{ deleting: candidateDeleteTarget?.fingerprint === item.fingerprint }"><label class="candidate-select"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><button type="button" class="candidate-purge" title="从服务器彻底删除此候选节点" @click="stageCandidateDelete(item)">彻底删除</button></div><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><section v-if="candidateDeleteTarget" class="candidate-delete-confirm" role="alert"><header><span>险</span><div><b>彻底删除 {{ candidateDeleteTarget.name }}？</b><small>{{ candidateDeleteTarget.configPath }}</small></div></header><p v-if="candidateDeleteTarget.sharedGroup">系统会先建立 SHA-256 快照，只从共享配置移除端口 {{ candidateDeleteTarget.listenPort }} 的 inbound；其他节点与共享服务会保留。配置校验或重启失败将自动恢复。</p><p v-else>系统会先建立 SHA-256 快照，再停止并删除 {{ candidateDeleteTarget.serviceName === 'unknown' ? '对应配置文件' : '对应服务与配置文件' }}。此操作不可从面板撤销。</p><label>输入完整节点名称确认<input v-model="candidateDeleteConfirm" autocomplete="off" :placeholder="candidateDeleteTarget.name"></label><div><button type="button" class="secondary" @click="cancelCandidateDelete">保留节点</button><button type="button" class="danger-button" :disabled="busy || candidateDeleteConfirm !== candidateDeleteTarget.name" @click="deleteCandidate">{{ busy ? '正在创建任务…' : '确认彻底删除' }}</button></div></section><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
+    <form v-else-if="modal === 'socks-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeSOCKSExit"><span class="modal-seal red">撤</span><p class="eyebrow">SOCKS EGRESS REMOVAL</p><h2>移除 SOCKS 出站？</h2><p>这会删除 Root Agent 加密保存的 SOCKS 服务器与认证信息，不会修改上游代理。</p><p v-if="socksNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用 SOCKS 出站：{{ socksNodesInUse.map(node => node.name).join('、') }}。请先将它们切回其他出口。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="socksRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="socksBusy" @click="modal = null">保留 SOCKS 出站</button><button class="danger-button" :disabled="socksBusy || socksRemoveConfirm !== 'REMOVE' || socksNodesInUse.length > 0">{{ socksBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></transition>
