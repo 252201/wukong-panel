@@ -54,23 +54,24 @@ type NodeCandidate struct {
 }
 
 type NodeCreateRequest struct {
-	Protocol        string   `json:"protocol"`
-	Name            string   `json:"name"`
-	Mode            string   `json:"mode"`
-	Egress          string   `json:"egress"`
-	ListenPort      int      `json:"listenPort"`
-	Server          string   `json:"server"`
-	Domain          string   `json:"domain"`
-	PreferredServer string   `json:"preferredServer,omitempty"`
-	IPv4Bind        string   `json:"ipv4Bind"`
-	IPv6Bind        string   `json:"ipv6Bind"`
-	AutoBind        bool     `json:"autoBind"`
-	V6OnlyDomains   []string `json:"v6OnlyDomains"`
-	CertificatePath string   `json:"certificatePath"`
-	KeyPath         string   `json:"keyPath"`
-	Password        string   `json:"password,omitempty"`
-	WebSocketPath   string   `json:"webSocketPath,omitempty"`
-	TunnelToken     string   `json:"tunnelToken,omitempty"`
+	Protocol        string         `json:"protocol"`
+	Name            string         `json:"name"`
+	Mode            string         `json:"mode"`
+	Egress          string         `json:"egress"`
+	ListenPort      int            `json:"listenPort"`
+	Server          string         `json:"server"`
+	Domain          string         `json:"domain"`
+	PreferredServer string         `json:"preferredServer,omitempty"`
+	IPv4Bind        string         `json:"ipv4Bind"`
+	IPv6Bind        string         `json:"ipv6Bind"`
+	AutoBind        bool           `json:"autoBind"`
+	V6OnlyDomains   []string       `json:"v6OnlyDomains"`
+	CertificatePath string         `json:"certificatePath"`
+	KeyPath         string         `json:"keyPath"`
+	Password        string         `json:"password,omitempty"`
+	WebSocketPath   string         `json:"webSocketPath,omitempty"`
+	TunnelToken     string         `json:"tunnelToken,omitempty"`
+	SOCKSOutbound   *SOCKSOutbound `json:"-"`
 }
 
 type NodeBatchCreateRequest struct {
@@ -87,6 +88,7 @@ type NodeDeploymentDefaults struct {
 	IPv4                 []BindAddress `json:"ipv4"`
 	IPv6                 []BindAddress `json:"ipv6"`
 	ResidentialExitReady bool          `json:"residentialExitReady"`
+	SOCKSExitReady       bool          `json:"socksExitReady"`
 }
 
 type NodeActionRequest struct {
@@ -149,6 +151,44 @@ type ResidentialExitRequest struct {
 }
 
 type ResidentialExitDeleteRequest struct {
+	Confirm string `json:"confirm"`
+}
+
+type SOCKSOutbound struct {
+	Server   string `json:"server"`
+	Port     int    `json:"port"`
+	Version  string `json:"version"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"-"`
+	Network  string `json:"network"`
+}
+
+type SOCKSExit struct {
+	Configured     bool   `json:"configured"`
+	Server         string `json:"server"`
+	Port           int    `json:"port"`
+	Version        string `json:"version"`
+	Username       string `json:"username,omitempty"`
+	HasPassword    bool   `json:"hasPassword"`
+	Network        string `json:"network"`
+	ExpectedExitIP string `json:"expectedExitIp,omitempty"`
+	ProbeExitIP    string `json:"probeExitIp,omitempty"`
+	ProbeLatencyMS int64  `json:"probeLatencyMs,omitempty"`
+	ProbeCheckedAt string `json:"probeCheckedAt,omitempty"`
+}
+
+type SOCKSExitRequest struct {
+	Server         string `json:"server"`
+	Port           int    `json:"port"`
+	Version        string `json:"version"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	ClearPassword  bool   `json:"clearPassword,omitempty"`
+	Network        string `json:"network"`
+	ExpectedExitIP string `json:"expectedExitIp,omitempty"`
+}
+
+type SOCKSExitDeleteRequest struct {
 	Confirm string `json:"confirm"`
 }
 

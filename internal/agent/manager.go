@@ -260,7 +260,13 @@ func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
 
 func (m *Manager) DeploymentDefaults(context.Context) (model.NodeDeploymentDefaults, error) {
 	v4, v6 := bindAddressOptions()
-	return model.NodeDeploymentDefaults{PanelDomain: strings.TrimSpace(m.cfg.PanelDomain), IPv4: v4, IPv6: v6, ResidentialExitReady: m.residentialExitConfigured()}, nil
+	return model.NodeDeploymentDefaults{
+		PanelDomain:          strings.TrimSpace(m.cfg.PanelDomain),
+		IPv4:                 v4,
+		IPv6:                 v6,
+		ResidentialExitReady: m.residentialExitConfigured(),
+		SOCKSExitReady:       m.socksExitConfigured(),
+	}, nil
 }
 
 func (m *Manager) ReconcileBindings(ctx context.Context) error {
@@ -798,6 +804,10 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
 		return model.Node{}, errors.New("落地出口尚未完成配置")
 	}
+	request, err = m.attachSOCKSOutbound(request)
+	if err != nil {
+		return model.Node{}, err
+	}
 	return m.createPrepared(ctx, request, "", true)
 }
 
@@ -819,6 +829,10 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 		}
 		if value.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
 			return nil, fmt.Errorf("device %d: 落地出口尚未完成配置", index+1)
+		}
+		value, err = m.attachSOCKSOutbound(value)
+		if err != nil {
+			return nil, fmt.Errorf("device %d: %w", index+1, err)
 		}
 		if protocol == "" {
 			protocol = value.Protocol
@@ -1199,6 +1213,14 @@ func normalizeModeBindings(request model.NodeCreateRequest) model.NodeCreateRequ
 		request.V6OnlyDomains = nil
 		return request
 	}
+	if request.Egress == "socks" {
+		request.Mode = "v4only"
+		request.IPv4Bind = ""
+		request.IPv6Bind = ""
+		request.AutoBind = false
+		request.V6OnlyDomains = nil
+		return request
+	}
 	switch request.Mode {
 	case "v4only":
 		request.IPv6Bind = ""
@@ -1537,6 +1559,15 @@ func (m *Manager) probeNode(ctx context.Context, node model.Node) error {
 			return fail(result, fmt.Errorf("residential exit IP mismatch: got %s, want %s", result.ExitIP, state.ExpectedExitIP))
 		}
 	}
+	if node.Egress == "socks" {
+		state, stateErr := m.loadSOCKSExit()
+		if stateErr != nil {
+			return fail(result, fmt.Errorf("read SOCKS exit state: %w", stateErr))
+		}
+		if state.ExpectedExitIP != "" && result.ExitIP != state.ExpectedExitIP {
+			return fail(result, fmt.Errorf("SOCKS exit IP mismatch: got %s, want %s", result.ExitIP, state.ExpectedExitIP))
+		}
+	}
 	if err = m.store.SetNodeProbeResult(node.ID, "success", result.LatencyMS, result.ExitIP, result.Target, "", time.Now()); err != nil {
 		return err
 	}
@@ -1632,6 +1663,10 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 	if request.Egress == "residential" && !m.cfg.Demo && !m.residentialExitConfigured() {
 		return errors.New("落地出口尚未完成配置")
 	}
+	request, err = m.attachSOCKSOutbound(request)
+	if err != nil {
+		return err
+	}
 	if request.ListenPort == 0 {
 		request.ListenPort, err = freeProtocolPort(node.Protocol)
 		if err != nil {
@@ -1711,6 +1746,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		runtimeRequest.IPv4Bind = request.IPv4Bind
 		runtimeRequest.IPv6Bind = request.IPv6Bind
 		runtimeRequest.AutoBind = request.AutoBind
+		runtimeRequest.SOCKSOutbound = request.SOCKSOutbound
 		if stored.ID == node.ID {
 			runtimeRequest = request
 			storedCredentials.WebSocketPath = request.WebSocketPath
@@ -1998,8 +2034,19 @@ func buildConfigWithInbounds(request model.NodeCreateRequest, inbounds []any, ve
 	if request.Mode == "v6only" {
 		strategy = "ipv6_only"
 	}
-	outbounds = append(outbounds, direct(final, strategy))
-	if request.Mode == "prefer_v6" && len(request.V6OnlyDomains) > 0 {
+	var socksDNS map[string]any
+	if request.Egress == "socks" {
+		if request.SOCKSOutbound == nil {
+			return nil, errors.New("SOCKS outbound settings are missing")
+		}
+		var outbound map[string]any
+		outbound, socksDNS = buildSOCKSOutbound(*request.SOCKSOutbound, capabilities)
+		outbounds = append(outbounds, outbound)
+		final = "out-socks"
+	} else {
+		outbounds = append(outbounds, direct(final, strategy))
+	}
+	if request.Egress != "socks" && request.Mode == "prefer_v6" && len(request.V6OnlyDomains) > 0 {
 		outbounds = append(outbounds, direct("out-v6only", "ipv6_only"))
 		rule := map[string]any{"domain_suffix": request.V6OnlyDomains, "outbound": "out-v6only"}
 		if capabilities.RuleActions {
@@ -2008,7 +2055,9 @@ func buildConfigWithInbounds(request model.NodeCreateRequest, inbounds []any, ve
 		rules = append(rules, rule)
 	}
 	root := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": inbounds, "outbounds": outbounds, "route": map[string]any{"rules": rules, "final": final}}
-	if capabilities.NewDNSServers {
+	if socksDNS != nil {
+		root["dns"] = socksDNS
+	} else if capabilities.NewDNSServers {
 		root["dns"] = map[string]any{"servers": []any{map[string]any{"type": "local", "tag": "local"}}}
 	}
 	if capabilities.RuleActions {
@@ -2132,11 +2181,14 @@ func validateCreate(r model.NodeCreateRequest) error {
 	if r.Mode != "prefer_v6" && r.Mode != "v4only" && r.Mode != "v6only" {
 		return errors.New("invalid outbound mode")
 	}
-	if r.Egress != "" && r.Egress != "direct" && r.Egress != "residential" {
+	if r.Egress != "" && r.Egress != "direct" && r.Egress != "residential" && r.Egress != "socks" {
 		return errors.New("invalid egress")
 	}
 	if r.Egress == "residential" && (r.Mode != "v4only" || r.IPv4Bind != "" || r.IPv6Bind != "" || r.AutoBind) {
 		return errors.New("residential egress must use automatic IPv4 routing without address binding")
+	}
+	if r.Egress == "socks" && (r.Mode != "v4only" || r.IPv4Bind != "" || r.IPv6Bind != "" || r.AutoBind || len(r.V6OnlyDomains) > 0) {
+		return errors.New("SOCKS egress must not use direct routing mode, source binding or IPv6 domain policy")
 	}
 	protocol := normalizeProtocol(r.Protocol)
 	if !supportedProtocols[protocol] {
