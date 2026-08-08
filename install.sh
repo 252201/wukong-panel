@@ -13,6 +13,12 @@ CERT_FILE=""
 KEY_FILE=""
 EMAIL=""
 ACME_IP_VERSION=""
+INSTALL_FIREWALL_MODE="keep"
+INSTALL_FIREWALL_MODE_SET=false
+FIREWALL_PORTS=""
+FIREWALL_ACTION=""
+TAKEOVER_PORT80=false
+TAKEOVER_PORT80_SET=false
 UNATTENDED=false
 SKIP_PACKAGES=false
 BINARY_SOURCE="${WUKONG_BINARY:-}"
@@ -33,6 +39,8 @@ SINGBOX_BACKUP_ROOT="${WUKONG_SINGBOX_BACKUP_ROOT:-/var/lib/wukong-panel/backups
 SINGBOX_TRANSACTION_ACTIVE=false
 SINGBOX_RUNTIME_BIN=""
 SINGBOX_RUNTIME_CONFIG_DIR=""
+PORT80_SERVICES_FILE=""
+PORT80_SERVICES_STOPPED=false
 
 info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
@@ -220,6 +228,441 @@ resolve_auto_action() {
 
 using_systemd() {
   [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
+}
+
+firewall_normalize_ports() {
+  firewall_input=$1
+  firewall_old_ifs=$IFS
+  IFS=', '
+  for firewall_spec in $firewall_input; do
+    [ -n "$firewall_spec" ] || continue
+    firewall_protocol=tcp
+    case "$firewall_spec" in
+      */*)
+        firewall_port=${firewall_spec%/*}
+        firewall_protocol=${firewall_spec#*/}
+        ;;
+      *)
+        firewall_port=$firewall_spec
+        ;;
+    esac
+    case "$firewall_port" in ''|*[!0-9]*) IFS=$firewall_old_ifs; return 1 ;; esac
+    [ "$firewall_port" -ge 1 ] 2>/dev/null && [ "$firewall_port" -le 65535 ] 2>/dev/null || {
+      IFS=$firewall_old_ifs
+      return 1
+    }
+    case "$firewall_protocol" in tcp|udp) ;; *) IFS=$firewall_old_ifs; return 1 ;; esac
+    printf '%s/%s\n' "$firewall_port" "$firewall_protocol"
+  done
+  IFS=$firewall_old_ifs
+}
+
+firewall_validate_ports() {
+  firewall_ports_value=$1
+  [ -n "$firewall_ports_value" ] || return 0
+  firewall_normalize_ports "$firewall_ports_value" >/dev/null ||
+    die "防火墙端口格式无效：$firewall_ports_value（示例：22/tcp,9443/tcp,45080/udp）"
+}
+
+firewall_detect_backend() {
+  FIREWALL_BACKEND=none
+  case "${FAMILY:-}" in
+    apt)
+      command -v ufw >/dev/null 2>&1 && FIREWALL_BACKEND=ufw
+      [ "$FIREWALL_BACKEND" = none ] && command -v firewall-cmd >/dev/null 2>&1 && FIREWALL_BACKEND=firewalld
+      ;;
+    dnf)
+      command -v firewall-cmd >/dev/null 2>&1 && FIREWALL_BACKEND=firewalld
+      [ "$FIREWALL_BACKEND" = none ] && command -v ufw >/dev/null 2>&1 && FIREWALL_BACKEND=ufw
+      ;;
+    apk)
+      command -v nft >/dev/null 2>&1 && FIREWALL_BACKEND=nftables
+      ;;
+    *)
+      if command -v ufw >/dev/null 2>&1; then FIREWALL_BACKEND=ufw
+      elif command -v firewall-cmd >/dev/null 2>&1; then FIREWALL_BACKEND=firewalld
+      elif command -v nft >/dev/null 2>&1; then FIREWALL_BACKEND=nftables
+      fi
+      ;;
+  esac
+  printf '%s\n' "$FIREWALL_BACKEND"
+}
+
+install_firewall_backend() {
+  firewall_detect_backend >/dev/null
+  [ "$FIREWALL_BACKEND" != none ] && return 0
+  info "未检测到防火墙管理工具，正在安装适合 $OS_ID 的防火墙组件"
+  case "$FAMILY" in
+    apt)
+      apt-get update -qq || die "软件源更新失败，无法安装 ufw"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw >/dev/null || die "ufw 安装失败"
+      ;;
+    dnf)
+      dnf install -y -q firewalld >/dev/null || die "firewalld 安装失败"
+      ;;
+    apk)
+      apk add -q nftables >/dev/null || die "nftables 安装失败"
+      ;;
+    *) die "当前系统没有可自动安装的防火墙后端" ;;
+  esac
+  firewall_detect_backend >/dev/null
+  [ "$FIREWALL_BACKEND" != none ] || die "防火墙组件安装后仍无法找到管理命令"
+}
+
+firewall_ssh_ports() {
+  firewall_ss_output=$(ss -Hlnpt 2>/dev/null || true)
+  firewall_ssh_ports_value=$(printf '%s\n' "$firewall_ss_output" | awk '
+    /sshd|dropbear/ {
+      address=$4
+      sub(/^.*:/, "", address)
+      if (address ~ /^[0-9]+$/ && !seen[address]++) print address "/tcp"
+    }
+  ')
+  [ -n "$firewall_ssh_ports_value" ] || printf '%s\n' '22/tcp'
+  [ -z "$firewall_ssh_ports_value" ] || printf '%s\n' "$firewall_ssh_ports_value"
+}
+
+firewall_install_ports() {
+  {
+    firewall_ssh_ports
+    printf '%s\n' '80/tcp' '443/tcp'
+    [ -n "${PORT:-}" ] && printf '%s/tcp\n' "$PORT"
+    [ -n "$FIREWALL_PORTS" ] && firewall_normalize_ports "$FIREWALL_PORTS"
+  } | awk 'NF && !seen[$0]++'
+}
+
+firewall_run_ufw_allow() {
+  firewall_ufw_ports=$1
+  while IFS= read -r firewall_spec; do
+    [ -n "$firewall_spec" ] || continue
+    ufw allow "$firewall_spec" >/dev/null || return 1
+  done <<EOF
+$firewall_ufw_ports
+EOF
+}
+
+firewall_run_firewalld_allow() {
+  firewall_firewalld_ports=$1
+  while IFS= read -r firewall_spec; do
+    [ -n "$firewall_spec" ] || continue
+    firewall-cmd --permanent --zone=public --add-port="$firewall_spec" >/dev/null || return 1
+  done <<EOF
+$firewall_firewalld_ports
+EOF
+}
+
+firewall_nft_apply() {
+  firewall_nft_policy=$1
+  firewall_nft_ports=$2
+  firewall_nft_file=/etc/nftables.d/wukong-panel.nft
+  firewall_nft_tmp=$(mktemp)
+  {
+    printf 'table inet wukong_panel {\n'
+    printf '  chain input {\n'
+    printf '    type filter hook input priority 100; policy %s;\n' "$firewall_nft_policy"
+    printf '    iif lo accept\n'
+    printf '    ct state established,related accept\n'
+    printf '    ip protocol icmp accept\n'
+    printf '    ip6 nexthdr ipv6-icmp accept\n'
+    if [ "$firewall_nft_policy" = drop ]; then
+      while IFS= read -r firewall_spec; do
+        [ -n "$firewall_spec" ] || continue
+        firewall_nft_port=${firewall_spec%/*}
+        firewall_nft_protocol=${firewall_spec#*/}
+        printf '    %s dport %s accept\n' "$firewall_nft_protocol" "$firewall_nft_port"
+      done <<EOF
+$firewall_nft_ports
+EOF
+    fi
+    printf '  }\n}\n'
+  } >"$firewall_nft_tmp"
+  nft delete table inet wukong_panel >/dev/null 2>&1 || true
+  nft -f "$firewall_nft_tmp" || {
+    rm -f "$firewall_nft_tmp"
+    return 1
+  }
+  install -d -m 0755 /etc/nftables.d
+  install -m 0644 "$firewall_nft_tmp" "$firewall_nft_file"
+  rm -f "$firewall_nft_tmp"
+  firewall_nft_main_config=/etc/nftables.conf
+  [ -r "$firewall_nft_main_config" ] || firewall_nft_main_config=/etc/nftables.nft
+  if [ ! -r "$firewall_nft_main_config" ]; then
+    install -d -m 0755 "$(dirname "$firewall_nft_main_config")"
+    printf 'include "/etc/nftables.d/wukong-panel.nft"\n' >"$firewall_nft_main_config"
+  elif ! grep -Fq 'wukong-panel.nft' "$firewall_nft_main_config"; then
+    printf '\ninclude "/etc/nftables.d/wukong-panel.nft"\n' >>"$firewall_nft_main_config"
+  fi
+  if using_systemd && command -v systemctl >/dev/null 2>&1; then
+    systemctl enable nftables.service >/dev/null 2>&1 || true
+  elif command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+    rc-update add nftables default >/dev/null 2>&1 || true
+  fi
+}
+
+firewall_nft_remove() {
+  nft delete table inet wukong_panel >/dev/null 2>&1 || true
+  for firewall_nft_main_config in /etc/nftables.conf /etc/nftables.nft; do
+    [ -r "$firewall_nft_main_config" ] || continue
+    tmp_nft_config=$(mktemp)
+    grep -vF 'include "/etc/nftables.d/wukong-panel.nft"' "$firewall_nft_main_config" >"$tmp_nft_config" || true
+    install -m 0644 "$tmp_nft_config" "$firewall_nft_main_config"
+    rm -f "$tmp_nft_config"
+  done
+  rm -f /etc/nftables.d/wukong-panel.nft
+}
+
+firewall_enable() {
+  firewall_enable_ports=$1
+  install_firewall_backend
+  firewall_detect_backend >/dev/null
+  case "$FIREWALL_BACKEND" in
+    ufw)
+      ufw default deny incoming >/dev/null
+      ufw default allow outgoing >/dev/null
+      firewall_run_ufw_allow "$firewall_enable_ports" || die "ufw 放行端口失败"
+      ufw --force enable >/dev/null || die "ufw 启用失败"
+      ;;
+    firewalld)
+      if using_systemd; then systemctl enable --now firewalld.service >/dev/null || die "firewalld 启动失败"; fi
+      firewall-cmd --set-default-zone=public >/dev/null || die "firewalld 默认区域设置失败"
+      firewall-cmd --permanent --set-default-zone=public >/dev/null || die "firewalld 永久默认区域设置失败"
+      firewall-cmd --permanent --zone=public --set-target=DROP >/dev/null || die "firewalld 默认拒绝策略设置失败"
+      firewall_run_firewalld_allow "$firewall_enable_ports" || die "firewalld 放行端口失败"
+      firewall-cmd --reload >/dev/null || die "firewalld 重载失败"
+      ;;
+    nftables)
+      firewall_nft_apply drop "$firewall_enable_ports" || die "nftables 防火墙规则应用失败"
+      ;;
+    *) die "未找到可用的防火墙后端" ;;
+  esac
+  info "防火墙已开启；已放行：$(printf '%s' "$firewall_enable_ports" | tr '\n' ' ')"
+}
+
+firewall_allow_all() {
+  install_firewall_backend
+  firewall_detect_backend >/dev/null
+  case "$FIREWALL_BACKEND" in
+    ufw)
+      ufw default allow incoming >/dev/null
+      ufw default allow outgoing >/dev/null
+      ufw --force enable >/dev/null || die "ufw 启用失败"
+      ;;
+    firewalld)
+      if using_systemd; then systemctl enable --now firewalld.service >/dev/null || die "firewalld 启动失败"; fi
+      firewall-cmd --set-default-zone=trusted >/dev/null || die "firewalld trusted 区域设置失败"
+      firewall-cmd --permanent --set-default-zone=trusted >/dev/null || die "firewalld 永久 trusted 区域设置失败"
+      firewall-cmd --permanent --zone=trusted --set-target=ACCEPT >/dev/null || die "firewalld 全放行策略设置失败"
+      firewall-cmd --reload >/dev/null || die "firewalld 重载失败"
+      ;;
+    nftables)
+      firewall_nft_apply accept ""
+      ;;
+    *) die "未找到可用的防火墙后端" ;;
+  esac
+  warn "防火墙已开启但入站端口全部放行；这会暴露 VPS 上的所有监听服务"
+}
+
+firewall_disable() {
+  firewall_detect_backend >/dev/null
+  case "$FIREWALL_BACKEND" in
+    none) info "未检测到已安装的防火墙管理工具，无需关闭" ;;
+    ufw) ufw disable >/dev/null || die "ufw 关闭失败" ;;
+    firewalld)
+      if using_systemd; then systemctl disable --now firewalld.service >/dev/null || die "firewalld 关闭失败"; fi
+      ;;
+    nftables)
+      firewall_nft_remove
+      if using_systemd; then systemctl disable --now nftables.service >/dev/null 2>&1 || true; fi
+      ;;
+  esac
+  info "防火墙已关闭（云厂商安全组仍需单独检查）"
+}
+
+firewall_status() {
+  firewall_detect_backend >/dev/null
+  printf '防火墙后端: %s\n' "$FIREWALL_BACKEND"
+  case "$FIREWALL_BACKEND" in
+    ufw) ufw status verbose || true ;;
+    firewalld) firewall-cmd --state 2>/dev/null || true; firewall-cmd --zone=public --list-all 2>/dev/null || true ;;
+    nftables) nft list table inet wukong_panel 2>/dev/null || nft list ruleset 2>/dev/null || true ;;
+    none) printf '%s\n' '未检测到 UFW、firewalld 或 nftables' ;;
+  esac
+  if command -v ss >/dev/null 2>&1; then
+    printf '%s\n' '当前监听端口:'
+    ss -ltnup 2>/dev/null || true
+  fi
+}
+
+install_runtime_packages() {
+  info "安装运行依赖（$OS_ID / $INIT）"
+  case "$FAMILY" in
+    apt)
+      run_quiet apt-get update -qq || die "软件源更新失败"
+      run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        ca-certificates curl openssl nginx tcpdump tar iproute2 || die "运行依赖安装失败"
+      ;;
+    dnf)
+      run_quiet dnf install -y -q \
+        ca-certificates curl openssl nginx tcpdump tar iproute shadow-utils || die "运行依赖安装失败"
+      ;;
+    apk)
+      run_quiet apk add -q \
+        ca-certificates curl openssl nginx tcpdump tar iproute2 || die "运行依赖安装失败"
+      ;;
+  esac
+  for runtime_command in curl openssl nginx tar ss; do
+    command -v "$runtime_command" >/dev/null 2>&1 ||
+      die "运行依赖安装不完整：缺少 $runtime_command；请检查软件源后重试"
+  done
+}
+
+verify_runtime_packages() {
+  for runtime_command in curl openssl nginx tar ss; do
+    command -v "$runtime_command" >/dev/null 2>&1 ||
+      die "缺少 $runtime_command。纯净系统请不要使用 --skip-packages，或先安装 ca-certificates、curl、openssl、nginx、tar、iproute2"
+  done
+}
+
+ensure_download_tools() {
+  for download_command in curl openssl tar; do
+    command -v "$download_command" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
+
+install_download_tools() {
+  ensure_download_tools && return 0
+  [ "$SKIP_PACKAGES" != true ] ||
+    die "缺少 curl、openssl 或 tar；不能在 --skip-packages 下执行更新"
+  info "补齐更新所需的下载与校验工具"
+  case "$FAMILY" in
+    apt)
+      run_quiet apt-get update -qq || die "软件源更新失败"
+      run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl openssl tar iproute2 ||
+        die "更新工具安装失败"
+      ;;
+    dnf)
+      run_quiet dnf install -y -q ca-certificates curl openssl tar iproute ||
+        die "更新工具安装失败"
+      ;;
+    apk)
+      run_quiet apk add -q ca-certificates curl openssl tar iproute2 ||
+        die "更新工具安装失败"
+      ;;
+    *) die "当前系统没有可自动安装的更新工具" ;;
+  esac
+  ensure_download_tools || die "更新工具安装后仍缺少 curl、openssl 或 tar"
+}
+
+manage_firewall() {
+  case "$FIREWALL_ACTION" in
+    status) firewall_status ;;
+    on)
+      firewall_validate_ports "$FIREWALL_PORTS"
+      firewall_enable "$(firewall_install_ports)"
+      ;;
+    off) firewall_disable ;;
+    open)
+      [ -n "$FIREWALL_PORTS" ] || die "--firewall-action open 需要 --firewall-ports"
+      firewall_validate_ports "$FIREWALL_PORTS"
+      firewall_enable "$(firewall_ssh_ports; firewall_normalize_ports "$FIREWALL_PORTS")"
+      ;;
+    all) firewall_allow_all ;;
+    *) die "防火墙操作必须是 status、on、off、open 或 all" ;;
+  esac
+}
+
+prepare_install_firewall() {
+  case "$INSTALL_FIREWALL_MODE" in
+    keep) return 0 ;;
+    off) firewall_disable ;;
+    on)
+      firewall_validate_ports "$FIREWALL_PORTS"
+      firewall_enable "$(firewall_install_ports)"
+      ;;
+    all) firewall_allow_all ;;
+    *) die "安装时防火墙模式必须是 keep、on、off 或 all" ;;
+  esac
+}
+
+port80_listener_lines() {
+  command -v ss >/dev/null 2>&1 || return 0
+  ss -ltnp 2>/dev/null | awk '$4 ~ /(^|:)80$/ {print}'
+}
+
+port80_service_active() {
+  port80_service_manager=$1
+  port80_service_name=$2
+  case "$port80_service_manager" in
+    systemd) systemctl is-active --quiet "$port80_service_name.service" ;;
+    openrc) rc-service "$port80_service_name" status >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+port80_known_services() {
+  port80_lines=$1
+  for port80_candidate in nginx apache2 httpd caddy lighttpd; do
+    printf '%s\n' "$port80_lines" | grep -Fq "\"$port80_candidate\"" || continue
+    if using_systemd && port80_service_active systemd "$port80_candidate"; then
+      printf 'systemd|%s\n' "$port80_candidate"
+    elif command -v rc-service >/dev/null 2>&1 && port80_service_active openrc "$port80_candidate"; then
+      printf 'openrc|%s\n' "$port80_candidate"
+    fi
+  done
+}
+
+stop_port80_services() {
+  [ "$TAKEOVER_PORT80" = true ] || return 0
+  port80_lines=$(port80_listener_lines)
+  [ -n "$port80_lines" ] || return 0
+  PORT80_SERVICES_FILE=${PORT80_SERVICES_FILE:-$TMP_DIR/port80-services}
+  port80_records=$(port80_known_services "$port80_lines")
+  port80_unknown=$(printf '%s\n' "$port80_lines" | grep -Ev 'users:\(\("(nginx|apache2|httpd|caddy|lighttpd)"' || true)
+  [ -z "$port80_unknown" ] || {
+    printf '%s\n' "$port80_lines" >&2
+    die "公网 80 被未知进程占用，无法安全临时接管；请先停止该进程，或改用 --acme cloudflare/现有证书"
+  }
+  [ -n "$port80_records" ] || die "公网 80 被已知 Web 进程占用，但未找到可管理的服务单元；请先手动停止，或改用 --acme cloudflare/现有证书"
+  : >"$PORT80_SERVICES_FILE"
+  while IFS='|' read -r port80_manager port80_service; do
+    [ -n "$port80_service" ] || continue
+    case "$port80_manager" in
+      systemd) systemctl stop "$port80_service.service" || die "无法临时停止 $port80_service" ;;
+      openrc) rc-service "$port80_service" stop || die "无法临时停止 $port80_service" ;;
+    esac
+    printf '%s|%s\n' "$port80_manager" "$port80_service" >>"$PORT80_SERVICES_FILE"
+  done <<EOF
+$port80_records
+EOF
+  port80_wait=0
+  while [ -n "$(port80_listener_lines)" ] && [ "$port80_wait" -lt 10 ]; do
+    sleep 1
+    port80_wait=$((port80_wait + 1))
+  done
+  [ -z "$(port80_listener_lines)" ] || die "临时停止 Web 服务后公网 80 仍被占用"
+  PORT80_SERVICES_STOPPED=true
+  info "已临时停止占用公网 80 的 Web 服务，证书签发完成后会自动恢复"
+}
+
+restore_port80_services() {
+  [ "$PORT80_SERVICES_STOPPED" = true ] || return 0
+  [ -r "$PORT80_SERVICES_FILE" ] || return 0
+  restore_port80_failed=false
+  while IFS='|' read -r restore_port80_manager restore_port80_service; do
+    [ -n "$restore_port80_service" ] || continue
+    case "$restore_port80_manager" in
+      systemd) systemctl start "$restore_port80_service.service" || restore_port80_failed=true ;;
+      openrc) rc-service "$restore_port80_service" start || restore_port80_failed=true ;;
+    esac
+  done <"$PORT80_SERVICES_FILE"
+  PORT80_SERVICES_STOPPED=false
+  if [ "$restore_port80_failed" = true ]; then
+    warn "证书处理后部分原 Web 服务未能恢复，请检查 nginx/apache/caddy 状态"
+  else
+    info "已恢复证书处理前占用公网 80 的 Web 服务"
+  fi
+  rm -f "$PORT80_SERVICES_FILE"
 }
 
 sha256_file() {
@@ -1251,7 +1694,7 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install 或 residential-peer-remove
+  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall
   --update             等同于 --action update
   --start-panel        启动面板 Web 与 Agent（也可使用 --start）
   --stop-panel         关闭面板 Web 与 Agent（也可使用 --stop）
@@ -1273,6 +1716,15 @@ usage() {
   --acme METHOD        证书方式：http、cloudflare、selfsigned
   --acme-ip-version 4|6  HTTP-01 强制通过 IPv4 或 IPv6 验证
   --email EMAIL        Let's Encrypt 账户邮箱
+  --firewall-mode MODE  安装时防火墙：keep、on、off 或 all（默认 keep）
+  --firewall-ports LIST 安装时额外放行端口，如 22/tcp,9443/tcp,45080/udp
+  --firewall-action MODE 独立管理防火墙：status、on、off、open 或 all
+  --firewall-on         等同于 --firewall-action on
+  --firewall-off        等同于 --firewall-action off
+  --firewall-status     等同于 --firewall-action status
+  --firewall-open LIST  开启防火墙并放行指定端口
+  --firewall-open-all   开启防火墙但放行所有入站端口（不推荐）
+  --takeover-port-80    HTTP-01 签发时临时停止已知 Web 服务并自动恢复
   --interactive        即使提供了参数也进入交互向导
   --unattended         无人值守安装
   --help               显示本帮助
@@ -1311,6 +1763,15 @@ while [ "$#" -gt 0 ]; do
     --cert-file) CERT_FILE="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --key-file) KEY_FILE="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --email) EMAIL="$2"; EMAIL_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --firewall-mode) INSTALL_FIREWALL_MODE="$2"; INSTALL_FIREWALL_MODE_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --firewall-ports) FIREWALL_PORTS="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
+    --firewall-action) ACTION=firewall; FIREWALL_ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --firewall-on) ACTION=firewall; FIREWALL_ACTION=on; HAS_CONFIG_ARGS=true; shift ;;
+    --firewall-off) ACTION=firewall; FIREWALL_ACTION=off; HAS_CONFIG_ARGS=true; shift ;;
+    --firewall-status) ACTION=firewall; FIREWALL_ACTION=status; HAS_CONFIG_ARGS=true; shift ;;
+    --firewall-open) ACTION=firewall; FIREWALL_ACTION=open; FIREWALL_PORTS="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --firewall-open-all) ACTION=firewall; FIREWALL_ACTION=all; HAS_CONFIG_ARGS=true; shift ;;
+    --takeover-port-80) TAKEOVER_PORT80=true; TAKEOVER_PORT80_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift ;;
     --binary) BINARY_SOURCE="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --interactive) FORCE_INTERACTIVE=true; shift ;;
     --unattended|-y|--yes) UNATTENDED=true; shift ;;
@@ -1350,7 +1811,7 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install 或 residential-peer-remove" ;; esac
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove|firewall) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall" ;; esac
 
 if [ "$ACTION" = "residential-peer-install" ]; then
   install_residential_peer
@@ -1421,7 +1882,18 @@ if [ "$ACTION" = "install" ] && [ "$INTERACTIVE_SESSION" = true ]; then
     email_default="admin@$(printf '%s' "$DOMAIN" | cut -d. -f2-)"
     EMAIL=$(prompt_value "Let's Encrypt 账户邮箱" "$email_default")
   fi
-  printf '\n安装配置确认\n  域名: %s\n  HTTPS 端口: %s\n  证书方式: %s\n  HTTP-01 网络: %s\n\n' "${DOMAIN:-不使用域名}" "$PORT" "$ACME_METHOD" "${ACME_IP_VERSION:-自动/不适用}" >"$PROMPT_TTY"
+  if [ "$INSTALL_FIREWALL_MODE_SET" != true ]; then
+    printf '%s\n' "请选择安装时的防火墙策略：" "  1) 保持系统现状（默认）" "  2) 开启并放行 SSH、80/443、面板端口" "  3) 开启并放行所有入站端口（不推荐）" "  4) 关闭已检测到的防火墙" >"$PROMPT_TTY"
+    firewall_choice=$(prompt_value "选择" "1")
+    case "$firewall_choice" in
+      1|keep) INSTALL_FIREWALL_MODE=keep ;;
+      2|on) INSTALL_FIREWALL_MODE=on ;;
+      3|all) INSTALL_FIREWALL_MODE=all ;;
+      4|off) INSTALL_FIREWALL_MODE=off ;;
+      *) die "无效的防火墙策略选项: $firewall_choice" ;;
+    esac
+  fi
+  printf '\n安装配置确认\n  域名: %s\n  HTTPS 端口: %s\n  证书方式: %s\n  HTTP-01 网络: %s\n  防火墙: %s\n\n' "${DOMAIN:-不使用域名}" "$PORT" "$ACME_METHOD" "${ACME_IP_VERSION:-自动/不适用}" "$INSTALL_FIREWALL_MODE" >"$PROMPT_TTY"
   confirm_install=$(prompt_value "确认开始安装？(Y/n)" "Y")
   case "$confirm_install" in Y|y|yes|YES|Yes) ;; *) info "已取消安装"; exit 0 ;; esac
 fi
@@ -1430,6 +1902,8 @@ case "$PORT" in ''|*[!0-9]*) die "--port 必须是 1-65535 的数字" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "--port 必须是 1-65535 的数字"
 case "$ACME_METHOD" in selfsigned|http|cloudflare) ;; *) die "--acme 必须是 http、cloudflare 或 selfsigned" ;; esac
 case "$ACME_IP_VERSION" in ''|4|6) ;; *) die "--acme-ip-version 必须是 4 或 6" ;; esac
+case "$INSTALL_FIREWALL_MODE" in keep|on|off|all) ;; *) die "--firewall-mode 必须是 keep、on、off 或 all" ;; esac
+firewall_validate_ports "$FIREWALL_PORTS"
 [ -z "$DOMAIN" ] && { [ "$ACME_METHOD" = "selfsigned" ] || die "申请 Let's Encrypt 证书必须填写 --domain"; }
 if [ -n "$DOMAIN" ]; then
   case "$DOMAIN" in *[!A-Za-z0-9.-]*|.*|*.) die "域名格式无效，请只填写主机名，不要包含 https://、端口或路径" ;; esac
@@ -1448,6 +1922,11 @@ case "$OS_ID" in
   *) die "不支持的系统: ${OS_ID:-unknown}。首版支持 Debian、Ubuntu、Rocky、AlmaLinux、Alpine" ;;
 esac
 
+if [ "$ACTION" = "firewall" ]; then
+  manage_firewall
+  exit 0
+fi
+
 ARCH=$(uname -m)
 case "$ARCH" in x86_64|amd64) ASSET_ARCH="amd64" ;; aarch64|arm64) ASSET_ARCH="arm64" ;; *) die "不支持的架构: $ARCH" ;; esac
 
@@ -1455,6 +1934,7 @@ TMP_DIR=$(mktemp -d)
 cleanup_install() {
   cleanup_status=$?
   trap - EXIT HUP INT TERM
+  restore_port80_services || true
   if [ "$SINGBOX_TRANSACTION_ACTIVE" = true ]; then
     rollback_singbox_transaction || warn "自动回滚未完成，请保留终端并人工检查 $SINGBOX_TRANSACTION_ROOT"
   fi
@@ -1467,6 +1947,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 if [ "$ACTION" = "update" ]; then
+  install_download_tools
   ensure_residential_exit_dependencies
   update_panel
   exit 0
@@ -1476,6 +1957,7 @@ if [ "$ACTION" = "reset-password" ]; then
   exit 0
 fi
 if [ "$ACTION" = "singbox-update" ]; then
+  install_download_tools
   update_singbox
   exit 0
 fi
@@ -1489,13 +1971,11 @@ if [ "$ACTION" = "singbox-uninstall" ]; then
 fi
 
 if [ "$SKIP_PACKAGES" != true ]; then
-  info "安装运行依赖（$OS_ID / $INIT）"
-  case "$FAMILY" in
-    apt) apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl openssl nginx tcpdump tar >/dev/null ;;
-    dnf) dnf install -y -q ca-certificates curl openssl nginx tcpdump shadow-utils tar >/dev/null ;;
-    apk) apk add -q ca-certificates curl openssl nginx tcpdump tar ;;
-  esac
+  install_runtime_packages
+else
+  verify_runtime_packages
 fi
+prepare_install_firewall
 ensure_residential_exit_dependencies
 
 install -d -m 0755 /usr/local/bin /etc/wukong-panel /etc/wukong-panel/tls
@@ -1538,13 +2018,28 @@ elif [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; then
   if [ ! -x /root/.acme.sh/acme.sh ]; then curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" >/dev/null; fi
   ACME_ISSUE_STATUS=0
   if [ "$ACME_METHOD" = "http" ]; then
-    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:|\])80$'; then die "公网 80 已被占用；请改用 --acme cloudflare 或导入现有证书"; fi
+    if [ -n "$(port80_listener_lines)" ]; then
+      if [ "$TAKEOVER_PORT80_SET" != true ] && [ "$INTERACTIVE_SESSION" = true ]; then
+        printf '%s\n' "检测到公网 80 已被占用：" "$(port80_listener_lines)" >"$PROMPT_TTY"
+        takeover_default=N
+        printf '%s\n' "$(port80_listener_lines)" | grep -Eq 'users:\(\("(nginx|apache2|httpd|caddy|lighttpd)"' && takeover_default=Y
+        if [ "$takeover_default" = Y ]; then
+          takeover_choice=$(prompt_value "是否临时停止已知 Web 服务并在证书签发后恢复？(Y/n)" "$takeover_default")
+        else
+          takeover_choice=$(prompt_value "是否临时停止已知 Web 服务并在证书签发后恢复？(y/N)" "$takeover_default")
+        fi
+        case "$takeover_choice" in Y|y|yes|YES|Yes) TAKEOVER_PORT80=true ;; *) TAKEOVER_PORT80=false ;; esac
+      fi
+      [ "$TAKEOVER_PORT80" = true ] || die "公网 80 已被占用；可改用 --acme cloudflare、导入现有证书，或增加 --takeover-port-80 临时接管已知 Web 服务"
+      stop_port80_services
+    fi
     info "申请 Let's Encrypt 证书（HTTP-01${ACME_IP_VERSION:+ / IPv$ACME_IP_VERSION}）"
     case "$ACME_IP_VERSION" in
       4) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v4 --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
       6) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --listen-v6 --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
       *) /root/.acme.sh/acme.sh --issue -d "$DOMAIN" --standalone --httpport 80 --keylength ec-256 --server letsencrypt || ACME_ISSUE_STATUS=$? ;;
     esac
+    restore_port80_services
   else
     [ -n "${CF_Token:-}" ] || die "Cloudflare DNS-01 需要 CF_Token"
     [ -n "${CF_Zone_ID:-${CF_Account_ID:-}}" ] || die "Cloudflare DNS-01 还需要 CF_Zone_ID 或 CF_Account_ID"
@@ -1758,6 +2253,11 @@ if [ -z "$DOMAIN$IPV4_HOST$IPV6_HOST" ]; then
 fi
 printf '%s\n' "$INIT_OUTPUT" | sed -n 's/^WUKONG_INITIAL_PASSWORD=/初始密码: /p'
 printf '管理账号: admin\n'
-printf '请在防火墙/安全组中放行 TCP %s；节点 UDP 端口按需放行。\n' "$PORT"
+case "$INSTALL_FIREWALL_MODE" in
+  keep) printf '防火墙保持安装前状态；请在主机防火墙/云安全组中放行 TCP %s，节点 UDP 端口按需放行。\n' "$PORT" ;;
+  on) printf '安装器已开启主机防火墙并放行 SSH、80/443、TCP %s；节点端口按需通过 --firewall-ports 增加。\n' "$PORT" ;;
+  all) printf '安装器已开启主机防火墙但放行所有入站端口；请尽快收紧规则。\n' ;;
+  off) printf '安装器已关闭检测到的主机防火墙；云安全组仍需单独检查。\n' ;;
+esac
 [ -n "$IPV4_HOST" ] && warn "NAT/受限端口 VPS 必须把公网 TCP 端口映射到本机 TCP $PORT；若映射端口不同，请使用公网映射端口访问"
 [ "$ACME_METHOD" = "selfsigned" ] && warn "当前使用自签名证书，浏览器首次访问需要手动信任"

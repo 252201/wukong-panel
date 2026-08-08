@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version (for example v0.8.0)
+        description: Release version (for example v0.8.1)
         required: true
         type: string
 
@@ -112,7 +112,8 @@ jobs:
             release/wukong-panel-linux-arm64 \
             release/SHA256SUMS \
             release/install.sh \
-            release/uninstall.sh
+            release/uninstall.sh \
+            release/bootstrap.sh
 
       - name: Verify published release assets
         shell: bash
@@ -130,7 +131,8 @@ jobs:
             wukong-panel-linux-arm64 \
             SHA256SUMS \
             install.sh \
-            uninstall.sh
+            uninstall.sh \
+            bootstrap.sh
           do
             cmp "release/$asset" "$download_dir/$asset"
           done
