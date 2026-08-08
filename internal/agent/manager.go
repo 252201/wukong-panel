@@ -651,12 +651,19 @@ func (m *Manager) replaceCandidateConfig(ctx context.Context, node model.Node, o
 		return err
 	}
 	defer os.Remove(tmp)
-	if !m.cfg.Demo {
+	// A candidate with no discoverable service is an orphan configuration. It
+	// may have been written for an older sing-box release and therefore fail
+	// the current binary's strict decoder even though no running service will
+	// consume it. Deletion must still be able to remove one inbound from that
+	// file. Keep validation for known services, where replacing an invalid
+	// configuration could break a live or restartable node.
+	serviceKnown := m.candidateServiceKnown(node)
+	if !m.cfg.Demo && serviceKnown {
 		if err := command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
 			return fmt.Errorf("candidate configuration check failed: %w", err)
 		}
 	}
-	wasActive := m.candidateServiceKnown(node) && m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active"
+	wasActive := serviceKnown && m.serviceStatus(ctx, node.ServiceManager, node.ServiceName) == "active"
 	if err := os.Rename(tmp, node.ConfigPath); err != nil {
 		return err
 	}

@@ -547,7 +547,7 @@ func TestDeleteCandidateRemovesOnlySelectedSharedInbound(t *testing.T) {
 	}
 }
 
-func TestDeleteCandidateCheckFailurePreservesSharedConfig(t *testing.T) {
+func TestDeleteCandidateAllowsUnknownLegacyConfig(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
 	configPath := filepath.Join(dir, "shared.json")
@@ -583,26 +583,66 @@ func TestDeleteCandidateCheckFailurePreservesSharedConfig(t *testing.T) {
 	if target.Fingerprint == "" {
 		t.Fatalf("shared deletion target missing: %#v", candidates)
 	}
-	if err = manager.DeleteCandidate(t.Context(), target.Fingerprint, target.Name); err == nil || !strings.Contains(err.Error(), "configuration check failed") {
-		t.Fatalf("candidate deletion ignored the failed config check: %v", err)
+	if err = manager.DeleteCandidate(t.Context(), target.Fingerprint, target.Name); err != nil {
+		t.Fatalf("unknown-service candidate deletion failed: %v", err)
 	}
 	current, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(current) != string(original) {
-		t.Fatalf("failed config check changed shared config:\n%s", current)
+	var root map[string]any
+	if err = json.Unmarshal(current, &root); err != nil {
+		t.Fatal(err)
+	}
+	inbounds, _ := root["inbounds"].([]any)
+	if len(inbounds) != 1 || int(numberValue(inbounds[0].(map[string]any)["listen_port"])) != 47211 {
+		t.Fatalf("unknown-service candidate was not removed: %s", current)
 	}
 	info, err := os.Stat(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("failed config check changed mode: %v", info.Mode().Perm())
+		t.Fatalf("unknown-service deletion changed mode: %v", info.Mode().Perm())
 	}
 	backups, err := filepath.Glob(filepath.Join(dataDir, "backups", "*-"+target.Fingerprint, "shared.json"))
 	if err != nil || len(backups) != 1 {
-		t.Fatalf("failed deletion backup missing: backups=%v err=%v", backups, err)
+		t.Fatalf("unknown-service deletion backup missing: backups=%v err=%v", backups, err)
+	}
+}
+
+func TestReplaceCandidateConfigCheckFailurePreservesKnownService(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "known.json")
+	original := []byte(`{"inbounds":[{"type":"hysteria2","listen_port":47221}]}`)
+	updated := []byte(`{"inbounds":[{"type":"hysteria2","listen_port":47222}]}`)
+	if err := os.WriteFile(configPath, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho 'invalid generated config' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	manager := NewManager(config.Config{ConfigDir: dir, SingBoxBin: binary}, database, nil)
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{ServiceName: "sing-box-known", ServiceManager: "systemd", ConfigPath: configPath}
+	if err = manager.replaceCandidateConfig(t.Context(), node, original, updated, info.Mode().Perm()); err == nil || !strings.Contains(err.Error(), "configuration check failed") {
+		t.Fatalf("known-service check failure was ignored: %v", err)
+	}
+	current, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(current) != string(original) {
+		t.Fatalf("known-service check failure changed config: %s", current)
 	}
 }
 
