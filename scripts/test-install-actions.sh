@@ -33,6 +33,10 @@ grep -q '2|start) ACTION=start' "$ROOT/install.sh" || { echo "start panel menu a
 grep -q '3|stop) ACTION=stop' "$ROOT/install.sh" || { echo "stop panel menu action missing" >&2; exit 1; }
 grep -q '7|reset-password) ACTION=reset-password' "$ROOT/install.sh" || { echo "reset password menu action missing" >&2; exit 1; }
 grep -q '11|residential-peer-remove) ACTION=residential-peer-remove' "$ROOT/install.sh" || { echo "residential peer removal menu action missing" >&2; exit 1; }
+grep -q '12|firewall) ACTION=firewall' "$ROOT/install.sh" || { echo "firewall menu action missing" >&2; exit 1; }
+grep -q '13|cancel) info "已取消"' "$ROOT/install.sh" || { echo "cancel menu action missing" >&2; exit 1; }
+grep -q '请选择防火墙操作' "$ROOT/install.sh" || { echo "interactive firewall menu missing" >&2; exit 1; }
+grep -q '5|all) FIREWALL_ACTION=all' "$ROOT/install.sh" || { echo "interactive open-all firewall action missing" >&2; exit 1; }
 grep -q '"$TMP_DIR/wukong-panel" reset-password --data-dir /var/lib/wukong-panel' "$ROOT/install.sh" || { echo "reset password command missing" >&2; exit 1; }
 [ "$(grep -c 'checkpath --directory --owner root:wukong --mode 0750 /run/wukong-panel' "$ROOT/install.sh")" -eq 2 ] || {
   echo "OpenRC runtime directory hooks missing" >&2

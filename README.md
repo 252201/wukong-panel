@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.8.1-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.8.2-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -127,7 +127,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.8.1 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.8.2 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -172,6 +172,8 @@ sudo sh install.sh --firewall-open 45080/udp,34001/tcp
 sudo sh install.sh --firewall-open-all   # 不推荐
 sudo sh install.sh --firewall-off
 ```
+
+已安装面板的 VPS 也可以直接运行 `sudo sh install.sh`，在操作菜单中选择“管理防火墙”，再选择查看状态、开启、关闭、指定端口或“开启并放行所有入站端口”。“所有端口”仅建议用于临时排障；云厂商安全组仍需单独配置。
 
 开启防火墙时安装器会优先识别当前 SSH 监听端口并自动放行，避免因自定义 SSH 端口导致锁死；云厂商安全组仍需单独配置。
 

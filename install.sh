@@ -1789,9 +1789,9 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机落地出口配置" " 12) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机落地出口配置" " 12) 管理防火墙" " 13) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|firewall) ACTION=firewall ;; 13|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       if residential_peer_installed; then
         printf '%s\n' "检测到本机 B 机落地出口配置，请选择操作：" "  1) 安装悟空面板" "  2) 移除 B 机落地出口配置" "  3) 取消" >"$PROMPT_TTY"
@@ -1804,6 +1804,22 @@ if interactive_available; then
       fi
     fi
   fi
+fi
+
+if [ "$ACTION" = "firewall" ] && [ "$INTERACTIVE_SESSION" = true ] && [ -z "$FIREWALL_ACTION" ]; then
+  printf '%s\n' "请选择防火墙操作：" "  1) 查看状态" "  2) 开启防火墙（自动放行 SSH、80/443、面板端口）" "  3) 关闭防火墙" "  4) 开启并放行指定端口" "  5) 开启并放行所有入站端口（不推荐）" >"$PROMPT_TTY"
+  firewall_action_choice=$(prompt_value "选择" "1")
+  case "$firewall_action_choice" in
+    1|status) FIREWALL_ACTION=status ;;
+    2|on) FIREWALL_ACTION=on ;;
+    3|off) FIREWALL_ACTION=off ;;
+    4|open)
+      FIREWALL_ACTION=open
+      FIREWALL_PORTS=$(prompt_value "放行端口（例如 45080/udp,9443/tcp）" "$FIREWALL_PORTS")
+      ;;
+    5|all) FIREWALL_ACTION=all ;;
+    *) die "无效的防火墙操作选项: $firewall_action_choice" ;;
+  esac
 fi
 
 if [ "$ACTION" = "auto" ]; then
