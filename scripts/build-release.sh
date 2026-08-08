@@ -14,7 +14,7 @@ for arch in amd64 arm64; do
     -ldflags "-s -w -X main.version=$VERSION" \
     -o "$OUT/wukong-panel-linux-$arch" ./cmd/wukong-panel
 done
-cp "$ROOT/install.sh" "$ROOT/uninstall.sh" "$OUT/"
+cp "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/bootstrap.sh" "$OUT/"
 chmod 0755 "$OUT"/*
 (cd "$OUT" && sha256sum wukong-panel-linux-* > SHA256SUMS)
 echo "release artifacts: $OUT"

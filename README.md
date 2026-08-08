@@ -32,11 +32,46 @@
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh
 ```
 
+纯净 VPS 如果没有预装 `curl`，请使用下面的兼容入口；它会优先使用已有的 `curl`/`wget`，否则通过 `apt`、`dnf` 或 `apk` 安装 `ca-certificates` 和 `curl` 后再继续：
+
+如果系统已有 `wget`，也可以直接使用发布资产中的 `bootstrap.sh`：
+
+```bash
+wget -qO- https://github.com/252201/wukong-panel/releases/latest/download/bootstrap.sh | sudo sh
+```
+
+```bash
+sudo sh -c '
+set -eu
+url="https://github.com/252201/wukong-panel/releases/latest/download/install.sh"
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$url" | sh
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO- "$url" | sh
+elif command -v apt-get >/dev/null 2>&1; then
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl
+  curl -fsSL "$url" | sh
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y -q ca-certificates curl
+  curl -fsSL "$url" | sh
+elif command -v apk >/dev/null 2>&1; then
+  apk add -q ca-certificates curl
+  curl -fsSL "$url" | sh
+else
+  echo "找不到 curl、wget 或受支持的包管理器" >&2
+  exit 1
+fi
+'
+```
+
+安装器进入系统后还会自动补齐 `curl`、`iproute2`（包含 `ss`）等依赖；只有明确使用 `--skip-packages` 时才要求这些工具事先存在。
+
 同一个入口同时负责安装、启动、关闭、更新和卸载：未安装时进入安装向导；检测到已有面板时可直接启动或关闭 Web 与 Agent，也可选择安全更新、重新配置、保留数据卸载或彻底卸载。关闭面板只停止 Web 与 Agent，保留 nginx 公网入口和开机启动设置。更新模式只替换校验后的二进制，不重新申请证书、不改 nginx 和节点配置；但会为旧安装补齐可信证书路径、ACME 每日续期任务和续签后的安全 reload/restart 钩子。更新前会停服务复制 SQLite 一致性备份，健康检查失败则自动回滚。systemd 使用 `RuntimeDirectory=`，Alpine/OpenRC 使用幂等 `start_pre()`，两者都会在服务启动前自动重建 `/run/wukong-panel`，避免重启清空临时目录后出现 502。
 
 首次安装可依次填写面板域名、HTTPS 端口、证书方式和 ACME 邮箱。填写域名后默认申请 Let’s Encrypt 证书，并可选择 HTTP-01 自动验证、仅 IPv4、仅 IPv6 或 Cloudflare DNS-01。安装器会注册每日续期检查：systemd 使用持久化 timer，OpenRC 使用 daily periodic；续签成功后先校验 sing-box 配置，只重启实际引用该证书的活动节点，再 reload Nginx。HTTP-01 standalone 仅在证书到达续期时间时临时停启 Nginx，并保证失败时恢复。纯脚本/CI 环境会自动保持非交互；也可显式使用 `--unattended`。
 
-申请证书前应先把域名的 A/AAAA 记录指向该 VPS。HTTP-01 要求公网 TCP 80 可达；IPv4 NAT 端口受限但 IPv6 不限端口时，选择“仅 IPv6”，并确保域名 AAAA 记录正确。
+申请证书前应先把域名的 A/AAAA 记录指向该 VPS。HTTP-01 要求公网 TCP 80 可达；IPv4 NAT 端口受限但 IPv6 不限端口时，选择“仅 IPv6”，并确保域名 AAAA 记录正确。若公网 80 已被 nginx、Apache、Caddy 或 lighttpd 占用，交互安装器会询问是否临时停止已知服务，签发完成后自动恢复；无人值守安装需显式增加 `--takeover-port-80`，否则会安全失败。未知进程不会被强制终止。
 
 NAT VPS、只开放指定端口的 VPS，需要在安装时把面板 HTTPS 端口设为可用的 **TCP** 端口。通过管道执行时，参数必须写在 `sh -s --` 后面：
 
@@ -98,8 +133,12 @@ sudo sh install.sh --version v0.8.0 --port 9443 --base-path /my-secret-panel/
 sudo sh install.sh --domain panel.example.com \
   --cert-file /path/fullchain.cer --key-file /path/private.key
 
-# HTTP-01（要求公网 80 未被占用）
+# HTTP-01
 sudo sh install.sh --domain panel.example.com --acme http --email admin@example.com
+
+# HTTP-01（临时停止已知 Web 服务，签发后自动恢复）
+sudo sh install.sh --domain panel.example.com --acme http \
+  --email admin@example.com --takeover-port-80
 
 # IPv6 HTTP-01（适用于 IPv4 NAT 端口受限、IPv6 公网 80 可达）
 sudo sh install.sh --domain panel.example.com --acme http \
@@ -110,7 +149,31 @@ sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
   --domain panel.example.com --acme cloudflare
 ```
 
-无域名时默认监听 HTTPS `9443` 并生成自签名证书。安装器不会修改 SSH、防火墙或云安全组，只会提示需要开放的端口。
+无域名时默认监听 HTTPS `9443` 并生成自签名证书。默认安装不会修改防火墙或云安全组；需要时可在安装阶段选择策略：
+
+```bash
+# 开启主机防火墙，自动放行 SSH、80/443、面板端口，并额外放行节点端口
+sudo sh install.sh --firewall-mode on \
+  --firewall-ports 45080/udp,43191/tcp
+
+# 开启并放行所有入站端口（仅适合临时排障，不推荐长期使用）
+sudo sh install.sh --firewall-mode all
+
+# 关闭已检测到的主机防火墙
+sudo sh install.sh --firewall-mode off
+```
+
+安装完成后也可以独立管理防火墙。Debian/Ubuntu 优先使用 UFW，Rocky/AlmaLinux 优先使用 firewalld，Alpine 使用 nftables；缺少后端时会按发行版自动安装：
+
+```bash
+sudo sh install.sh --firewall-status
+sudo sh install.sh --firewall-on
+sudo sh install.sh --firewall-open 45080/udp,34001/tcp
+sudo sh install.sh --firewall-open-all   # 不推荐
+sudo sh install.sh --firewall-off
+```
+
+开启防火墙时安装器会优先识别当前 SSH 监听端口并自动放行，避免因自定义 SSH 端口导致锁死；云厂商安全组仍需单独配置。
 
 ### AnyTLS
 
