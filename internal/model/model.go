@@ -1,8 +1,12 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const APIVersion = "v1"
+const FleetProtocolVersion = 1
 
 type Node struct {
 	ID              string    `json:"id"`
@@ -293,4 +297,92 @@ type Settings struct {
 	BillingResetDay   int    `json:"billingResetDay"`
 	CollectEndpoints  bool   `json:"collectEndpoints"`
 	SubscriptionToken string `json:"subscriptionToken,omitempty"`
+}
+
+type FleetHost struct {
+	ID                   string        `json:"id"`
+	Name                 string        `json:"name"`
+	Hostname             string        `json:"hostname"`
+	OS                   string        `json:"os"`
+	Arch                 string        `json:"arch"`
+	ServiceManager       string        `json:"serviceManager"`
+	PanelVersion         string        `json:"panelVersion"`
+	SingBoxVersion       string        `json:"singBoxVersion"`
+	ProtocolVersion      int           `json:"protocolVersion"`
+	Capabilities         []string      `json:"capabilities"`
+	Online               bool          `json:"online"`
+	Compatible           bool          `json:"compatible"`
+	Archived             bool          `json:"archived"`
+	LastSeenAt           time.Time     `json:"lastSeenAt,omitempty"`
+	SubscriptionCachedAt time.Time     `json:"subscriptionCachedAt,omitempty"`
+	CreatedAt            time.Time     `json:"createdAt"`
+	Snapshot             FleetSnapshot `json:"snapshot"`
+}
+
+type FleetSnapshot struct {
+	Full               bool                       `json:"full"`
+	Overview           Overview                   `json:"overview"`
+	Nodes              []Node                     `json:"nodes"`
+	NodeDetails        map[string]NodeEditDetails `json:"nodeDetails,omitempty"`
+	Jobs               []Job                      `json:"jobs"`
+	Settings           Settings                   `json:"settings"`
+	DeploymentDefaults NodeDeploymentDefaults     `json:"deploymentDefaults"`
+	ResidentialExit    *ResidentialExit           `json:"residentialExit,omitempty"`
+	SOCKSExit          *SOCKSExit                 `json:"socksExit,omitempty"`
+	Timeline           TrafficTimeline            `json:"timeline"`
+	Endpoints          []EndpointStat             `json:"endpoints"`
+}
+
+type FleetEnrollmentRequest struct {
+	Token           string   `json:"token"`
+	Name            string   `json:"name"`
+	Hostname        string   `json:"hostname"`
+	OS              string   `json:"os"`
+	Arch            string   `json:"arch"`
+	ServiceManager  string   `json:"serviceManager"`
+	PanelVersion    string   `json:"panelVersion"`
+	ProtocolVersion int      `json:"protocolVersion"`
+	Capabilities    []string `json:"capabilities"`
+}
+
+type FleetEnrollmentResponse struct {
+	HostID           string    `json:"hostId"`
+	AgentToken       string    `json:"agentToken"`
+	ProtocolVersion  int       `json:"protocolVersion"`
+	HeartbeatSeconds int       `json:"heartbeatSeconds"`
+	EnrolledAt       time.Time `json:"enrolledAt"`
+}
+
+type FleetHeartbeat struct {
+	ProtocolVersion int           `json:"protocolVersion"`
+	PanelVersion    string        `json:"panelVersion"`
+	SingBoxVersion  string        `json:"singBoxVersion"`
+	Capabilities    []string      `json:"capabilities"`
+	Snapshot        FleetSnapshot `json:"snapshot"`
+}
+
+type FleetCommand struct {
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Actor     string          `json:"actor"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	ExpiresAt time.Time       `json:"expiresAt"`
+}
+
+type FleetCommandResult struct {
+	Status string          `json:"status"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+type FleetStatus struct {
+	Enabled             bool                `json:"enabled"`
+	PublicURL           string              `json:"publicUrl"`
+	LocalHostID         string              `json:"localHostId"`
+	Hosts               []FleetHost         `json:"hosts"`
+	ArchivedHosts       []FleetHost         `json:"archivedHosts,omitempty"`
+	SelectedHostIDs     []string            `json:"selectedHostIds,omitempty"`
+	SelectedNodeIDs     map[string][]string `json:"selectedNodeIds,omitempty"`
+	GlobalSubscription  string              `json:"globalSubscription,omitempty"`
+	SubscriptionUpdated time.Time           `json:"subscriptionUpdated,omitempty"`
 }

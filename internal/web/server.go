@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,16 +60,30 @@ type Server struct {
 	store         *store.Store
 	agent         AgentAPI
 	version       string
+	fleetVault    *security.Vault
+	fleetVaultErr error
 	limiterMu     sync.Mutex
 	loginAttempts map[string][]time.Time
+	fleetRequests map[string][]time.Time
 }
 
 func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Server {
-	return &Server{cfg: cfg, store: s, agent: agent, version: version, loginAttempts: map[string][]time.Time{}}
+	var vault *security.Vault
+	var vaultErr error
+	if cfg.DataDir == "" {
+		vaultErr = errors.New("fleet vault requires a data directory")
+	} else {
+		vault, vaultErr = security.OpenVault(filepath.Join(cfg.DataDir, "fleet-secrets"))
+	}
+	return &Server{cfg: cfg, store: s, agent: agent, version: version, fleetVault: vault, fleetVaultErr: vaultErr, loginAttempts: map[string][]time.Time{}, fleetRequests: map[string][]time.Time{}}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/fleet/agent/enroll", s.fleetAgentEnroll)
+	mux.HandleFunc("POST /api/v1/fleet/agent/heartbeat", s.fleetAgentHeartbeat)
+	mux.HandleFunc("GET /api/v1/fleet/agent/commands/next", s.fleetAgentNextCommand)
+	mux.HandleFunc("POST /api/v1/fleet/agent/commands/{id}/result", s.fleetAgentCommandResult)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("GET /api/v1/auth/me", s.auth(s.me, false))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.auth(s.logout, true))
@@ -102,7 +117,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/settings", s.auth(s.settings, false))
 	mux.HandleFunc("PUT /api/v1/settings", s.auth(s.saveSettings, true))
 	mux.HandleFunc("POST /api/v1/settings/subscription-token", s.auth(s.rotateSubscriptionToken, true))
+	mux.HandleFunc("GET /api/v1/fleet/status", s.auth(s.fleetStatus, false))
+	mux.HandleFunc("PUT /api/v1/fleet/status", s.auth(s.saveFleetStatus, true))
+	mux.HandleFunc("POST /api/v1/fleet/enrollments", s.auth(s.createFleetEnrollment, true))
+	mux.HandleFunc("PATCH /api/v1/fleet/hosts/{hostId}", s.auth(s.renameFleetHost, true))
+	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}", s.auth(s.archiveFleetHost, true))
+	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}/purge", s.auth(s.purgeFleetHost, true))
+	mux.HandleFunc("/api/v1/fleet/hosts/{hostId}/{resource...}", s.fleetAuth(s.fleetHostGateway))
 	mux.HandleFunc("GET /sub/{token}/clash.yaml", s.subscription)
+	mux.HandleFunc("GET /fleet-sub/{token}/clash.yaml", s.fleetSubscription)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "version": s.version})
 	})

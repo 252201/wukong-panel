@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -36,9 +37,10 @@ import (
 )
 
 type Manager struct {
-	cfg   config.Config
-	store *store.Store
-	vault *security.Vault
+	cfg      config.Config
+	store    *store.Store
+	vault    *security.Vault
+	mutation sync.Mutex
 }
 
 const (
@@ -82,6 +84,8 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 }
 
 func (m *Manager) ReconcileDeviceGroups(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if m.cfg.Demo {
 		return nil
 	}
@@ -248,6 +252,8 @@ func mergeDeviceGroupConfigs(nodes []model.Node) ([]byte, error) {
 }
 
 func (m *Manager) ReconcileRuntimeVersion(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if m.cfg.Demo {
 		return nil
 	}
@@ -270,6 +276,8 @@ func (m *Manager) DeploymentDefaults(context.Context) (model.NodeDeploymentDefau
 }
 
 func (m *Manager) ReconcileBindings(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if m.cfg.Demo {
 		return nil
 	}
@@ -542,6 +550,8 @@ func (m *Manager) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 }
 
 func (m *Manager) DeleteCandidate(ctx context.Context, id, confirmName string) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	candidates, err := m.Scan(ctx)
 	if err != nil {
 		return err
@@ -771,6 +781,8 @@ func (m *Manager) enableService(ctx context.Context, node model.Node) error {
 }
 
 func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error) {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	candidates, err := m.Scan(ctx)
 	if err != nil {
 		return 0, err
@@ -804,6 +816,8 @@ func (m *Manager) Import(ctx context.Context, fingerprints []string) (int, error
 }
 
 func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (model.Node, error) {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	request, err := prepareCreateRequest(request)
 	if err != nil {
 		return model.Node{}, err
@@ -819,6 +833,8 @@ func (m *Manager) Create(ctx context.Context, request model.NodeCreateRequest) (
 }
 
 func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreateRequest) ([]model.Node, error) {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if len(request.Nodes) < 2 || len(request.Nodes) > 20 {
 		return nil, errors.New("device batch must contain between 2 and 20 nodes")
 	}
@@ -1315,6 +1331,8 @@ func configUsesSelfSignedCertificate(configPath string) bool {
 }
 
 func (m *Manager) Action(ctx context.Context, id, action, confirmName string) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	node, err := m.store.Node(ctx, id, true)
 	if err != nil {
 		return err
@@ -1594,6 +1612,8 @@ func compactProbeError(err error) string {
 }
 
 func (m *Manager) Rename(ctx context.Context, id string, request model.NodeRenameRequest) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	name := strings.TrimSpace(request.Name)
 	if name == "" || utf8.RuneCountInString(name) > 80 {
 		return errors.New("node name is required and must be at most 80 characters")
@@ -1636,6 +1656,8 @@ func (m *Manager) EditDetails(ctx context.Context, id string) (model.NodeEditDet
 }
 
 func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditRequest) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	node, err := m.store.Node(ctx, id, true)
 	if err != nil {
 		return err

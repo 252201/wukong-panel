@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -86,6 +89,10 @@ func main() {
 		runSingBoxCLI(context.Background(), cfg, cfg.Args)
 		return
 	}
+	if cfg.Command == "fleet" {
+		runFleetCLI(context.Background(), cfg, cfg.Args)
+		return
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		log.Fatal(err)
 	}
@@ -149,6 +156,11 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
+		if connector, fleetErr := agent.NewFleetConnector(cfg, s, manager, version); fleetErr == nil {
+			go connector.Run(ctx)
+		} else if !errors.Is(fleetErr, os.ErrNotExist) {
+			log.Printf("fleet connector disabled: %v", fleetErr)
+		}
 		server := agent.NewServer(manager, cfg.AgentToken)
 		fatalServe(server.ListenAndServe(ctx, cfg.AgentSocket))
 		return
@@ -182,8 +194,97 @@ func main() {
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:
-		log.Fatalf("unknown command %q (use serve, agent, web, init, reset-password, doctor, scan, node, singbox)", cfg.Command)
+		log.Fatalf("unknown command %q (use serve, agent, web, init, reset-password, doctor, scan, node, singbox, fleet)", cfg.Command)
 	}
+}
+
+func runFleetCLI(ctx context.Context, cfg config.Config, args []string) {
+	if os.Geteuid() != 0 {
+		log.Fatal("fleet join/leave must be run as root")
+	}
+	if len(args) == 0 {
+		log.Fatal("usage: wukong-panel fleet join --controller URL --enrollment-token TOKEN [--host-name NAME] | fleet leave")
+	}
+	switch args[0] {
+	case "leave":
+		for _, path := range []string{cfg.FleetConfigFile, cfg.FleetTokenFile} {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Fatal(err)
+			}
+		}
+		fmt.Println("fleet controller connection removed")
+	case "join":
+		flags := flag.NewFlagSet("fleet join", flag.ExitOnError)
+		controller := flags.String("controller", "", "trusted HTTPS controller URL")
+		enrollmentToken := flags.String("enrollment-token", "", "single-use enrollment token")
+		hostName := flags.String("host-name", "", "display name on the controller")
+		if err := flags.Parse(args[1:]); err != nil {
+			log.Fatal(err)
+		}
+		controllerURL, err := url.Parse(strings.TrimRight(strings.TrimSpace(*controller), "/") + "/")
+		if err != nil || controllerURL.Scheme != "https" || controllerURL.Host == "" || controllerURL.User != nil {
+			log.Fatal("--controller must be a trusted HTTPS URL")
+		}
+		if strings.TrimSpace(*enrollmentToken) == "" {
+			log.Fatal("--enrollment-token is required")
+		}
+		identity := agent.RuntimeFleetIdentity(*hostName, version)
+		request := model.FleetEnrollmentRequest{Token: strings.TrimSpace(*enrollmentToken), Name: identity.Name, Hostname: identity.Hostname, OS: identity.OS, Arch: identity.Arch, ServiceManager: identity.ServiceManager, PanelVersion: identity.PanelVersion, ProtocolVersion: identity.ProtocolVersion, Capabilities: identity.Capabilities}
+		body, _ := json.Marshal(request)
+		httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, controllerURL.String()+"api/v1/fleet/agent/enroll", bytes.NewReader(body))
+		if err != nil {
+			log.Fatal(err)
+		}
+		httpRequest.Header.Set("Content-Type", "application/json")
+		response, err := agent.NewTrustedFleetHTTPClient(30 * time.Second).Do(httpRequest)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer response.Body.Close()
+		responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if response.StatusCode != http.StatusCreated {
+			log.Fatalf("controller enrollment failed: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+		}
+		var enrolled model.FleetEnrollmentResponse
+		if err = json.Unmarshal(responseBody, &enrolled); err != nil || enrolled.HostID == "" || enrolled.AgentToken == "" {
+			log.Fatal("controller returned an invalid enrollment response")
+		}
+		clientConfig, _ := json.MarshalIndent(agent.FleetClientConfig{ControllerURL: controllerURL.String(), HostID: enrolled.HostID, HostName: identity.Name}, "", "  ")
+		if err = atomicPrivateWrite(cfg.FleetConfigFile, append(clientConfig, '\n')); err == nil {
+			err = atomicPrivateWrite(cfg.FleetTokenFile, []byte(enrolled.AgentToken+"\n"))
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("fleet controller joined: host_id=%s\n", enrolled.HostID)
+	default:
+		log.Fatalf("unknown fleet subcommand %q", args[0])
+	}
+}
+
+func atomicPrivateWrite(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".wukong-fleet-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err = temporary.Chmod(0o600); err == nil {
+		_, err = temporary.Write(data)
+	}
+	if closeErr := temporary.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {

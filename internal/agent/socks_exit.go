@@ -225,6 +225,8 @@ func socksStateConnectionEqual(a, b socksExitState) bool {
 }
 
 func (m *Manager) ConfigureSOCKSExit(ctx context.Context, request model.SOCKSExitRequest) (model.SOCKSExit, error) {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	request, err := normalizeSOCKSExitRequest(request)
 	if err != nil {
 		return model.SOCKSExit{}, err
@@ -300,6 +302,8 @@ func (m *Manager) ConfigureSOCKSExit(ctx context.Context, request model.SOCKSExi
 }
 
 func (m *Manager) RemoveSOCKSExit(ctx context.Context, confirm string) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if confirm != "REMOVE" {
 		return errors.New("confirmation must be REMOVE")
 	}

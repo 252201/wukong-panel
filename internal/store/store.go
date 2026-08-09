@@ -108,6 +108,40 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, actor TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT NOT NULL, detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS fleet_enrollment_tokens (
+  token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fleet_hosts (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, hostname TEXT NOT NULL DEFAULT '', os TEXT NOT NULL DEFAULT '',
+  arch TEXT NOT NULL DEFAULT '', service_manager TEXT NOT NULL DEFAULT '', panel_version TEXT NOT NULL DEFAULT '',
+  sing_box_version TEXT NOT NULL DEFAULT '', protocol_version INTEGER NOT NULL DEFAULT 0,
+  capabilities_json TEXT NOT NULL DEFAULT '[]', token_hash TEXT NOT NULL UNIQUE,
+  snapshot_json TEXT NOT NULL DEFAULT '{}', last_seen_at INTEGER NOT NULL DEFAULT 0,
+  archived_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_hosts_last_seen ON fleet_hosts(last_seen_at);
+CREATE TABLE IF NOT EXISTS fleet_metrics (
+  host_id TEXT NOT NULL, ts INTEGER NOT NULL, metric_json TEXT NOT NULL,
+  PRIMARY KEY(host_id,ts), FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_metrics_ts ON fleet_metrics(ts);
+CREATE TABLE IF NOT EXISTS fleet_commands (
+  id TEXT PRIMARY KEY, host_id TEXT NOT NULL, job_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT 'admin',
+  payload_cipher TEXT NOT NULL DEFAULT '', result_cipher TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+  error TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_commands_pending ON fleet_commands(host_id,status,expires_at,created_at);
+CREATE TABLE IF NOT EXISTS fleet_command_receipts (
+  command_id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '', completed_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fleet_subscription_cache (
+  host_id TEXT PRIMARY KEY, revision TEXT NOT NULL DEFAULT '', cipher TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
 `
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
@@ -138,6 +172,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 		}
 	}
 	if err := s.ensureColumn("process_recent", "node_names", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("fleet_commands", "actor", "TEXT NOT NULL DEFAULT 'admin'"); err != nil {
 		return err
 	}
 	defaults := map[string]string{

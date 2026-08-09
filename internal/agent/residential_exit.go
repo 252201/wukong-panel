@@ -94,6 +94,8 @@ func ensureResidentialRPFilterPostUp(config string) (string, bool, error) {
 }
 
 func (m *Manager) ReconcileResidentialExit(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if m.cfg.Demo {
 		return nil
 	}
@@ -230,6 +232,8 @@ func residentialExitModel(state residentialExitState) model.ResidentialExit {
 }
 
 func (m *Manager) ConfigureResidentialExit(ctx context.Context, request model.ResidentialExitRequest) (model.ResidentialExit, error) {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	request, err := validateResidentialRequest(request)
 	if err != nil {
 		return model.ResidentialExit{}, err
@@ -319,6 +323,8 @@ func (m *Manager) installResidentialExit(ctx context.Context, state residentialE
 }
 
 func (m *Manager) RemoveResidentialExit(ctx context.Context, confirm string) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
 	if confirm != "REMOVE" {
 		return errors.New("请输入 REMOVE 确认移除落地出口")
 	}

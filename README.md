@@ -1,14 +1,17 @@
 # 悟空面板
 
-悟空面板是面向个人与小型团队的单机 VPS 节点控制台，将 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS、AnyTLS 的部署、生命周期管理、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
+悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.8.2-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.9.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
 ## 特性
 
-- 单机自治：每台 VPS 独立安装，无需中心服务器。
+- 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
+- 出站安全通道：远端 Agent 仅通过证书可信的 HTTPS 主动连接中央，每 10 秒心跳并维持命令长轮询；不开放 Root Agent 公网端口、不使用 SSH。一次性接入令牌 10 分钟过期且只能成功使用一次，后续独立 Agent Token 只在中央保存 SHA-256。
+- 幂等远端任务：每台远端配置变更串行执行，命令使用幂等 ID；断线重投不会重复操作，过期命令不会在以后重连时补执行。配置暂存、`sing-box check`、快照和失败回滚仍由远端 Root Agent 完成。
+- 全局订阅：保留每台 VPS 的原订阅，同时提供可筛选主机和节点的中央订阅。远端生成的 Clash 片段以中央专用 AES-256-GCM 密钥加密缓存；离线时标记并使用最后成功缓存，从未生成缓存则明确返回 `503`。
 - 七协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 与 AnyTLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
 - 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
 - Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
@@ -127,7 +130,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.8.2 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.9.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -176,6 +179,29 @@ sudo sh install.sh --firewall-off
 已安装面板的 VPS 也可以直接运行 `sudo sh install.sh`，在操作菜单中选择“管理防火墙”，再选择查看状态、开启、关闭、指定端口或“开启并放行所有入站端口”。“所有端口”仅建议用于临时排障；云厂商安全组仍需单独配置。
 
 开启防火墙时安装器会优先识别当前 SSH 监听端口并自动放行，避免因自定义 SSH 端口导致锁死；云厂商安全组仍需单独配置。
+
+## 中央多机管理
+
+在准备作为中央的面板进入“设置 → 中央多机控制”，填写包含随机管理路径的公网 HTTPS URL，例如 `https://panel.example.com/wukong-abc123/`，保存后生成一次性接入命令。该 URL 必须使用操作系统信任链可验证的证书，不提供跳过 TLS 校验的选项。
+
+在远端 VPS 以 root 运行面板生成的命令即可完成安装或安全更新并接入；等价参数如下：
+
+```bash
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- \
+      --join-controller 'https://panel.example.com/wukong-abc123/' \
+      --enrollment-token '10分钟一次性令牌' \
+      --host-name '东京-02'
+```
+
+退出中央只会删除远端 root-only 的连接配置并重启 Agent，本机面板、数据库和 sing-box 节点保持不变：
+
+```bash
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- --leave-controller
+```
+
+中央模式首版不提供跨主机批量部署、面板升级、防火墙、RBAC、多主复制或自动故障切换。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
 
 ### AnyTLS
 

@@ -29,6 +29,10 @@ grep -q -- '--start|--start-panel) ACTION=start' "$ROOT/install.sh" || { echo "s
 grep -q -- '--stop|--stop-panel) ACTION=stop' "$ROOT/install.sh" || { echo "stop panel flag missing" >&2; exit 1; }
 grep -q -- '--install-residential-peer) ACTION=residential-peer-install' "$ROOT/install.sh" || { echo "residential peer install flag missing" >&2; exit 1; }
 grep -q -- '--remove-residential-peer) ACTION=residential-peer-remove' "$ROOT/install.sh" || { echo "residential peer removal flag missing" >&2; exit 1; }
+grep -q -- '--join-controller) JOIN_CONTROLLER=' "$ROOT/install.sh" || { echo "fleet controller join flag missing" >&2; exit 1; }
+grep -q -- '--enrollment-token) ENROLLMENT_TOKEN=' "$ROOT/install.sh" || { echo "fleet enrollment token flag missing" >&2; exit 1; }
+grep -q -- '--leave-controller) LEAVE_CONTROLLER=true' "$ROOT/install.sh" || { echo "fleet leave flag missing" >&2; exit 1; }
+grep -q '/usr/local/bin/wukong-panel fleet leave' "$ROOT/install.sh" || { echo "fleet leave command missing" >&2; exit 1; }
 grep -q '2|start) ACTION=start' "$ROOT/install.sh" || { echo "start panel menu action missing" >&2; exit 1; }
 grep -q '3|stop) ACTION=stop' "$ROOT/install.sh" || { echo "stop panel menu action missing" >&2; exit 1; }
 grep -q '7|reset-password) ACTION=reset-password' "$ROOT/install.sh" || { echo "reset password menu action missing" >&2; exit 1; }
