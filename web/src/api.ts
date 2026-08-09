@@ -163,6 +163,17 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
+export interface FleetSnapshot { overview: Overview; nodes: NodeItem[] }
+export interface FleetHost {
+  id: string; name: string; hostname: string; os: string; arch: string; serviceManager: string
+  panelVersion: string; singBoxVersion: string; protocolVersion: number; capabilities: string[]
+  online: boolean; compatible: boolean; archived: boolean; lastSeenAt?: string; subscriptionCachedAt?: string; createdAt: string; snapshot: FleetSnapshot
+}
+export interface FleetStatus {
+  enabled: boolean; publicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
+  globalSubscription?: string; subscriptionUpdated?: string
+}
+
 function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPlan {
   return {
     ...plan,
@@ -177,23 +188,26 @@ function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPla
 }
 
 let csrf = ''
+let fleetHostID = ''
 export function setCSRF(value: string) { csrf = value }
+export function setFleetHost(value: string) { fleetHostID = value === 'local' ? '' : value }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, scoped = true): Promise<T> {
   const headers = new Headers(options.headers)
   if (options.body) headers.set('Content-Type', 'application/json')
   if (csrf && options.method && options.method !== 'GET') headers.set('X-CSRF-Token', csrf)
-  const response = await fetch(`api/v1/${path}`, { ...options, headers, credentials: 'same-origin' })
+  const target = scoped && fleetHostID ? `fleet/hosts/${encodeURIComponent(fleetHostID)}/${path}` : path
+  const response = await fetch(`api/v1/${target}`, { ...options, headers, credentials: 'same-origin' })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`)
   return body as T
 }
 
 export const api = {
-  login: (username: string, password: string) => request<{username: string; csrf: string; mustChange: boolean}>('auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  me: () => request<{username: string; csrf: string; mustChange: boolean; version: string}>('auth/me'),
-  logout: () => request<{ok: boolean}>('auth/logout', { method: 'POST', body: '{}' }),
-  changePassword: (password: string) => request<{ok: boolean}>('auth/password', { method: 'POST', body: JSON.stringify({ password }) }),
+  login: (username: string, password: string) => request<{username: string; csrf: string; mustChange: boolean}>('auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }, false),
+  me: () => request<{username: string; csrf: string; mustChange: boolean; version: string}>('auth/me', {}, false),
+  logout: () => request<{ok: boolean}>('auth/logout', { method: 'POST', body: '{}' }, false),
+  changePassword: (password: string) => request<{ok: boolean}>('auth/password', { method: 'POST', body: JSON.stringify({ password }) }, false),
   overview: () => request<Overview>('overview'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
@@ -221,4 +235,10 @@ export const api = {
   settings: () => request<Settings>('settings'),
   saveSettings: (data: Settings) => request<{ok: boolean}>('settings', { method: 'PUT', body: JSON.stringify(data) }),
   rotateSubscription: () => request<{token: string}>('settings/subscription-token', { method: 'POST', body: '{}' }),
+  fleetStatus: () => request<FleetStatus>('fleet/status', {}, false),
+  saveFleetStatus: (data: {enabled: boolean; publicUrl: string; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>; rotateGlobalToken?: boolean}) => request<FleetStatus>('fleet/status', { method: 'PUT', body: JSON.stringify(data) }, false),
+  createFleetEnrollment: () => request<{token: string; expiresAt: string; command: string}>('fleet/enrollments', { method: 'POST', body: '{}' }, false),
+  renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
+  removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
+  purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
 }

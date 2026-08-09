@@ -41,6 +41,10 @@ SINGBOX_RUNTIME_BIN=""
 SINGBOX_RUNTIME_CONFIG_DIR=""
 PORT80_SERVICES_FILE=""
 PORT80_SERVICES_STOPPED=false
+JOIN_CONTROLLER=""
+ENROLLMENT_TOKEN=""
+FLEET_HOST_NAME=""
+LEAVE_CONTROLLER=false
 
 info() { printf '\033[1;33m[悟空]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;31m[提示]\033[0m %s\n' "$*" >&2; }
@@ -810,6 +814,32 @@ start_panel_now() {
     die "面板服务已尝试启动，但健康检查未通过；请检查 Web 与 Agent 日志"
   fi
   info "悟空面板已启动：$health"
+}
+
+restart_agent_service() {
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl restart wukong-agent.service
+  elif command -v rc-service >/dev/null 2>&1; then
+    rc-service wukong-agent restart
+  else
+    die "无法识别 Agent 服务管理器"
+  fi
+}
+
+join_fleet_controller() {
+  [ -n "$JOIN_CONTROLLER" ] || return 0
+  [ -n "$ENROLLMENT_TOKEN" ] || die "--join-controller 必须同时提供 --enrollment-token"
+  set -- fleet join --controller "$JOIN_CONTROLLER" --enrollment-token "$ENROLLMENT_TOKEN"
+  [ -z "$FLEET_HOST_NAME" ] || set -- "$@" --host-name "$FLEET_HOST_NAME"
+  /usr/local/bin/wukong-panel "$@" || die "接入中央主控失败"
+  restart_agent_service
+  info "已接入中央主控并重启 Agent"
+}
+
+leave_fleet_controller() {
+  /usr/local/bin/wukong-panel fleet leave || die "退出中央主控失败"
+  restart_agent_service
+  info "已退出中央主控；本机面板和节点保持运行"
 }
 
 stop_panel_now() {
@@ -1713,6 +1743,10 @@ usage() {
   --domain DOMAIN      面板域名
   --base-path PATH     随机管理路径；留空时自动生成
   --version VERSION    安装指定版本
+  --join-controller URL  安装/更新后接入可信 HTTPS 中央主控
+  --enrollment-token TOKEN  10 分钟一次性接入令牌
+  --host-name NAME     在中央主控显示的本机名称
+  --leave-controller   撤销本机保存的中央连接并重启 Agent
   --acme METHOD        证书方式：http、cloudflare、selfsigned
   --acme-ip-version 4|6  HTTP-01 强制通过 IPv4 或 IPv6 验证
   --email EMAIL        Let's Encrypt 账户邮箱
@@ -1755,6 +1789,10 @@ while [ "$#" -gt 0 ]; do
     --uninstall) ACTION=uninstall; HAS_CONFIG_ARGS=true; shift ;;
     --purge) ACTION=uninstall; PURGE=true; HAS_CONFIG_ARGS=true; shift ;;
     --version) VERSION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --join-controller) JOIN_CONTROLLER="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --enrollment-token) ENROLLMENT_TOKEN="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --host-name) FLEET_HOST_NAME="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
+    --leave-controller) LEAVE_CONTROLLER=true; HAS_CONFIG_ARGS=true; shift ;;
     --domain) DOMAIN="$2"; DOMAIN_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --port) PORT="$2"; PORT_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --base-path) BASE_PATH="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
@@ -1827,7 +1865,15 @@ if [ "$ACTION" = "auto" ]; then
   panel_installed && installed=true
   ACTION=$(resolve_auto_action "$installed" "$RECONFIGURE_ARGS")
 fi
-case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove|firewall) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall" ;; esac
+if [ "$LEAVE_CONTROLLER" = true ]; then ACTION=fleet-leave; fi
+if [ -n "$JOIN_CONTROLLER" ] && panel_installed; then ACTION=update; fi
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove|firewall|fleet-leave) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall" ;; esac
+
+if [ "$ACTION" = "fleet-leave" ]; then
+  panel_installed || die "未检测到已安装的悟空面板"
+  leave_fleet_controller
+  exit 0
+fi
 
 if [ "$ACTION" = "residential-peer-install" ]; then
   install_residential_peer
@@ -1966,6 +2012,7 @@ if [ "$ACTION" = "update" ]; then
   install_download_tools
   ensure_residential_exit_dependencies
   update_panel
+  join_fleet_controller
   exit 0
 fi
 if [ "$ACTION" = "reset-password" ]; then
@@ -2239,6 +2286,8 @@ if [ "$INIT" = "systemd" ]; then systemctl enable --now nginx; systemctl reload 
 if [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; then
   configure_certificate_renewal "$DOMAIN" "$TLS_CERT" "$TLS_KEY"
 fi
+
+join_fleet_controller
 
 IPV4_HOST=$(curl -4 -fsSL --max-time 4 https://api.ipify.org 2>/dev/null || true)
 if [ -z "$IPV4_HOST" ]; then IPV4_HOST=$(hostname -I 2>/dev/null | awk '{print $1}' || true); fi

@@ -32,6 +32,8 @@ jobs:
       - run: npm run build
         working-directory: web
       - run: go test -race ./...
+      - name: Dual-instance fleet control-plane end-to-end
+        run: go test -run '^TestFleetDualInstanceEndToEnd$' -count=1 -v ./internal/agent
       - name: Verify generated protocol configs with official sing-box
         env:
           SING_BOX_VERSION: "1.13.14"

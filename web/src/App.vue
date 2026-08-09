@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, type Candidate, type EndpointStat, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 
-type Page = 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
+type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
 
 const authenticated = ref(false)
@@ -14,6 +14,14 @@ const loginError = ref('')
 const mustChange = ref(false)
 const newPassword = ref('')
 const page = ref<Page>('overview')
+const fleetStatus = ref<FleetStatus | null>(null)
+const selectedHostId = ref('local')
+const fleetEnabledDraft = ref(false)
+const fleetPublicURL = ref('')
+const enrollmentCommand = ref('')
+const enrollmentExpiresAt = ref('')
+const fleetSelectedHosts = ref<string[]>([])
+const fleetSelectedNodes = ref<Record<string, string[]>>({})
 const overview = ref<Overview | null>(null)
 const nodes = ref<NodeItem[]>([])
 const jobs = ref<Job[]>([])
@@ -59,11 +67,12 @@ const formHydrating = ref(false)
 const probeJobs = reactive<Record<string, string>>({})
 
 const words = {
-  'zh-CN': { overview: '总览', nodes: '节点', traffic: '流量', system: '系统', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
-  'en-US': { overview: 'Overview', nodes: 'Nodes', traffic: 'Traffic', system: 'System', jobs: 'Jobs', settings: 'Settings', deploy: 'Deploy node', import: 'Import nodes', online: 'Online', offline: 'Offline' },
+  'zh-CN': { fleet: '舰队', overview: '总览', nodes: '节点', traffic: '流量', system: '系统', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
+  'en-US': { fleet: 'Fleet', overview: 'Overview', nodes: 'Nodes', traffic: 'Traffic', system: 'System', jobs: 'Jobs', settings: 'Settings', deploy: 'Deploy node', import: 'Import nodes', online: 'Online', offline: 'Offline' },
 }
 const t = (key: keyof typeof words['zh-CN']) => words[language.value][key]
 const navItems = computed(() => [
+  ...(fleetStatus.value?.enabled ? [{ id: 'fleet' as Page, seal: '舰', label: t('fleet') }] : []),
   { id: 'overview' as Page, seal: '总', label: t('overview') },
   { id: 'nodes' as Page, seal: '节', label: t('nodes') },
   { id: 'traffic' as Page, seal: '流', label: t('traffic') },
@@ -71,6 +80,27 @@ const navItems = computed(() => [
   { id: 'jobs' as Page, seal: '任', label: t('jobs') },
   { id: 'settings' as Page, seal: '设', label: t('settings') },
 ])
+const currentFleetHost = computed<FleetHost | null>(() => fleetStatus.value?.hosts.find(host => host.id === selectedHostId.value) || null)
+const remoteHost = computed(() => selectedHostId.value !== 'local')
+const mutationsDisabled = computed(() => remoteHost.value && (!currentFleetHost.value?.online || !currentFleetHost.value?.compatible))
+const fleetHosts = computed(() => fleetStatus.value?.hosts || [])
+const remoteFleetHosts = computed(() => fleetHosts.value.filter(host => host.id !== 'local'))
+const fleetAggregate = computed(() => {
+  const online = fleetHosts.value.filter(host => host.online)
+  const totals = online.reduce((result, host) => {
+    const metric = host.snapshot?.overview?.now
+    result.cpu += metric?.cpu || 0
+    result.memoryUsed += metric?.memoryUsedBytes || 0
+    result.memoryTotal += metric?.memoryTotalBytes || 0
+    result.diskUsed += metric?.diskUsedBytes || 0
+    result.diskTotal += metric?.diskTotalBytes || 0
+    result.rx += metric?.rxBps || 0
+    result.tx += metric?.txBps || 0
+    result.nodes += host.snapshot?.overview?.nodeCount || 0
+    return result
+  }, { cpu: 0, memoryUsed: 0, memoryTotal: 0, diskUsed: 0, diskTotal: 0, rx: 0, tx: 0, nodes: 0 })
+  return { ...totals, cpu: online.length ? totals.cpu / online.length : 0, online: online.length, total: fleetHosts.value.length }
+})
 
 const trafficPercent = computed(() => {
   const data = overview.value
@@ -191,17 +221,104 @@ function navigateTo(nextPage: Page) {
   page.value = nextPage
 }
 
+async function refreshFleetStatus() {
+  const status = await api.fleetStatus()
+  fleetStatus.value = status
+  fleetEnabledDraft.value = status.enabled
+	 fleetPublicURL.value = status.publicUrl || `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
+	 fleetSelectedHosts.value = status.selectedHostIds?.length ? [...status.selectedHostIds] : status.hosts.map(host => host.id)
+	 const selectedNodes = { ...(status.selectedNodeIds || {}) }
+	 for (const host of status.hosts) if (!(host.id in selectedNodes)) selectedNodes[host.id] = (host.snapshot?.nodes || []).filter(node => node.status === 'active').map(node => node.id)
+	 fleetSelectedNodes.value = selectedNodes
+  if (!status.hosts.some(host => host.id === selectedHostId.value)) {
+    selectedHostId.value = 'local'
+    setFleetHost('local')
+  }
+}
+
+async function switchFleetHost(hostId: string) {
+  selectedHostId.value = hostId
+  setFleetHost(hostId)
+  residentialFormHydrated.value = false
+  socksFormHydrated.value = false
+  if (page.value === 'fleet') navigateTo('overview')
+  await refreshAll()
+}
+
+async function saveFleetController(rotateGlobalToken = false) {
+  busy.value = true
+  try {
+	 fleetStatus.value = await api.saveFleetStatus({ enabled: fleetEnabledDraft.value, publicUrl: fleetPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value, rotateGlobalToken })
+    notify(rotateGlobalToken ? '全局订阅令牌已轮换' : '中央控制设置已保存')
+  } catch (error) { notify(error instanceof Error ? error.message : '中央控制设置保存失败') }
+  finally { busy.value = false }
+}
+
+async function saveFleetSubscriptionSelection() {
+	try {
+		fleetStatus.value = await api.saveFleetStatus({ enabled: true, publicUrl: fleetPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value })
+		notify('全局订阅范围已保存，旧缓存已失效')
+	} catch (error) { notify(error instanceof Error ? error.message : '订阅范围保存失败') }
+}
+
+function toggleFleetNode(hostId: string, nodeId: string, enabled: boolean) {
+	const selected = new Set(fleetSelectedNodes.value[hostId] || [])
+	if (enabled) selected.add(nodeId); else selected.delete(nodeId)
+	fleetSelectedNodes.value = { ...fleetSelectedNodes.value, [hostId]: [...selected] }
+}
+
+async function createFleetEnrollment() {
+  busy.value = true
+  try {
+    const result = await api.createFleetEnrollment()
+    enrollmentCommand.value = result.command
+    enrollmentExpiresAt.value = result.expiresAt
+    notify('已生成 10 分钟一次性接入命令')
+  } catch (error) { notify(error instanceof Error ? error.message : '接入令牌生成失败') }
+  finally { busy.value = false }
+}
+
+async function renameFleetHost(host: FleetHost) {
+  const name = window.prompt('新的主机名称', host.name)?.trim()
+  if (!name || name === host.name) return
+  try { await api.renameFleetHost(host.id, name); await refreshFleetStatus(); notify('主机已重命名') }
+  catch (error) { notify(error instanceof Error ? error.message : '重命名失败') }
+}
+
+async function removeFleetHost(host: FleetHost) {
+  const confirmName = window.prompt(`输入完整主机名「${host.name}」确认移除。远端面板与节点不会受影响。`) || ''
+  if (confirmName !== host.name) return
+  try {
+    await api.removeFleetHost(host.id, confirmName)
+    if (selectedHostId.value === host.id) await switchFleetHost('local')
+    await refreshFleetStatus(); notify('主机凭据已撤销，指标进入 30 天归档期')
+  } catch (error) { notify(error instanceof Error ? error.message : '移除失败') }
+}
+
+async function purgeFleetHost(host: FleetHost) {
+	const confirmName = window.prompt(`永久清除「${host.name}」的中央指标、命令和订阅缓存。输入完整主机名确认。`) || ''
+	if (confirmName !== host.name) return
+	try { await api.purgeFleetHost(host.id, confirmName); await refreshFleetStatus(); notify('主机归档数据已永久清除') }
+	catch (error) { notify(error instanceof Error ? error.message : '永久清除失败') }
+}
+
+function ensureHostWritable() {
+  if (!mutationsDisabled.value) return true
+  notify(currentFleetHost.value?.compatible ? '该主机离线，修改操作已禁用' : '舰队协议版本不兼容，修改操作已禁用')
+  return false
+}
+
 async function bootstrap() {
   loading.value = true
   try {
     const me = await api.me(); setCSRF(me.csrf); authenticated.value = true; username.value = me.username; mustChange.value = me.mustChange
-    if (!me.mustChange) await refreshAll()
+    if (!me.mustChange) { await refreshFleetStatus(); await refreshAll() }
   } catch { authenticated.value = false }
   finally { loading.value = false }
 }
 async function login() {
   busy.value = true; loginError.value = ''
-  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; if (!result.mustChange) await refreshAll() }
+  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; if (!result.mustChange) { await refreshFleetStatus(); await refreshAll() } }
   catch (error) { loginError.value = error instanceof Error ? error.message : '登录失败' }
   finally { busy.value = false }
 }
@@ -235,6 +352,7 @@ async function showJobLog() {
   await refreshAll()
 }
 async function createNode() {
+	if (!ensureHostWritable()) return
   busy.value = true
   try {
     const creatingDeviceBatch = deviceMode.value
@@ -321,6 +439,7 @@ watch(() => createForm.protocol, (protocol, previous) => {
   if (protocol !== 'vless-ws-tunnel') createForm.preferredServer = ''
 })
 async function openNodeForm(kind: 'create' | 'device-create') {
+	if (!ensureHostWritable()) return
   Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
   if (kind === 'device-create') resetDeviceDrafts()
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
@@ -340,6 +459,7 @@ async function openNodeForm(kind: 'create' | 'device-create') {
 function openCreate() { return openNodeForm('create') }
 function openDeviceCreate() { return openNodeForm('device-create') }
 async function openEdit(node: NodeItem) {
+	if (!ensureHostWritable()) return
   if (node.ownership !== 'managed') return
   selectedNode.value = node
   modal.value = 'edit'
@@ -367,6 +487,7 @@ async function openEdit(node: NodeItem) {
   }
 }
 async function nodeAction(node: NodeItem, action: string) {
+	if (!ensureHostWritable()) return
   if (action === 'delete') { selectedNode.value = node; deleteConfirm.value = ''; modal.value = 'delete'; return }
   try { await api.nodeAction(node.id, action); notify(`${node.sharedGroup && ['start', 'stop', 'restart'].includes(action) ? '设备编队整组' : ''}${jobLabel(`node.${action}`)}任务已创建`); await refreshAll() }
   catch (error) { notify(error instanceof Error ? error.message : '操作失败') }
@@ -398,6 +519,7 @@ async function watchProbeJob(nodeId: string, jobId: string) {
   finally { if (probeJobs[nodeId] === jobId) delete probeJobs[nodeId] }
 }
 async function deleteNode() {
+	if (!ensureHostWritable()) return
   if (!selectedNode.value) return
   busy.value = true
   try { await api.nodeAction(selectedNode.value.id, 'delete', deleteConfirm.value); modal.value = null; notify('删除任务已创建'); await showJobLog() }
@@ -410,11 +532,13 @@ async function revealShare(node: NodeItem) {
   catch (error) { notify(error instanceof Error ? error.message : '无法生成分享链接') }
 }
 async function openImport() {
+	if (!ensureHostWritable()) return
   modal.value = 'import'; candidates.value = []; selectedCandidates.value = []; candidateDeleteTarget.value = null; candidateDeleteConfirm.value = ''
   try { candidates.value = await api.scan(); selectedCandidates.value = candidates.value.map(item => item.fingerprint) }
   catch (error) { notify(error instanceof Error ? error.message : '扫描失败') }
 }
 async function importSelected() {
+	if (!ensureHostWritable()) return
   busy.value = true
   try { await api.importNodes(selectedCandidates.value); modal.value = null; notify('接管任务已创建'); await showJobLog() }
   catch (error) { notify(error instanceof Error ? error.message : '接管失败') }
@@ -430,6 +554,7 @@ function cancelCandidateDelete() {
   candidateDeleteConfirm.value = ''
 }
 async function deleteCandidate() {
+	if (!ensureHostWritable()) return
   const candidate = candidateDeleteTarget.value
   if (!candidate || candidateDeleteConfirm.value !== candidate.name) return
   busy.value = true
@@ -441,10 +566,12 @@ async function deleteCandidate() {
   finally { busy.value = false }
 }
 async function saveSettings() {
+	if (!ensureHostWritable()) return
   try { await api.saveSettings(settings.value); language.value = settings.value.language === 'en-US' ? 'en-US' : 'zh-CN'; notify('设置已保存') }
   catch (error) { notify(error instanceof Error ? error.message : '保存失败') }
 }
 async function rotateSubscription() {
+	if (!ensureHostWritable()) return
   try { const result = await api.rotateSubscription(); settings.value.subscriptionToken = `${result.token.slice(0, 4)}••••${result.token.slice(-4)}`; notify('订阅令牌已轮换') }
   catch (error) { notify(error instanceof Error ? error.message : '轮换失败') }
 }
@@ -455,6 +582,7 @@ async function scanSingBoxMigration() {
   finally { migrationLoading.value = false }
 }
 async function configureResidentialExit() {
+	if (!ensureHostWritable()) return
   residentialBusy.value = true
   try {
     const result = await api.configureResidentialExit({
@@ -474,6 +602,7 @@ function stageResidentialExitRemoval() {
   modal.value = 'residential-remove'
 }
 async function removeResidentialExit() {
+	if (!ensureHostWritable()) return
   if (residentialRemoveConfirm.value !== 'REMOVE' || residentialNodesInUse.value.length) return
   residentialBusy.value = true
   try {
@@ -488,6 +617,7 @@ async function removeResidentialExit() {
   finally { residentialBusy.value = false }
 }
 async function configureSOCKSExit() {
+	if (!ensureHostWritable()) return
   socksBusy.value = true
   try {
     const result = await api.configureSOCKSExit({
@@ -513,6 +643,7 @@ function stageSOCKSExitRemoval() {
   modal.value = 'socks-remove'
 }
 async function removeSOCKSExit() {
+	if (!ensureHostWritable()) return
   if (socksRemoveConfirm.value !== 'REMOVE' || socksNodesInUse.value.length) return
   socksBusy.value = true
   try {
@@ -529,7 +660,7 @@ async function removeSOCKSExit() {
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
-onMounted(async () => { updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) refreshAll().catch(() => {}) }, 10_000) })
+onMounted(async () => { updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
 onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
@@ -558,16 +689,27 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
     <aside class="sidebar">
       <button class="brand-button" @click="navigateTo('overview')"><span class="mini-orbit">悟</span><span><strong>悟空面板</strong><small>WUKONG PANEL</small></span></button>
       <nav><button v-for="item in navItems" :key="item.id" :class="{ active: page === item.id }" @click="navigateTo(item.id)"><i>{{ item.seal }}</i><span>{{ item.label }}</span><b v-if="item.id === 'jobs' && activeJobs">{{ activeJobs }}</b></button></nav>
-      <div class="sidebar-foot"><div class="server-pulse"><i></i><span><b>本机 Agent</b><small>安全通道已连接</small></span></div><button class="ghost-icon" title="退出" @click="logout">↪</button></div>
+      <div class="sidebar-foot"><div class="server-pulse" :class="{ muted: mutationsDisabled }"><i></i><span><b>{{ currentFleetHost?.name || '本机' }} Agent</b><small>{{ currentFleetHost?.online === false ? '最后快照 · 当前离线' : '安全通道已连接' }}</small></span></div><button class="ghost-icon" title="退出" @click="logout">↪</button></div>
     </aside>
 
     <section class="workspace">
       <header class="topbar">
         <div><p class="breadcrumb">天宫 / {{ navItems.find(item => item.id === page)?.label }}</p><h1>{{ navItems.find(item => item.id === page)?.label }}</h1></div>
-        <div class="top-actions"><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button class="secondary" @click="openImport">⌁ {{ t('import') }}</button><button class="device-entry" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button class="primary" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
+        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><span>当前主机</span><select :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
       </header>
 
-      <div v-if="page === 'overview'" class="page-content overview-page">
+      <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
+
+      <div v-if="page === 'fleet'" class="page-content fleet-page">
+        <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><button class="primary" @click="createFleetEnrollment">＋ 接入 VPS</button></div>
+        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>平均 CPU</small><strong>{{ fleetAggregate.cpu.toFixed(1) }}<span>%</span></strong><em>仅统计在线主机</em></article><article><small>聚合内存</small><strong>{{ bytes(fleetAggregate.memoryUsed) }}</strong><em>/ {{ bytes(fleetAggregate.memoryTotal) }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }} · {{ fleetAggregate.nodes }} 节点</em></article></section>
+        <section class="fleet-host-grid"><article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }"><header><div><i></i><span><b>{{ host.name }}</b><small>{{ host.id === 'local' ? '中央本机' : `${host.os || 'Linux'} · ${host.arch || 'unknown'}` }}</small></span></div><em>{{ host.online ? '在线' : '离线' }}</em></header><div class="fleet-host-metrics"><span><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b></span><span><small>内存</small><b>{{ bytes(host.snapshot?.overview?.now?.memoryUsedBytes || 0) }}</b></span><span><small>磁盘</small><b>{{ (host.snapshot?.overview?.now?.disk || 0).toFixed(1) }}%</b></span><span><small>节点</small><b>{{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</b></span></div><footer><span>Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }} · sing-box {{ host.singBoxVersion || '—' }}</span><div><button @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="renameFleetHost(host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="removeFleetHost(host)">移除</button></div></footer><p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p></article></section>
+        <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="purgeFleetHost(host)">永久清除</button></article></div></section>
+        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
+        <section v-if="enrollmentCommand" class="panel-card enrollment-card"><div><span class="section-mark">令</span><div><h3>一次性接入命令</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div><button @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>在远端 VPS 以 root 执行。Agent 只会主动连接上方可信 HTTPS 主控，不开放公网管理端口。</small></section>
+      </div>
+
+      <div v-else-if="page === 'overview'" class="page-content overview-page">
         <section class="hero-grid">
           <article class="traffic-oracle panel-card">
             <div class="card-caption"><span>本账期流量</span><em>{{ overview?.billingStart }} — {{ overview?.billingEnd }}</em></div>
@@ -598,16 +740,16 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <section class="node-grid">
           <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel', preferred: !!node.preferredServer }]">
             <div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div>
-            <div class="node-title-row"><h3>{{ node.name }}</h3><button v-if="node.ownership === 'managed'" type="button" title="重新编辑节点" :aria-label="`重新编辑节点 ${node.name}`" @click="openEdit(node)">编辑</button></div>
+            <div class="node-title-row"><h3>{{ node.name }}</h3><button v-if="node.ownership === 'managed'" type="button" title="重新编辑节点" :aria-label="`重新编辑节点 ${node.name}`" :disabled="mutationsDisabled" @click="openEdit(node)">编辑</button></div>
             <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
             <div v-if="node.protocol === 'vless-ws-tunnel' && node.preferredServer" class="preferred-route"><span><small>优选接入</small><code>{{ node.preferredServer }}</code></span><i>→</i><span><small>SNI · WS HOST</small><code>{{ node.server }}</code></span></div>
             <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-origin"><span><small>Cloudflare Service</small><code>{{ tunnelOrigin(node) }}</code></span><button type="button" title="复制 Cloudflare Service URL" @click="copy(tunnelOrigin(node))">复制</button></div>
             <div class="node-specs"><span><small>出站策略</small><b>{{ outboundLabel(node) }}</b></span><span :title="`配置创建于 sing-box ${node.configVersion}`"><small>运行版本</small><b>{{ overview?.singBoxVersion || node.configVersion || '—' }}</b></span><span><small>服务管理</small><b>{{ node.serviceManager }}</b></span><span><small>归属</small><b>{{ node.ownership === 'imported' ? '接管' : '悟空' }}</b></span></div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ {{ node.ownership === 'managed' ? (node.protocol === 'vless-ws-tunnel' ? '设备编队 · 独立入站，共享 sing-box 与 Tunnel 连接器' : '设备编队 · 独立入站，共享一个 sing-box 进程') : '与同配置内其他端点共享生命周期' }}</p>
             <div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div>
-            <div class="node-actions"><button @click="revealShare(node)">分享</button><button class="probe-button" :disabled="node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" @click="nodeAction(node, 'restart')">重启</button><button v-else @click="nodeAction(node, 'start')">启动</button><button class="danger" @click="nodeAction(node, 'delete')">删除</button></div>
+            <div class="node-actions"><button :disabled="mutationsDisabled" @click="revealShare(node)">分享</button><button class="probe-button" :disabled="mutationsDisabled || node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button :disabled="mutationsDisabled" @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" :disabled="mutationsDisabled" @click="nodeAction(node, 'restart')">重启</button><button v-else :disabled="mutationsDisabled" @click="nodeAction(node, 'start')">启动</button><button class="danger" :disabled="mutationsDisabled" @click="nodeAction(node, 'delete')">删除</button></div>
           </article>
-          <button class="add-node-card" @click="openCreate"><span>＋</span><b>部署新节点</b><small>七协议 · 自动生成安全凭据</small></button>
+          <button class="add-node-card" :disabled="mutationsDisabled" @click="openCreate"><span>＋</span><b>部署新节点</b><small>七协议 · 自动生成安全凭据</small></button>
         </section>
       </div>
 
@@ -633,7 +775,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
           </div>
         </section>
         <section class="endpoint-section panel-card"><div class="card-head"><div><span class="section-mark red">端</span><div><h3>近 24 小时客户端端点</h3><p>仅展示脱敏地址 · 按下行包长度聚合</p></div></div></div><div class="endpoint-list"><div v-for="(item,index) in endpoints" :key="`${item.nodeId}-${item.endpoint}`"><b>{{ String(index + 1).padStart(2, '0') }}</b><span><strong>{{ item.nodeName }}</strong><small>{{ item.endpoint }}</small></span><em>{{ bytes(item.bytes) }}</em></div><p v-if="!endpoints.length" class="empty">等待端点采样；未安装 tcpdump 时整机流量仍正常统计。</p></div></section>
-        <div class="privacy-banner"><span>隐</span><div><b>端点隐私策略</b><p>客户端 IP 默认脱敏；原始端点保留 24 小时，设备聚合保留 90 天。</p></div><label class="switch"><input v-model="settings.collectEndpoints" type="checkbox" @change="saveSettings"><i></i></label></div>
+        <div class="privacy-banner"><span>隐</span><div><b>端点隐私策略</b><p>客户端 IP 默认脱敏；原始端点保留 24 小时，设备聚合保留 90 天。</p></div><label class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled" @change="saveSettings"><i></i></label></div>
       </div>
 
       <div v-else-if="page === 'system'" class="page-content">
@@ -648,7 +790,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <label>B 机公钥<input v-model="residentialForm.peerPublicKey" placeholder="先留空生成 B 机脚本"><small>B 私钥只在 B 机本地生成，面板不会接收</small></label>
             <label>预期落地 IPv4（可选）<input v-model="residentialForm.expectedExitIp" placeholder="用于人工核对出口"></label>
           </div>
-          <div class="residential-actions"><button class="primary" :disabled="residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="residentialBusy" @click="stageResidentialExitRemoval">移除落地出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
+          <div class="residential-actions"><button class="primary" :disabled="mutationsDisabled || residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="mutationsDisabled || residentialBusy" @click="stageResidentialExitRemoval">移除落地出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
           <div v-if="residentialExit?.installScript" class="residential-script"><div><b>B 机一键安装命令</b><button @click="copy(residentialExit?.installScript || '')">复制脚本</button></div><textarea :value="residentialExit.installScript" readonly spellcheck="false" wrap="off"></textarea><p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方。A/B 私钥不会跨机传输。</p></div>
           <p class="help-text">选用落地出口的节点被强制为 IPv4，并通过 fwmark {{ 102 }} 进入独立路由表；隧道中断时策略表保留 unreachable 默认路由，不会泄漏到 A 机公网。</p>
         </section>
@@ -664,7 +806,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
             <label>预期出口 IP（可选）<input v-model="socksForm.expectedExitIp" placeholder="用于真实代理核对"></label>
             <label v-if="socksExit?.hasPassword && socksForm.version === '5'" class="toggle-row socks-clear-password"><span><b>清除已保存密码</b><small>保存后改为无密码认证</small></span><span class="switch"><input v-model="socksForm.clearPassword" type="checkbox"><i></i></span></label>
           </div>
-          <div class="residential-actions"><button class="primary" :disabled="socksBusy || !socksForm.server" @click="configureSOCKSExit">{{ socksBusy ? '正在真实代理预检…' : socksExit?.configured ? '重新预检并保存' : '预检并保存' }}</button><button v-if="socksExit?.configured" class="danger-button" :disabled="socksBusy" @click="stageSOCKSExitRemoval">移除 SOCKS 出站</button><span v-if="socksExit?.probeCheckedAt">出口 {{ socksExit.probeExitIp || '已连通' }} · {{ socksExit.probeLatencyMs }} ms · {{ new Date(socksExit.probeCheckedAt).toLocaleString(language) }}</span></div>
+          <div class="residential-actions"><button class="primary" :disabled="mutationsDisabled || socksBusy || !socksForm.server" @click="configureSOCKSExit">{{ socksBusy ? '正在真实代理预检…' : socksExit?.configured ? '重新预检并保存' : '预检并保存' }}</button><button v-if="socksExit?.configured" class="danger-button" :disabled="mutationsDisabled || socksBusy" @click="stageSOCKSExitRemoval">移除 SOCKS 出站</button><span v-if="socksExit?.probeCheckedAt">出口 {{ socksExit.probeExitIp || '已连通' }} · {{ socksExit.probeLatencyMs }} ms · {{ new Date(socksExit.probeCheckedAt).toLocaleString(language) }}</span></div>
           <p class="help-text">保存前会通过上游 SOCKS 完成真实 HTTPS 闭环。配置正被节点使用时禁止修改或删除，请先将引用节点切回其他出口；SOCKS4/4a 只承载 TCP，SOCKS5 的 UDP 流量要求上游支持 UDP ASSOCIATE。</p>
         </section>
         <section class="panel-card migration-panel">
@@ -681,9 +823,10 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
         <section class="job-list panel-card"><div v-for="job in jobs" :key="job.id" class="job-row"><span class="job-icon" :class="job.status">{{ job.status === 'success' ? '✓' : job.status === 'failed' ? '!' : '↻' }}</span><div class="job-copy"><b>{{ jobLabel(job.kind) }}</b><small>{{ job.target }} · {{ new Date(job.createdAt).toLocaleString(language) }}</small><p v-if="job.error">{{ job.error }}</p></div><div class="job-progress"><span>{{ job.message }}</span><div><i :class="job.status" :style="{ width: `${job.progress}%` }"></i></div></div></div><p v-if="!jobs.length" class="empty">暂无任务记录。</p></section>
       </div>
 
-      <div v-else class="page-content settings-page">
-        <div class="page-intro"><div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div><button class="primary" @click="saveSettings">保存更改</button></div>
-        <section class="settings-grid"><article class="panel-card"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone"></label><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28"></label><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox"><i></i></span></label></article><article class="panel-card"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></section>
+      <div v-else-if="page === 'settings'" class="page-content settings-page">
+        <div class="page-intro"><div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div><button class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button></div>
+        <section v-if="selectedHostId === 'local'" class="panel-card fleet-controller-settings"><div class="setting-title"><span>舰</span><div><h3>中央多机控制</h3><p>本机作为单主控；远端 Agent 通过可信 HTTPS 主动接入</p></div></div><label class="toggle-row"><span><b>启用中央控制</b><small>未启用时界面与 v0.8.2 单机模式保持一致</small></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label><label v-if="fleetEnabledDraft">主控公网 URL<input v-model="fleetPublicURL" type="url" placeholder="https://panel.example.com/wukong/"><small>必须使用系统信任的 HTTPS 证书，并包含面板随机路径</small></label><div class="fleet-setting-actions"><button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment">生成接入命令</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="saveFleetController(true)">轮换全局订阅 Token</button></div><div v-if="fleetStatus?.globalSubscription" class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div></section>
+        <section class="settings-grid"><article class="panel-card"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone" :disabled="mutationsDisabled"></label><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled"></label><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label></article><article class="panel-card"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button :disabled="mutationsDisabled" @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></section>
       </div>
     </section>
   </div>

@@ -9,23 +9,25 @@ import (
 )
 
 type Config struct {
-	Command        string
-	Listen         string
-	AgentSocket    string
-	AgentToken     string
-	AgentTokenFile string
-	DataDir        string
-	SecretDir      string
-	ConfigDir      string
-	SingBoxBin     string
-	CloudflaredBin string
-	TLSCertFile    string
-	TLSKeyFile     string
-	PanelDomain    string
-	BasePath       string
-	SecureCookie   bool
-	Demo           bool
-	Args           []string
+	Command         string
+	Listen          string
+	AgentSocket     string
+	AgentToken      string
+	AgentTokenFile  string
+	DataDir         string
+	SecretDir       string
+	ConfigDir       string
+	SingBoxBin      string
+	CloudflaredBin  string
+	TLSCertFile     string
+	TLSKeyFile      string
+	PanelDomain     string
+	BasePath        string
+	SecureCookie    bool
+	Demo            bool
+	FleetConfigFile string
+	FleetTokenFile  string
+	Args            []string
 }
 
 func Parse(version string) Config {
@@ -40,7 +42,7 @@ func Parse(version string) Config {
 	if len(originalArgs) > 2 {
 		cfg.Args = originalArgs[2:]
 	}
-	if command == "node" || command == "singbox" {
+	if command == "node" || command == "singbox" || command == "fleet" {
 		os.Args = []string{os.Args[0]}
 	}
 	flag.StringVar(&cfg.Listen, "listen", env("WUKONG_LISTEN", "127.0.0.1:8788"), "web listen address")
@@ -58,6 +60,8 @@ func Parse(version string) Config {
 	flag.StringVar(&cfg.BasePath, "base-path", env("WUKONG_BASE_PATH", "/wukong/"), "public base path")
 	flag.BoolVar(&cfg.SecureCookie, "secure-cookie", envBool("WUKONG_SECURE_COOKIE", true), "set secure cookies")
 	flag.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
+	flag.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
+	flag.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
 	flag.Parse()
 	if cfg.AgentTokenFile == "" {
 		cfg.AgentTokenFile = filepath.Join(cfg.DataDir, "agent.token")
