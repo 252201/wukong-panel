@@ -22,6 +22,8 @@ import (
 
 const localFleetHostID = "local"
 
+const maxFleetProbeBody = 2 << 20
+
 type fleetSubscriptionEntry struct {
 	Node  model.Node  `json:"node"`
 	Share model.Share `json:"share"`
@@ -57,10 +59,18 @@ func (s *Server) fleetEnabled() bool {
 }
 
 func validControllerURL(value string) (string, error) {
+	return validHTTPSBaseURL(value, "主控地址")
+}
+
+func validSubscriptionPublicURL(value string) (string, error) {
+	return validHTTPSBaseURL(value, "订阅公开地址")
+}
+
+func validHTTPSBaseURL(value, label string) (string, error) {
 	value = strings.TrimRight(strings.TrimSpace(value), "/") + "/"
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("主控地址必须是证书可信的 HTTPS URL")
+		return "", fmt.Errorf("%s必须是证书可信的 HTTPS URL", label)
 	}
 	return value, nil
 }
@@ -93,7 +103,8 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 		}
 	}
 	publicURL, _ := s.store.Setting("fleet_public_url")
-	status := model.FleetStatus{Enabled: s.fleetEnabled(), PublicURL: publicURL, LocalHostID: localFleetHostID}
+	subscriptionPublicURL, _ := s.store.Setting("fleet_subscription_public_url")
+	status := model.FleetStatus{Enabled: s.fleetEnabled(), PublicURL: publicURL, SubscriptionPublicURL: subscriptionPublicURL, LocalHostID: localFleetHostID}
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_hosts")), &status.SelectedHostIDs)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_nodes")), &status.SelectedNodeIDs)
 	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", PanelVersion: s.version, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
@@ -114,24 +125,30 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
 	status.Hosts = append([]model.FleetHost{local}, hosts...)
 	status.ArchivedHosts = archivedHosts
-	if token, _ := s.store.Setting("fleet_global_token"); token != "" && publicURL != "" {
-		status.GlobalSubscription = publicURL + "fleet-sub/" + token + "/clash.yaml"
+	subscriptionBaseURL := subscriptionPublicURL
+	if subscriptionBaseURL == "" {
+		subscriptionBaseURL = publicURL
+	}
+	if token, _ := s.store.Setting("fleet_global_token"); token != "" && subscriptionBaseURL != "" {
+		status.GlobalSubscription = subscriptionBaseURL + "fleet-sub/" + token + "/clash.yaml"
 	}
 	return status, nil
 }
 
 func (s *Server) saveFleetStatus(w http.ResponseWriter, r *http.Request, session store.Session) {
 	var request struct {
-		Enabled           bool                `json:"enabled"`
-		PublicURL         string              `json:"publicUrl"`
-		SelectedHostIDs   []string            `json:"selectedHostIds"`
-		SelectedNodeIDs   map[string][]string `json:"selectedNodeIds"`
-		RotateGlobalToken bool                `json:"rotateGlobalToken"`
+		Enabled               bool                `json:"enabled"`
+		PublicURL             string              `json:"publicUrl"`
+		SubscriptionPublicURL *string             `json:"subscriptionPublicUrl"`
+		SelectedHostIDs       []string            `json:"selectedHostIds"`
+		SelectedNodeIDs       map[string][]string `json:"selectedNodeIds"`
+		RotateGlobalToken     bool                `json:"rotateGlobalToken"`
 	}
 	if !decode(w, r, &request) {
 		return
 	}
 	publicURL := ""
+	subscriptionPublicURL := mustSetting(s.store, "fleet_subscription_public_url")
 	var err error
 	if request.Enabled {
 		publicURL, err = validControllerURL(request.PublicURL)
@@ -139,6 +156,18 @@ func (s *Server) saveFleetStatus(w http.ResponseWriter, r *http.Request, session
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if request.SubscriptionPublicURL != nil {
+			subscriptionPublicURL = strings.TrimSpace(*request.SubscriptionPublicURL)
+			if subscriptionPublicURL != "" {
+				subscriptionPublicURL, err = validSubscriptionPublicURL(subscriptionPublicURL)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+		}
+	} else {
+		subscriptionPublicURL = ""
 	}
 	if request.SelectedHostIDs != nil && len(request.SelectedHostIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "全局订阅至少需要选择一台主机")
@@ -146,6 +175,9 @@ func (s *Server) saveFleetStatus(w http.ResponseWriter, r *http.Request, session
 	}
 	if err = s.store.SetSetting("fleet_controller_enabled", strconv.FormatBool(request.Enabled)); err == nil {
 		err = s.store.SetSetting("fleet_public_url", publicURL)
+	}
+	if err == nil {
+		err = s.store.SetSetting("fleet_subscription_public_url", subscriptionPublicURL)
 	}
 	if err == nil && request.SelectedHostIDs != nil {
 		encoded, _ := json.Marshal(uniqueStrings(request.SelectedHostIDs))
@@ -188,6 +220,69 @@ func (s *Server) saveFleetStatus(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) probeFleetSubscription(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request struct {
+		SubscriptionPublicURL string `json:"subscriptionPublicUrl"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	baseURL := strings.TrimSpace(request.SubscriptionPublicURL)
+	if baseURL == "" {
+		baseURL = mustSetting(s.store, "fleet_public_url")
+	}
+	baseURL, err := validSubscriptionPublicURL(baseURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := mustSetting(s.store, "fleet_global_token")
+	if token == "" {
+		writeError(w, http.StatusConflict, "请先保存中央控制设置并生成全局订阅令牌")
+		return
+	}
+	target := baseURL + "fleet-sub/" + url.PathEscape(token) + "/clash.yaml"
+	probeRequest, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无法创建订阅检测请求")
+		return
+	}
+	probeRequest.Header.Set("User-Agent", "Wukong-Panel-Subscription-Probe/1")
+	startedAt := time.Now()
+	response, err := s.fleetProbeClient.Do(probeRequest)
+	latency := time.Since(startedAt).Milliseconds()
+	if err != nil {
+		var urlError *url.Error
+		if errors.As(err, &urlError) {
+			err = urlError.Err
+		}
+		writeError(w, http.StatusBadGateway, "订阅入口访问失败："+err.Error())
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("订阅入口返回 HTTP %d", response.StatusCode))
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxFleetProbeBody+1))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "无法读取订阅响应")
+		return
+	}
+	if len(body) > maxFleetProbeBody {
+		writeError(w, http.StatusBadGateway, "订阅响应超过 2 MiB")
+		return
+	}
+	content := string(body)
+	if !strings.Contains(content, "proxies:") {
+		writeError(w, http.StatusBadGateway, "响应不是有效的 Clash 订阅")
+		return
+	}
+	nodeCount := strings.Count("\n"+content, "\n  - name:")
+	_ = s.store.Audit(session.Username, "fleet.subscription.probe", baseURL, fmt.Sprintf("status=200 nodes=%d latency_ms=%d", nodeCount, latency))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": response.StatusCode, "nodeCount": nodeCount, "latencyMs": latency})
 }
 
 func uniqueStrings(values []string) []string {

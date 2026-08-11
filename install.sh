@@ -6,6 +6,7 @@ VERSION="latest"
 ACTION="auto"
 SINGBOX_VERSION="1.13.14"
 DOMAIN=""
+SUBSCRIPTION_DOMAIN=""
 PORT="9443"
 BASE_PATH=""
 ACME_METHOD="selfsigned"
@@ -695,6 +696,7 @@ uninstall_panel() {
     rm -f /etc/init.d/wukong-web /etc/init.d/wukong-agent
   fi
   rm -f /etc/nginx/conf.d/wukong-panel.conf /etc/nginx/http.d/wukong-panel.conf
+  rm -f /etc/nginx/conf.d/wukong-subscription.conf /etc/nginx/http.d/wukong-subscription.conf
   rm -f /usr/local/bin/wukong-panel /usr/local/bin/wukongctl
   if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
     if using_systemd; then systemctl reload nginx 2>/dev/null || true; else rc-service nginx reload 2>/dev/null || true; fi
@@ -1147,6 +1149,151 @@ EOF
   else
     info "已启用 Let's Encrypt 每日自动续期与节点证书热更新"
   fi
+}
+
+configure_subscription_domain() {
+  subscription_domain=$SUBSCRIPTION_DOMAIN
+  [ -n "$subscription_domain" ] || die "缺少 --configure-subscription-domain DOMAIN"
+  panel_installed || die "未检测到已安装的悟空面板"
+
+  subscription_tls_dir="/etc/wukong-panel/tls-subscription/$subscription_domain"
+  subscription_tls_cert="$subscription_tls_dir/fullchain.cer"
+  subscription_tls_key="$subscription_tls_dir/private.key"
+  install -d -m 0700 "$subscription_tls_dir"
+
+  if [ -n "$CERT_FILE" ] || [ -n "$KEY_FILE" ]; then
+    [ -r "$CERT_FILE" ] && [ -r "$KEY_FILE" ] || die "--cert-file 与 --key-file 必须同时提供且可读"
+    subscription_tls_cert=$CERT_FILE
+    subscription_tls_key=$KEY_FILE
+  else
+    case "$ACME_METHOD" in http|cloudflare) ;; *) die "独立订阅域名必须使用 http、cloudflare 或导入现有可信证书" ;; esac
+    [ -n "$EMAIL" ] || EMAIL="admin@$(printf '%s' "$subscription_domain" | cut -d. -f2-)"
+    if [ ! -x /root/.acme.sh/acme.sh ]; then
+      curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" >/dev/null
+    fi
+    subscription_acme_status=0
+    if [ "$ACME_METHOD" = "http" ]; then
+      if [ -n "$(port80_listener_lines)" ]; then
+        if [ "$TAKEOVER_PORT80_SET" != true ] && [ "$INTERACTIVE_SESSION" = true ]; then
+          printf '%s\n' "检测到公网 80 已被占用：" "$(port80_listener_lines)" >"$PROMPT_TTY"
+          subscription_takeover_choice=$(prompt_value "是否临时停止已知 Web 服务并在证书签发后恢复？(Y/n)" "Y")
+          case "$subscription_takeover_choice" in Y|y|yes|YES|Yes) TAKEOVER_PORT80=true ;; *) TAKEOVER_PORT80=false ;; esac
+        fi
+        [ "$TAKEOVER_PORT80" = true ] || die "公网 80 已被占用；可改用 --acme cloudflare、导入现有证书，或增加 --takeover-port-80"
+        stop_port80_services
+      fi
+      info "为 $subscription_domain 申请 Let's Encrypt 证书（HTTP-01${ACME_IP_VERSION:+ / IPv$ACME_IP_VERSION}）"
+      case "$ACME_IP_VERSION" in
+        4) /root/.acme.sh/acme.sh --issue -d "$subscription_domain" --standalone --listen-v4 --httpport 80 --keylength ec-256 --server letsencrypt || subscription_acme_status=$? ;;
+        6) /root/.acme.sh/acme.sh --issue -d "$subscription_domain" --standalone --listen-v6 --httpport 80 --keylength ec-256 --server letsencrypt || subscription_acme_status=$? ;;
+        *) /root/.acme.sh/acme.sh --issue -d "$subscription_domain" --standalone --httpport 80 --keylength ec-256 --server letsencrypt || subscription_acme_status=$? ;;
+      esac
+      restore_port80_services
+    else
+      [ -n "${CF_Token:-}" ] || die "Cloudflare DNS-01 需要 CF_Token"
+      [ -n "${CF_Zone_ID:-${CF_Account_ID:-}}" ] || die "Cloudflare DNS-01 还需要 CF_Zone_ID 或 CF_Account_ID"
+      info "为 $subscription_domain 申请 Let's Encrypt 证书（Cloudflare DNS-01）"
+      /root/.acme.sh/acme.sh --issue -d "$subscription_domain" --dns dns_cf --keylength ec-256 --server letsencrypt || subscription_acme_status=$?
+    fi
+    accept_acme_issue_status "$subscription_acme_status"
+    /root/.acme.sh/acme.sh --install-cert -d "$subscription_domain" --ecc --fullchain-file "$subscription_tls_cert" --key-file "$subscription_tls_key" --reloadcmd "nginx -t && nginx -s reload || true"
+  fi
+
+  openssl x509 -in "$subscription_tls_cert" -noout -checkhost "$subscription_domain" >/dev/null 2>&1 ||
+    die "证书不包含订阅域名 $subscription_domain"
+  cert_public=$(openssl x509 -in "$subscription_tls_cert" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+  key_public=$(openssl pkey -in "$subscription_tls_key" -pubout -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+  [ -n "$cert_public" ] && [ "$cert_public" = "$key_public" ] || die "订阅域名证书与私钥不匹配"
+  chmod 0600 "$subscription_tls_key"
+
+  subscription_nginx_dir=/etc/nginx/conf.d
+  if [ -d /etc/nginx/http.d ] && [ ! -d /etc/nginx/conf.d ]; then subscription_nginx_dir=/etc/nginx/http.d; fi
+  install -d -m 0755 "$subscription_nginx_dir"
+  subscription_nginx_config="$subscription_nginx_dir/wukong-subscription.conf"
+  for existing_nginx_config in /etc/nginx/conf.d/*.conf /etc/nginx/http.d/*.conf; do
+    [ -r "$existing_nginx_config" ] || continue
+    [ "$existing_nginx_config" = "$subscription_nginx_config" ] && continue
+    if awk -v expected="$subscription_domain" '$1 == "server_name" { for (i = 2; i <= NF; i++) { value=$i; sub(/;$/, "", value); if (value == expected) { found=1; exit } } } END { exit(found ? 0 : 1) }' "$existing_nginx_config"; then
+      die "订阅域名已由其他 Nginx 配置使用：$existing_nginx_config"
+    fi
+  done
+  if [ -e "$subscription_nginx_config" ] && ! grep -Fq '# Managed by Wukong Panel subscription gateway' "$subscription_nginx_config"; then
+    die "$subscription_nginx_config 已存在且不属于悟空，已拒绝覆盖"
+  fi
+  subscription_nginx_backup=""
+  if [ -r "$subscription_nginx_config" ]; then
+    subscription_nginx_backup="$TMP_DIR/wukong-subscription.conf.previous"
+    cp "$subscription_nginx_config" "$subscription_nginx_backup"
+  fi
+  cat >"$subscription_nginx_config" <<EOF_WUKONG_SUBSCRIPTION_NGINX
+# Managed by Wukong Panel subscription gateway
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name $subscription_domain;
+
+    ssl_certificate $subscription_tls_cert;
+    ssl_certificate_key $subscription_tls_key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+    access_log off;
+
+    location ^~ /fleet-sub/ {
+        limit_except GET { deny all; }
+        proxy_pass http://127.0.0.1:8788;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_buffering off;
+    }
+
+    location / { return 404; }
+}
+EOF_WUKONG_SUBSCRIPTION_NGINX
+  if ! nginx -t; then
+    if [ -n "$subscription_nginx_backup" ]; then
+      cp "$subscription_nginx_backup" "$subscription_nginx_config"
+    else
+      rm -f "$subscription_nginx_config"
+    fi
+    die "订阅专用 Nginx 配置校验失败，已恢复原配置"
+  fi
+  subscription_nginx_started=false
+  if using_systemd; then
+    systemctl enable nginx.service >/dev/null 2>&1 || true
+    if systemctl is-active --quiet nginx.service; then
+      if systemctl reload nginx.service; then subscription_nginx_started=true; fi
+    else
+      if systemctl start nginx.service; then subscription_nginx_started=true; fi
+    fi
+  else
+    rc-update add nginx default >/dev/null 2>&1 || true
+    if rc-service nginx status >/dev/null 2>&1; then
+      if rc-service nginx reload; then subscription_nginx_started=true; fi
+    else
+      if rc-service nginx start; then subscription_nginx_started=true; fi
+    fi
+  fi
+  if [ "$subscription_nginx_started" != true ]; then
+    if [ -n "$subscription_nginx_backup" ]; then cp "$subscription_nginx_backup" "$subscription_nginx_config"; else rm -f "$subscription_nginx_config"; fi
+    if nginx -t >/dev/null 2>&1; then
+      if using_systemd && systemctl is-active --quiet nginx.service; then systemctl reload nginx.service >/dev/null 2>&1 || true
+      elif command -v rc-service >/dev/null 2>&1 && rc-service nginx status >/dev/null 2>&1; then rc-service nginx reload >/dev/null 2>&1 || true
+      fi
+    fi
+    die "订阅专用 Nginx 无法启动或重载，已恢复原配置"
+  fi
+  if [ -z "$CERT_FILE$KEY_FILE" ]; then
+    configure_certificate_renewal "$subscription_domain" "$subscription_tls_cert" "$subscription_tls_key" ||
+      warn "证书已安装，但自动续期配置失败，请运行 /root/.acme.sh/acme.sh --cron 检查"
+  fi
+  info "独立订阅 HTTPS 入口已启用：https://$subscription_domain/"
+  info "请在悟空面板设置中将“订阅公开地址”填写为：https://$subscription_domain/"
+  warn "请确认云安全组与本机防火墙允许 443/tcp"
 }
 
 backfill_certificate_renewal() {
@@ -1724,7 +1871,7 @@ usage() {
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- [参数]
 
 常用参数：
-  --action ACTION      install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall
+  --action ACTION      install、update、start、stop、reset-password、uninstall、subscription-domain、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall
   --update             等同于 --action update
   --start-panel        启动面板 Web 与 Agent（也可使用 --start）
   --stop-panel         关闭面板 Web 与 Agent（也可使用 --stop）
@@ -1747,6 +1894,7 @@ usage() {
   --enrollment-token TOKEN  10 分钟一次性接入令牌
   --host-name NAME     在中央主控显示的本机名称
   --leave-controller   撤销本机保存的中央连接并重启 Agent
+  --configure-subscription-domain DOMAIN  配置只暴露 /fleet-sub/ 的标准 HTTPS 443 订阅入口
   --acme METHOD        证书方式：http、cloudflare、selfsigned
   --acme-ip-version 4|6  HTTP-01 强制通过 IPv4 或 IPv6 验证
   --email EMAIL        Let's Encrypt 账户邮箱
@@ -1765,6 +1913,9 @@ usage() {
 
 NAT/受限端口 VPS 示例：
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --port 你的可用TCP端口
+
+独立订阅 443 域名示例：
+  curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --configure-subscription-domain sub.example.com --acme http --email admin@example.com --takeover-port-80
 
 B 机落地出口移除：
   curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --remove-residential-peer
@@ -1793,6 +1944,7 @@ while [ "$#" -gt 0 ]; do
     --enrollment-token) ENROLLMENT_TOKEN="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --host-name) FLEET_HOST_NAME="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --leave-controller) LEAVE_CONTROLLER=true; HAS_CONFIG_ARGS=true; shift ;;
+    --configure-subscription-domain) ACTION=subscription-domain; SUBSCRIPTION_DOMAIN="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --domain) DOMAIN="$2"; DOMAIN_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --port) PORT="$2"; PORT_SET=true; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
     --base-path) BASE_PATH="$2"; HAS_CONFIG_ARGS=true; RECONFIGURE_ARGS=true; shift 2 ;;
@@ -1827,9 +1979,9 @@ if interactive_available; then
   INTERACTIVE_SESSION=true
   if [ "$ACTION" = "auto" ]; then
     if panel_installed; then
-      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机落地出口配置" " 12) 管理防火墙" " 13) 取消" >"$PROMPT_TTY"
+      printf '%s\n' "检测到已安装悟空面板，请选择操作：" "  1) 更新悟空面板" "  2) 启动面板" "  3) 关闭面板" "  4) 更新 sing-box（保留旧版，可回退）" "  5) 回退 sing-box 到上一版本" "  6) 卸载 sing-box（先完整备份节点）" "  7) 重置面板 admin 密码" "  8) 重新配置 / 修复安装" "  9) 卸载面板（保留配置和数据）" " 10) 完全卸载（删除面板配置和数据）" " 11) 移除本机 B 机落地出口配置" " 12) 管理防火墙" " 13) 配置独立订阅 443 域名" " 14) 取消" >"$PROMPT_TTY"
       action_choice=$(prompt_value "选择" "1")
-      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|firewall) ACTION=firewall ;; 13|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
+      case "$action_choice" in 1|update) ACTION=update ;; 2|start) ACTION=start ;; 3|stop) ACTION=stop ;; 4|singbox-update) ACTION=singbox-update ;; 5|singbox-rollback) ACTION=singbox-rollback ;; 6|singbox-uninstall) ACTION=singbox-uninstall ;; 7|reset-password) ACTION=reset-password ;; 8|install|repair) ACTION=install ;; 9|uninstall) ACTION=uninstall ;; 10|purge) ACTION=uninstall; PURGE=true ;; 11|residential-peer-remove) ACTION=residential-peer-remove ;; 12|firewall) ACTION=firewall ;; 13|subscription-domain) ACTION=subscription-domain ;; 14|cancel) info "已取消"; exit 0 ;; *) die "无效的操作选项: $action_choice" ;; esac
     else
       if residential_peer_installed; then
         printf '%s\n' "检测到本机 B 机落地出口配置，请选择操作：" "  1) 安装悟空面板" "  2) 移除 B 机落地出口配置" "  3) 取消" >"$PROMPT_TTY"
@@ -1867,7 +2019,7 @@ if [ "$ACTION" = "auto" ]; then
 fi
 if [ "$LEAVE_CONTROLLER" = true ]; then ACTION=fleet-leave; fi
 if [ -n "$JOIN_CONTROLLER" ] && panel_installed; then ACTION=update; fi
-case "$ACTION" in install|update|start|stop|reset-password|uninstall|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove|firewall|fleet-leave) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall" ;; esac
+case "$ACTION" in install|update|start|stop|reset-password|uninstall|subscription-domain|singbox-update|singbox-rollback|singbox-uninstall|residential-peer-install|residential-peer-remove|firewall|fleet-leave) ;; *) die "--action 必须是 install、update、start、stop、reset-password、uninstall、subscription-domain、singbox-update、singbox-rollback、singbox-uninstall、residential-peer-install、residential-peer-remove 或 firewall" ;; esac
 
 if [ "$ACTION" = "fleet-leave" ]; then
   panel_installed || die "未检测到已安装的悟空面板"
@@ -1900,7 +2052,7 @@ if [ "$ACTION" = "uninstall" ]; then
 fi
 
 case "$ACTION" in
-  update|start|stop|reset-password|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
+  update|start|stop|reset-password|subscription-domain|singbox-update|singbox-rollback|singbox-uninstall) panel_installed || die "未检测到已安装的悟空面板，无法执行该操作" ;;
 esac
 
 case "$ACTION" in
@@ -1920,6 +2072,31 @@ if [ "$INTERACTIVE_SESSION" = true ] && [ "$ACTION" = "singbox-rollback" ]; then
   [ -n "$previous_version" ] || die "没有可回退的 sing-box 备份"
   confirm_singbox=$(prompt_value "确认回退 sing-box 到 $previous_version？(y/N)" "N")
   case "$confirm_singbox" in Y|y|yes|YES|Yes) ;; *) info "已取消 sing-box 回退"; exit 0 ;; esac
+fi
+
+if [ "$ACTION" = "subscription-domain" ] && [ "$INTERACTIVE_SESSION" = true ]; then
+  info "进入独立订阅 HTTPS 入口向导"
+  [ -n "$SUBSCRIPTION_DOMAIN" ] || SUBSCRIPTION_DOMAIN=$(prompt_value "订阅域名" "$SUBSCRIPTION_DOMAIN")
+  if [ "$ACME_SET" != true ] && [ -z "$CERT_FILE$KEY_FILE" ]; then
+    printf '%s\n' "请选择 TLS 证书方式：" "  1) Let's Encrypt HTTP-01（推荐）" "  2) Let's Encrypt Cloudflare DNS-01" >"$PROMPT_TTY"
+    subscription_cert_choice=$(prompt_value "选择" "1")
+    case "$subscription_cert_choice" in 1|http) ACME_METHOD=http ;; 2|cloudflare) ACME_METHOD=cloudflare ;; *) die "无效的证书方式选项: $subscription_cert_choice" ;; esac
+  fi
+  if [ "$ACME_METHOD" = "http" ] && [ -z "$ACME_IP_VERSION" ]; then
+    printf '%s\n' "请选择 HTTP-01 验证网络：" "  1) 自动选择" "  2) 仅 IPv4" "  3) 仅 IPv6" >"$PROMPT_TTY"
+    subscription_ip_choice=$(prompt_value "选择" "1")
+    case "$subscription_ip_choice" in 1|auto) ACME_IP_VERSION="" ;; 2|4) ACME_IP_VERSION=4 ;; 3|6) ACME_IP_VERSION=6 ;; *) die "无效的 IP 版本选项: $subscription_ip_choice" ;; esac
+  fi
+  if { [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; } && [ "$EMAIL_SET" != true ]; then
+    EMAIL=$(prompt_value "Let's Encrypt 账户邮箱" "admin@$(printf '%s' "$SUBSCRIPTION_DOMAIN" | cut -d. -f2-)")
+  fi
+  printf '\n配置确认\n  订阅域名: %s\n  HTTPS 端口: 443\n  证书方式: %s\n\n' "$SUBSCRIPTION_DOMAIN" "$ACME_METHOD" >"$PROMPT_TTY"
+  confirm_subscription_domain=$(prompt_value "确认创建只暴露 /fleet-sub/ 的订阅入口？(Y/n)" "Y")
+  case "$confirm_subscription_domain" in Y|y|yes|YES|Yes) ;; *) info "已取消"; exit 0 ;; esac
+fi
+
+if [ "$ACTION" = "subscription-domain" ] && [ "$ACME_SET" != true ] && [ -z "$CERT_FILE$KEY_FILE" ]; then
+  ACME_METHOD=http
 fi
 
 if [ "$ACTION" = "install" ] && [ "$INTERACTIVE_SESSION" = true ]; then
@@ -1966,13 +2143,25 @@ case "$ACME_METHOD" in selfsigned|http|cloudflare) ;; *) die "--acme 必须是 h
 case "$ACME_IP_VERSION" in ''|4|6) ;; *) die "--acme-ip-version 必须是 4 或 6" ;; esac
 case "$INSTALL_FIREWALL_MODE" in keep|on|off|all) ;; *) die "--firewall-mode 必须是 keep、on、off 或 all" ;; esac
 firewall_validate_ports "$FIREWALL_PORTS"
-[ -z "$DOMAIN" ] && { [ "$ACME_METHOD" = "selfsigned" ] || die "申请 Let's Encrypt 证书必须填写 --domain"; }
+if [ "$ACTION" = "install" ] && [ -z "$DOMAIN" ]; then
+  [ "$ACME_METHOD" = "selfsigned" ] || die "申请 Let's Encrypt 证书必须填写 --domain"
+fi
 if [ -n "$DOMAIN" ]; then
   case "$DOMAIN" in *[!A-Za-z0-9.-]*|.*|*.) die "域名格式无效，请只填写主机名，不要包含 https://、端口或路径" ;; esac
   printf '%s\n' "$DOMAIN" | awk -F. '
     length($0) > 253 || NF < 2 { exit 1 }
     { for (i = 1; i <= NF; i++) if (length($i) < 1 || length($i) > 63 || $i !~ /^[A-Za-z0-9]/ || $i !~ /[A-Za-z0-9]$/) exit 1 }
   ' || die "域名格式无效，请检查各级域名"
+fi
+if [ "$ACTION" = "subscription-domain" ]; then
+  case "$SUBSCRIPTION_DOMAIN" in ''|*[!A-Za-z0-9.-]*|.*|*.) die "订阅域名格式无效，请只填写主机名" ;; esac
+  printf '%s\n' "$SUBSCRIPTION_DOMAIN" | awk -F. '
+    length($0) > 253 || NF < 2 { exit 1 }
+    { for (i = 1; i <= NF; i++) if (length($i) < 1 || length($i) > 63 || $i !~ /^[A-Za-z0-9]/ || $i !~ /[A-Za-z0-9]$/) exit 1 }
+  ' || die "订阅域名格式无效，请检查各级域名"
+  if [ -z "$CERT_FILE$KEY_FILE" ]; then
+    case "$ACME_METHOD" in http|cloudflare) ;; *) die "独立订阅域名的 --acme 必须是 http 或 cloudflare" ;; esac
+  fi
 fi
 
 OS_ID=""
@@ -2007,6 +2196,12 @@ trap 'cleanup_install' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+if [ "$ACTION" = "subscription-domain" ]; then
+  if [ "$SKIP_PACKAGES" != true ]; then install_runtime_packages; else verify_runtime_packages; fi
+  configure_subscription_domain
+  exit 0
+fi
 
 if [ "$ACTION" = "update" ]; then
   install_download_tools

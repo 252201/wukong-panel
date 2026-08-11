@@ -56,15 +56,16 @@ type socksExitAgent interface {
 }
 
 type Server struct {
-	cfg           config.Config
-	store         *store.Store
-	agent         AgentAPI
-	version       string
-	fleetVault    *security.Vault
-	fleetVaultErr error
-	limiterMu     sync.Mutex
-	loginAttempts map[string][]time.Time
-	fleetRequests map[string][]time.Time
+	cfg              config.Config
+	store            *store.Store
+	agent            AgentAPI
+	version          string
+	fleetVault       *security.Vault
+	fleetVaultErr    error
+	fleetProbeClient *http.Client
+	limiterMu        sync.Mutex
+	loginAttempts    map[string][]time.Time
+	fleetRequests    map[string][]time.Time
 }
 
 func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Server {
@@ -75,7 +76,17 @@ func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Ser
 	} else {
 		vault, vaultErr = security.OpenVault(filepath.Join(cfg.DataDir, "fleet-secrets"))
 	}
-	return &Server{cfg: cfg, store: s, agent: agent, version: version, fleetVault: vault, fleetVaultErr: vaultErr, loginAttempts: map[string][]time.Time{}, fleetRequests: map[string][]time.Time{}}
+	return &Server{
+		cfg: cfg, store: s, agent: agent, version: version,
+		fleetVault: vault, fleetVaultErr: vaultErr,
+		fleetProbeClient: &http.Client{
+			Timeout: 15 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		loginAttempts: map[string][]time.Time{}, fleetRequests: map[string][]time.Time{},
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -119,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/settings/subscription-token", s.auth(s.rotateSubscriptionToken, true))
 	mux.HandleFunc("GET /api/v1/fleet/status", s.auth(s.fleetStatus, false))
 	mux.HandleFunc("PUT /api/v1/fleet/status", s.auth(s.saveFleetStatus, true))
+	mux.HandleFunc("POST /api/v1/fleet/subscription-probe", s.auth(s.probeFleetSubscription, true))
 	mux.HandleFunc("POST /api/v1/fleet/enrollments", s.auth(s.createFleetEnrollment, true))
 	mux.HandleFunc("PATCH /api/v1/fleet/hosts/{hostId}", s.auth(s.renameFleetHost, true))
 	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}", s.auth(s.archiveFleetHost, true))

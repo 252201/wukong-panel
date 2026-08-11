@@ -182,7 +182,33 @@ sudo sh install.sh --firewall-off
 
 ## 中央多机管理
 
-在准备作为中央的面板进入“设置 → 中央多机控制”，填写包含随机管理路径的公网 HTTPS URL，例如 `https://panel.example.com/wukong-abc123/`，保存后生成一次性接入命令。该 URL 必须使用操作系统信任链可验证的证书，不提供跳过 TLS 校验的选项。
+在准备作为中央的面板进入“设置 → 中央多机控制”。这里有两个职责不同的地址：
+
+| 设置项 | 用途 | 示例 |
+| --- | --- | --- |
+| 主控通信地址 | 远端 Agent 接入、心跳与命令长轮询 | `https://panel.example.com/wukong-abc123/` |
+| 订阅公开地址 | 客户端拉取中央全局订阅 | `https://sub.example.com/` |
+
+两个地址都必须使用操作系统信任链可验证的 HTTPS 证书，不提供跳过 TLS 校验的选项。订阅公开地址可以留空，此时继续复用主控通信地址，兼容已有安装；需要标准 `HTTPS 443` 入口时，建议使用独立域名。保存中央设置后可点击“检测订阅入口”，由主控验证 TLS、HTTP 状态、订阅格式、节点数量与响应延迟；检测不会跟随重定向，避免把订阅 Token 带到其他域名。
+
+已经安装悟空面板的 VPS 可以运行安装器菜单中的“配置独立订阅 443 域名”，或直接执行：
+
+```bash
+# Let's Encrypt HTTP-01；公网 80 已被 Nginx 等已知服务占用时临时停用，签发后自动恢复
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
+  | sudo sh -s -- \
+      --configure-subscription-domain sub.example.com \
+      --acme http --email admin@example.com --takeover-port-80
+
+# Cloudflare DNS-01；令牌只通过当前进程环境传入，不写入悟空数据库
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh -o /tmp/wukong-install.sh
+sudo -E env CF_Token=... CF_Zone_ID=... sh /tmp/wukong-install.sh \
+  --configure-subscription-domain sub.example.com --acme cloudflare
+```
+
+该操作只在 `443` 创建一个订阅专用 Nginx 虚拟主机：仅 `GET /fleet-sub/` 会反代到本机面板，其他路径一律返回 `404`，不会暴露登录页或管理 API。安装器会校验证书域名、证书与私钥匹配关系、Nginx 配置，并接入已有 ACME 自动续期。完成后把输出的 `https://sub.example.com/` 填入“订阅公开地址”；云安全组和本机防火墙的 `443/tcp` 仍需允许入站。
+
+如果服务器已经有自己的反向代理，可以不运行该操作，只需按同样原则将独立域名的 `/fleet-sub/` 转发到 `http://127.0.0.1:8788`，根路径和其他路径返回 `404`。Cloudflare Tunnel 用户也可以建立只匹配 `^/fleet-sub/` 的 ingress 规则并添加最终 `http_status:404` 兜底，再把该 Tunnel 域名填入订阅公开地址；不要把整个 `127.0.0.1:8788` 无路径限制地发布到公网。
 
 在远端 VPS 以 root 运行面板生成的命令即可完成安装或安全更新并接入；等价参数如下：
 

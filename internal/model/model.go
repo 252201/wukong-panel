@@ -376,13 +376,14 @@ type FleetCommandResult struct {
 }
 
 type FleetStatus struct {
-	Enabled             bool                `json:"enabled"`
-	PublicURL           string              `json:"publicUrl"`
-	LocalHostID         string              `json:"localHostId"`
-	Hosts               []FleetHost         `json:"hosts"`
-	ArchivedHosts       []FleetHost         `json:"archivedHosts,omitempty"`
-	SelectedHostIDs     []string            `json:"selectedHostIds,omitempty"`
-	SelectedNodeIDs     map[string][]string `json:"selectedNodeIds,omitempty"`
-	GlobalSubscription  string              `json:"globalSubscription,omitempty"`
-	SubscriptionUpdated time.Time           `json:"subscriptionUpdated,omitempty"`
+	Enabled               bool                `json:"enabled"`
+	PublicURL             string              `json:"publicUrl"`
+	SubscriptionPublicURL string              `json:"subscriptionPublicUrl"`
+	LocalHostID           string              `json:"localHostId"`
+	Hosts                 []FleetHost         `json:"hosts"`
+	ArchivedHosts         []FleetHost         `json:"archivedHosts,omitempty"`
+	SelectedHostIDs       []string            `json:"selectedHostIds,omitempty"`
+	SelectedNodeIDs       map[string][]string `json:"selectedNodeIds,omitempty"`
+	GlobalSubscription    string              `json:"globalSubscription,omitempty"`
+	SubscriptionUpdated   time.Time           `json:"subscriptionUpdated,omitempty"`
 }

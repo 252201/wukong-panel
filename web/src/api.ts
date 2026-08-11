@@ -170,9 +170,10 @@ export interface FleetHost {
   online: boolean; compatible: boolean; archived: boolean; lastSeenAt?: string; subscriptionCachedAt?: string; createdAt: string; snapshot: FleetSnapshot
 }
 export interface FleetStatus {
-  enabled: boolean; publicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
+  enabled: boolean; publicUrl: string; subscriptionPublicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
   globalSubscription?: string; subscriptionUpdated?: string
 }
+export interface FleetSubscriptionProbe { ok: boolean; status: number; nodeCount: number; latencyMs: number }
 
 function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPlan {
   return {
@@ -236,7 +237,8 @@ export const api = {
   saveSettings: (data: Settings) => request<{ok: boolean}>('settings', { method: 'PUT', body: JSON.stringify(data) }),
   rotateSubscription: () => request<{token: string}>('settings/subscription-token', { method: 'POST', body: '{}' }),
   fleetStatus: () => request<FleetStatus>('fleet/status', {}, false),
-  saveFleetStatus: (data: {enabled: boolean; publicUrl: string; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>; rotateGlobalToken?: boolean}) => request<FleetStatus>('fleet/status', { method: 'PUT', body: JSON.stringify(data) }, false),
+  saveFleetStatus: (data: {enabled: boolean; publicUrl: string; subscriptionPublicUrl?: string; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>; rotateGlobalToken?: boolean}) => request<FleetStatus>('fleet/status', { method: 'PUT', body: JSON.stringify(data) }, false),
+  probeFleetSubscription: (subscriptionPublicUrl: string) => request<FleetSubscriptionProbe>('fleet/subscription-probe', { method: 'POST', body: JSON.stringify({ subscriptionPublicUrl }) }, false),
   createFleetEnrollment: () => request<{token: string; expiresAt: string; command: string}>('fleet/enrollments', { method: 'POST', body: '{}' }, false),
   renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
