@@ -121,7 +121,20 @@ jobs:
           set -euo pipefail
           download_dir="$(mktemp -d)"
           trap 'rm -rf "$download_dir"' EXIT
-          gh release download "$RELEASE_VERSION" --dir "$download_dir"
+          downloaded=false
+          for attempt in 1 2 3 4 5
+          do
+            if gh release download "$RELEASE_VERSION" --dir "$download_dir" --clobber; then
+              downloaded=true
+              break
+            fi
+            echo "Release assets are not visible yet; retrying in 3 seconds (attempt $attempt/5)"
+            sleep 3
+          done
+          if [[ "$downloaded" != true ]]; then
+            echo "Unable to download published release assets after 5 attempts" >&2
+            exit 1
+          fi
           (
             cd "$download_dir"
             sha256sum -c SHA256SUMS
