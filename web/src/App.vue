@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import ThemePicker from './ThemePicker.vue'
+import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -53,6 +55,7 @@ const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
 const language = ref<'zh-CN' | 'en-US'>('zh-CN')
+const themePreference = ref<ThemePreference>(readThemePreference())
 const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | null>(null)
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
@@ -398,6 +401,10 @@ async function changePassword() {
   finally { busy.value = false }
 }
 async function logout() { try { await api.logout() } finally { authenticated.value = false; overview.value = null } }
+function setThemePreference(preference: ThemePreference) {
+  themePreference.value = preference
+  applyThemePreference(preference)
+}
 async function refreshAll() {
   const [overviewData, nodeData, jobData, settingData, endpointData, timelineData, exitData, socksData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline(), api.residentialExit().catch(() => null), api.socksExit().catch(() => null)])
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; endpoints.value = endpointData; timeline.value = timelineData
@@ -757,8 +764,9 @@ async function removeSOCKSExit() {
 async function copy(value: string) { await navigator.clipboard.writeText(value); notify('已复制到剪贴板') }
 
 let timer = 0
-onMounted(async () => { updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
-onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
+let stopObservingTheme = () => {}
+onMounted(async () => { applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
+onBeforeUnmount(() => { stopObservingTheme(); window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
 <template>
@@ -778,6 +786,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
       <label>访问密码<input v-model="password" type="password" autocomplete="current-password" required /></label>
       <p v-if="loginError" class="form-error">{{ loginError }}</p>
       <button class="primary wide" :disabled="busy">{{ busy ? '验证中…' : '登录面板' }}<span>→</span></button>
+      <div class="login-theme-control"><span>界面主题</span><ThemePicker :model-value="themePreference" compact aria-label="登录页界面主题" @update:model-value="setThemePreference" /></div>
       <small>HTTPS 加密 · 单管理员 · 操作留痕</small>
     </form>
   </main>
@@ -948,7 +957,7 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
           </div>
           <div v-if="fleetStatus?.globalSubscription" class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div>
         </section>
-        <section class="settings-grid"><article class="panel-card"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone" :disabled="mutationsDisabled"></label><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled"></label><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label></article><article class="panel-card"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button :disabled="mutationsDisabled" @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></section>
+        <section class="settings-grid"><article class="panel-card appearance-settings"><div class="setting-title"><span>景</span><div><h3>外观与主题</h3><p>东方科幻 · 当前浏览器独立保存</p></div></div><ThemePicker :model-value="themePreference" aria-label="设置界面主题" @update:model-value="setThemePreference" /><p class="help-text">切换立即生效，不会写入服务器或影响其他设备。选择“系统”后会实时跟随设备深浅色设置。</p></article><article class="panel-card"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone" :disabled="mutationsDisabled"></label><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled"></label><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label></article><article class="panel-card"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button :disabled="mutationsDisabled" @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></section>
       </div>
     </section>
   </div>
