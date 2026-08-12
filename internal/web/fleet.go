@@ -107,7 +107,8 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	status := model.FleetStatus{Enabled: s.fleetEnabled(), PublicURL: publicURL, SubscriptionPublicURL: subscriptionPublicURL, LocalHostID: localFleetHostID}
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_hosts")), &status.SelectedHostIDs)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_nodes")), &status.SelectedNodeIDs)
-	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", PanelVersion: s.version, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
+	singBoxVersion := s.singBoxVersion(ctx)
+	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", PanelVersion: s.version, SingBoxVersion: singBoxVersion, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
 	metrics, _ := s.store.Metrics(80)
 	nodes, _ := s.store.Nodes(ctx)
 	jobs, _ := s.store.Jobs(30)
@@ -122,7 +123,7 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 			online++
 		}
 	}
-	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
+	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, SingBoxVersion: singBoxVersion, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
 	status.Hosts = append([]model.FleetHost{local}, hosts...)
 	status.ArchivedHosts = archivedHosts
 	subscriptionBaseURL := subscriptionPublicURL
