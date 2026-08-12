@@ -280,9 +280,28 @@ func (s *Server) probeFleetSubscription(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadGateway, "响应不是有效的 Clash 订阅")
 		return
 	}
-	nodeCount := strings.Count("\n"+content, "\n  - name:")
+	nodeCount := fleetSubscriptionNodeCount(content)
 	_ = s.store.Audit(session.Username, "fleet.subscription.probe", baseURL, fmt.Sprintf("status=200 nodes=%d latency_ms=%d", nodeCount, latency))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": response.StatusCode, "nodeCount": nodeCount, "latencyMs": latency})
+}
+
+func fleetSubscriptionNodeCount(content string) int {
+	inProxies := false
+	nodeCount := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "proxies:":
+			inProxies = true
+			continue
+		case "proxy-groups:", "rules:":
+			inProxies = false
+		}
+		if inProxies && strings.HasPrefix(line, "  - name:") {
+			nodeCount++
+		}
+	}
+	return nodeCount
 }
 
 func uniqueStrings(values []string) []string {

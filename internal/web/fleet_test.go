@@ -102,7 +102,7 @@ func TestProbeFleetSubscription(t *testing.T) {
 		if r.URL.Path != "/fleet-sub/global-secret/clash.yaml" {
 			t.Errorf("probe path=%q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte("proxies:\n  - name: edge-a\n  - name: edge-b\n"))
+		_, _ = w.Write([]byte("proxies:\n  - name: edge-a\n  - name: edge-b\nproxy-groups:\n  - name: Wukong Fleet\n    type: select\n    proxies:\n      - edge-a\n      - edge-b\nrules:\n  - MATCH,Wukong Fleet\n"))
 	}))
 	defer endpoint.Close()
 	server.fleetProbeClient = endpoint.Client()
@@ -123,6 +123,13 @@ func TestProbeFleetSubscription(t *testing.T) {
 	}
 	if !result.OK || result.NodeCount != 2 || result.LatencyMS < 0 {
 		t.Fatalf("probe result=%+v", result)
+	}
+}
+
+func TestFleetSubscriptionNodeCountExcludesProxyGroup(t *testing.T) {
+	content := "proxies:\n  - name: edge-a\n  - name: edge-b\nproxy-groups:\n  - name: Wukong Fleet\n    type: select\n    proxies:\n      - edge-a\n      - edge-b\nrules:\n  - MATCH,Wukong Fleet\n"
+	if got := fleetSubscriptionNodeCount(content); got != 2 {
+		t.Fatalf("node count=%d, want 2", got)
 	}
 }
 
