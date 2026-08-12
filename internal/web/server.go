@@ -238,16 +238,24 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.
 	if rx, tx, err := s.store.TrafficBetween(start.Format("2006-01-02"), end.Format("2006-01-02")); err == nil {
 		used = rx + tx
 	}
+	version := s.singBoxVersion(r.Context())
+	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, Processes: processes, ProcessCount: processCount, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
+}
+
+func (s *Server) singBoxVersion(ctx context.Context) string {
 	version := "unknown"
 	if healthAgent, ok := s.agent.(interface {
 		Health(context.Context) (map[string]any, error)
 	}); ok {
-		if result, err := healthAgent.Health(r.Context()); err == nil {
-			version = fmt.Sprint(result["version"])
+		if result, err := healthAgent.Health(ctx); err == nil {
+			if value, exists := result["version"]; exists && value != nil {
+				version = fmt.Sprint(value)
+			}
 		}
 	}
-	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, Processes: processes, ProcessCount: processCount, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
+	return version
 }
+
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request, session store.Session) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	items, err := s.store.Metrics(limit)

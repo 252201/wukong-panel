@@ -16,6 +16,12 @@ import (
 	"github.com/252201/wukong-panel/internal/store"
 )
 
+type fleetHealthAgent struct{ fakeAgent }
+
+func (fleetHealthAgent) Health(context.Context) (map[string]any, error) {
+	return map[string]any{"version": "1.13.14"}, nil
+}
+
 func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,7 +36,25 @@ func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	if err = database.SetSetting("fleet_public_url", "https://controller.example/wukong/"); err != nil {
 		t.Fatal(err)
 	}
-	return New(config.Config{DataDir: dir, BasePath: "/", SecureCookie: false}, database, fakeAgent{}, "0.9.0"), database
+	return New(config.Config{DataDir: dir, BasePath: "/", SecureCookie: false}, database, fleetHealthAgent{}, "0.9.0"), database
+}
+
+func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
+	server, _ := fleetWebTestServer(t)
+	status, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Hosts) == 0 {
+		t.Fatal("fleet status has no hosts")
+	}
+	local := status.Hosts[0]
+	if local.ID != localFleetHostID || local.SingBoxVersion != "1.13.14" {
+		t.Fatalf("local host version=%q host=%q", local.SingBoxVersion, local.ID)
+	}
+	if local.Snapshot.Overview.SingBoxVersion != "1.13.14" {
+		t.Fatalf("local snapshot version=%q", local.Snapshot.Overview.SingBoxVersion)
+	}
 }
 
 func TestFleetSubscriptionPublicURLFallbackAndOverride(t *testing.T) {
@@ -102,7 +126,7 @@ func TestProbeFleetSubscription(t *testing.T) {
 		if r.URL.Path != "/fleet-sub/global-secret/clash.yaml" {
 			t.Errorf("probe path=%q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte("proxies:\n  - name: edge-a\n  - name: edge-b\n"))
+		_, _ = w.Write([]byte("proxies:\n  - name: edge-a\n  - name: edge-b\nproxy-groups:\n  - name: Wukong Fleet\n    type: select\n    proxies:\n      - edge-a\n      - edge-b\nrules:\n  - MATCH,Wukong Fleet\n"))
 	}))
 	defer endpoint.Close()
 	server.fleetProbeClient = endpoint.Client()
@@ -123,6 +147,13 @@ func TestProbeFleetSubscription(t *testing.T) {
 	}
 	if !result.OK || result.NodeCount != 2 || result.LatencyMS < 0 {
 		t.Fatalf("probe result=%+v", result)
+	}
+}
+
+func TestFleetSubscriptionNodeCountExcludesProxyGroup(t *testing.T) {
+	content := "proxies:\n  - name: edge-a\n  - name: edge-b\nproxy-groups:\n  - name: Wukong Fleet\n    type: select\n    proxies:\n      - edge-a\n      - edge-b\nrules:\n  - MATCH,Wukong Fleet\n"
+	if got := fleetSubscriptionNodeCount(content); got != 2 {
+		t.Fatalf("node count=%d, want 2", got)
 	}
 }
 
