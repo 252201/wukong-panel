@@ -1,6 +1,6 @@
 .PHONY: web test build release clean
 
-VERSION ?= 0.9.1
+VERSION ?= 0.9.2
 export GOTOOLCHAIN := go1.26.5
 
 web:
@@ -18,6 +18,7 @@ test:
 	sh scripts/test-install-residential-peer-remove.sh
 	sh scripts/test-install-acme-status.sh
 	sh scripts/test-install-cert-renewal.sh
+	sh scripts/test-install-subscription-domain.sh
 	sh scripts/test-install-tls-backfill.sh
 	sh scripts/test-singbox-lifecycle.sh
 

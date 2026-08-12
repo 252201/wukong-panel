@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -18,6 +18,10 @@ const fleetStatus = ref<FleetStatus | null>(null)
 const selectedHostId = ref('local')
 const fleetEnabledDraft = ref(false)
 const fleetPublicURL = ref('')
+const fleetSubscriptionPublicURL = ref('')
+const fleetSubscriptionProbe = ref<FleetSubscriptionProbe | null>(null)
+const fleetSubscriptionProbeError = ref('')
+const fleetSubscriptionProbeBusy = ref(false)
 const enrollmentCommand = ref('')
 const enrollmentExpiresAt = ref('')
 const fleetLeaveCommand = 'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --leave-controller'
@@ -256,6 +260,7 @@ function applyFleetDraft(status: FleetStatus) {
   try {
     fleetEnabledDraft.value = status.enabled
     fleetPublicURL.value = status.publicUrl || `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
+    fleetSubscriptionPublicURL.value = status.subscriptionPublicUrl || ''
     fleetSelectedHosts.value = status.selectedHostIds?.length ? [...status.selectedHostIds] : status.hosts.map(host => host.id)
     fleetSelectedNodes.value = selectedNodes
   } finally { syncingFleetDraft = false }
@@ -274,7 +279,7 @@ async function switchFleetHost(hostId: string) {
 async function saveFleetController(rotateGlobalToken = false) {
   busy.value = true
   try {
-    fleetStatus.value = await api.saveFleetStatus({ enabled: fleetEnabledDraft.value, publicUrl: fleetPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value, rotateGlobalToken })
+    fleetStatus.value = await api.saveFleetStatus({ enabled: fleetEnabledDraft.value, publicUrl: fleetPublicURL.value, subscriptionPublicUrl: fleetSubscriptionPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value, rotateGlobalToken })
     applyFleetDraft(fleetStatus.value)
     fleetDraftDirty.value = false
     notify(rotateGlobalToken ? '全局订阅令牌已轮换' : '中央控制设置已保存')
@@ -285,12 +290,23 @@ async function saveFleetController(rotateGlobalToken = false) {
 async function saveFleetSubscriptionSelection() {
 	busy.value = true
 	try {
-		fleetStatus.value = await api.saveFleetStatus({ enabled: true, publicUrl: fleetPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value })
+		fleetStatus.value = await api.saveFleetStatus({ enabled: true, publicUrl: fleetPublicURL.value, subscriptionPublicUrl: fleetSubscriptionPublicURL.value, selectedHostIds: fleetSelectedHosts.value, selectedNodeIds: fleetSelectedNodes.value })
 		applyFleetDraft(fleetStatus.value)
 		fleetDraftDirty.value = false
 		notify('全局订阅范围已保存，旧缓存已失效')
 	} catch (error) { notify(error instanceof Error ? error.message : '订阅范围保存失败') }
 	finally { busy.value = false }
+}
+
+async function probeFleetSubscription() {
+  fleetSubscriptionProbeBusy.value = true
+  fleetSubscriptionProbe.value = null
+  fleetSubscriptionProbeError.value = ''
+  try {
+    fleetSubscriptionProbe.value = await api.probeFleetSubscription(fleetSubscriptionPublicURL.value)
+  } catch (error) {
+    fleetSubscriptionProbeError.value = error instanceof Error ? error.message : '订阅入口检测失败'
+  } finally { fleetSubscriptionProbeBusy.value = false }
 }
 
 function toggleFleetNode(hostId: string, nodeId: string, enabled: boolean) {
@@ -496,8 +512,12 @@ watch(() => createForm.protocol, (protocol, previous) => {
   if (protocol !== 'vless-ws-tunnel' && !createForm.server) createForm.server = panelDomain
   if (protocol !== 'vless-ws-tunnel') createForm.preferredServer = ''
 })
-watch([fleetEnabledDraft, fleetPublicURL, fleetSelectedHosts, fleetSelectedNodes], () => {
-  if (!syncingFleetDraft) fleetDraftDirty.value = true
+watch([fleetEnabledDraft, fleetPublicURL, fleetSubscriptionPublicURL, fleetSelectedHosts, fleetSelectedNodes], () => {
+  if (!syncingFleetDraft) {
+    fleetDraftDirty.value = true
+    fleetSubscriptionProbe.value = null
+    fleetSubscriptionProbeError.value = ''
+  }
 }, { deep: true, flush: 'sync' })
 watch(settings, () => {
   if (!syncingSettingsDraft) settingsDraftDirty.value = true
@@ -902,7 +922,32 @@ onBeforeUnmount(() => { window.clearInterval(timer); window.removeEventListener(
 
       <div v-else-if="page === 'settings'" class="page-content settings-page">
         <div class="page-intro"><div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div><button class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button></div>
-        <section v-if="selectedHostId === 'local'" class="panel-card fleet-controller-settings"><div class="setting-title"><span>舰</span><div><h3>中央多机控制</h3><p>本机作为单主控；远端 Agent 通过可信 HTTPS 主动接入</p></div></div><label class="toggle-row"><span><b>启用中央控制</b><small>未启用时界面与 v0.8.2 单机模式保持一致</small></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label><label v-if="fleetEnabledDraft">主控公网 URL<input v-model="fleetPublicURL" type="url" placeholder="https://panel.example.com/wukong/"><small>必须使用系统信任的 HTTPS 证书，并包含面板随机路径</small></label><div class="fleet-setting-actions"><button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment">生成接入命令</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="saveFleetController(true)">轮换全局订阅 Token</button></div><div v-if="fleetStatus?.globalSubscription" class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div></section>
+        <section v-if="selectedHostId === 'local'" class="panel-card fleet-controller-settings">
+          <div class="setting-title"><span>舰</span><div><h3>中央多机控制</h3><p>控制流与订阅流可使用各自独立的可信 HTTPS 入口</p></div></div>
+          <label class="toggle-row"><span><b>启用中央控制</b><small>未启用时界面与 v0.8.2 单机模式保持一致</small></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label>
+          <div v-if="fleetEnabledDraft" class="fleet-url-grid">
+            <label class="fleet-url-field">
+              <span><b>01 · 主控通信地址</b><em>CONTROL PLANE</em></span>
+              <input v-model="fleetPublicURL" type="url" placeholder="https://panel.example.com/wukong/">
+              <small>供远端 Agent 接入和心跳使用，必须包含面板随机路径。</small>
+            </label>
+            <label class="fleet-url-field subscription">
+              <span><b>02 · 订阅公开地址</b><em>SUBSCRIPTION · 443</em></span>
+              <input v-model="fleetSubscriptionPublicURL" type="url" placeholder="https://sub.example.com/">
+              <small>可留空以复用主控地址；建议使用独立标准 HTTPS 443 域名，只反代 <code>/fleet-sub/</code>。</small>
+            </label>
+          </div>
+          <div class="fleet-setting-actions">
+            <button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button>
+            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment">生成接入命令</button>
+            <button v-if="fleetStatus?.enabled" class="secondary probe" :disabled="fleetSubscriptionProbeBusy" @click="probeFleetSubscription">{{ fleetSubscriptionProbeBusy ? '正在检测…' : '检测订阅入口' }}</button>
+            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="saveFleetController(true)">轮换全局订阅 Token</button>
+          </div>
+          <div v-if="fleetSubscriptionProbeBusy || fleetSubscriptionProbe || fleetSubscriptionProbeError" class="fleet-probe-result" :class="fleetSubscriptionProbeError ? 'error' : fleetSubscriptionProbe ? 'success' : 'running'">
+            <i></i><span v-if="fleetSubscriptionProbeBusy">正从主控服务器验证 TLS、HTTP 状态与订阅内容…</span><span v-else-if="fleetSubscriptionProbe"><b>入口可用</b> · HTTP {{ fleetSubscriptionProbe.status }} · {{ fleetSubscriptionProbe.nodeCount }} 个节点 · {{ fleetSubscriptionProbe.latencyMs }} ms</span><span v-else>{{ fleetSubscriptionProbeError }}</span>
+          </div>
+          <div v-if="fleetStatus?.globalSubscription" class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div>
+        </section>
         <section class="settings-grid"><article class="panel-card"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone" :disabled="mutationsDisabled"></label><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled"></label><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label></article><article class="panel-card"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button :disabled="mutationsDisabled" @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></section>
       </div>
     </section>

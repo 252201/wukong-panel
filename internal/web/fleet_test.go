@@ -33,6 +33,127 @@ func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	return New(config.Config{DataDir: dir, BasePath: "/", SecureCookie: false}, database, fakeAgent{}, "0.9.0"), database
 }
 
+func TestFleetSubscriptionPublicURLFallbackAndOverride(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	if err := database.SetSetting("fleet_global_token", "global-secret"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.GlobalSubscription != "https://controller.example/wukong/fleet-sub/global-secret/clash.yaml" {
+		t.Fatalf("fallback subscription=%q", status.GlobalSubscription)
+	}
+	if err = database.SetSetting("fleet_subscription_public_url", "https://subscribe.example/"); err != nil {
+		t.Fatal(err)
+	}
+	status, err = server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SubscriptionPublicURL != "https://subscribe.example/" || status.GlobalSubscription != "https://subscribe.example/fleet-sub/global-secret/clash.yaml" {
+		t.Fatalf("dedicated subscription status=%+v", status)
+	}
+}
+
+func TestSaveFleetStatusPreservesDedicatedURLForLegacyClients(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	if err := database.SetSetting("fleet_subscription_public_url", "https://subscribe.example/"); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/fleet/status", strings.NewReader(`{"enabled":true,"publicUrl":"https://new-controller.example/panel"}`))
+	recorder := httptest.NewRecorder()
+	server.saveFleetStatus(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := mustSetting(database, "fleet_subscription_public_url"); got != "https://subscribe.example/" {
+		t.Fatalf("legacy save replaced dedicated URL: %q", got)
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/fleet/status", strings.NewReader(`{"enabled":true,"publicUrl":"https://new-controller.example/panel","subscriptionPublicUrl":"https://sub.example/path"}`))
+	recorder = httptest.NewRecorder()
+	server.saveFleetStatus(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("dedicated save status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := mustSetting(database, "fleet_subscription_public_url"); got != "https://sub.example/path/" {
+		t.Fatalf("normalized dedicated URL=%q", got)
+	}
+}
+
+func TestSaveFleetStatusRejectsInvalidSubscriptionURL(t *testing.T) {
+	server, _ := fleetWebTestServer(t)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/fleet/status", strings.NewReader(`{"enabled":true,"publicUrl":"https://controller.example/","subscriptionPublicUrl":"http://subscribe.example"}`))
+	recorder := httptest.NewRecorder()
+	server.saveFleetStatus(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "订阅公开地址") {
+		t.Fatalf("invalid URL status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProbeFleetSubscription(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	if err := database.SetSetting("fleet_global_token", "global-secret"); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet-sub/global-secret/clash.yaml" {
+			t.Errorf("probe path=%q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte("proxies:\n  - name: edge-a\n  - name: edge-b\n"))
+	}))
+	defer endpoint.Close()
+	server.fleetProbeClient = endpoint.Client()
+	server.fleetProbeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/subscription-probe", strings.NewReader(`{"subscriptionPublicUrl":"`+endpoint.URL+`"}`))
+	recorder := httptest.NewRecorder()
+	server.probeFleetSubscription(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("probe status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		OK        bool  `json:"ok"`
+		NodeCount int   `json:"nodeCount"`
+		LatencyMS int64 `json:"latencyMs"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || result.NodeCount != 2 || result.LatencyMS < 0 {
+		t.Fatalf("probe result=%+v", result)
+	}
+}
+
+func TestProbeFleetSubscriptionDoesNotFollowRedirects(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	if err := database.SetSetting("fleet_global_token", "global-secret"); err != nil {
+		t.Fatal(err)
+	}
+	redirectReached := false
+	destination := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		redirectReached = true
+	}))
+	defer destination.Close()
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, &http.Request{}, destination.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+	client := origin.Client()
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	server.fleetProbeClient = client
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/subscription-probe", strings.NewReader(`{"subscriptionPublicUrl":"`+origin.URL+`"}`))
+	recorder := httptest.NewRecorder()
+	server.probeFleetSubscription(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusBadGateway || redirectReached {
+		t.Fatalf("redirect probe status=%d reached=%t body=%s", recorder.Code, redirectReached, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "global-secret") {
+		t.Fatal("probe error leaked subscription token")
+	}
+}
+
 func enrollFleetAgent(t *testing.T, server *Server, database *store.Store, enrollment, name string) model.FleetEnrollmentResponse {
 	t.Helper()
 	if err := database.CreateFleetEnrollmentToken(enrollment, time.Now().Add(time.Minute)); err != nil {

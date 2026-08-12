@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS fleet_subscription_cache (
 	defaults := map[string]string{
 		"language": "zh-CN", "timezone": "Asia/Shanghai", "interface": "auto",
 		"traffic_quota_bytes": "0", "billing_reset_day": "1", "collect_endpoints": "true",
+		"fleet_subscription_public_url": "",
 	}
 	for key, value := range defaults {
 		if _, err := s.DB.Exec("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", key, value); err != nil {
