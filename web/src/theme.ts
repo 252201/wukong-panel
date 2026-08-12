@@ -25,8 +25,9 @@ export function effectiveTheme(preference: ThemePreference): EffectiveTheme {
 function syncThemeChrome(preference: ThemePreference) {
   const effective = effectiveTheme(preference)
   document.documentElement.dataset.theme = preference
+  document.documentElement.dataset.effectiveTheme = effective
   document.documentElement.style.colorScheme = effective
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', effective === 'light' ? '#eee8da' : '#0b0d0b')
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', effective === 'light' ? '#f7f8f8' : '#0b0d0b')
 }
 
 export function applyThemePreference(preference: ThemePreference, persist = true) {

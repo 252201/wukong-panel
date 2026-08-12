@@ -7,7 +7,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: ThemePreference] }>()
 const groupName = `theme-${useId()}`
 const options: { value: ThemePreference; label: string; description: string }[] = [
   { value: 'dark', label: '暗色', description: '墨夜金阙' },
-  { value: 'light', label: '亮色', description: '暖白宣纸' },
+  { value: 'light', label: '亮色', description: '明净橙白' },
   { value: 'system', label: '系统', description: '跟随设备' },
 ]
 </script>

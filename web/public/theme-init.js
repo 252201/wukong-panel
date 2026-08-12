@@ -11,7 +11,8 @@
     ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
     : preference
   document.documentElement.dataset.theme = preference
+  document.documentElement.dataset.effectiveTheme = effective
   document.documentElement.style.colorScheme = effective
   var themeColor = document.querySelector('meta[name="theme-color"]')
-  if (themeColor) themeColor.setAttribute('content', effective === 'light' ? '#eee8da' : '#0b0d0b')
+  if (themeColor) themeColor.setAttribute('content', effective === 'light' ? '#f7f8f8' : '#0b0d0b')
 })()
