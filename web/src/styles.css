@@ -503,3 +503,24 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .fleet-host-card footer,
 :root[data-effective-theme="light"] .fleet-probe-result,
 :root[data-effective-theme="light"] .fleet-scope-hosts > article { background: #f6f8f7; }
+
+:root[lang="en-US"] .sidebar nav button span { font-size: 13px; letter-spacing: -.01em; }
+:root[lang="en-US"] .device-entry b,
+:root[lang="en-US"] .primary,
+:root[lang="en-US"] .secondary { letter-spacing: 0; white-space: nowrap; }
+:root[lang="en-US"] .theme-choice > span > small { line-height: 1.2; }
+:root[lang="en-US"] .page-intro h2 { max-width: 28ch; }
+:root[lang="en-US"] .node-actions { flex-wrap: wrap; }
+:root[lang="en-US"] .settings-grid label { letter-spacing: 0; }
+
+@media (max-width: 650px) {
+  :root[lang="en-US"] .sidebar nav button span { font-size: 8px; }
+  :root[lang="en-US"] .topbar { gap: 8px; }
+  :root[lang="en-US"] .topbar > div:first-child { min-width: 82px; }
+  :root[lang="en-US"] .top-actions { min-width: 0; gap: 6px; }
+  :root[lang="en-US"] .top-actions .host-switcher { width: 145px; min-width: 0; }
+  :root[lang="en-US"] .top-actions .host-switcher select { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :root[lang="en-US"] .top-actions:has(.host-switcher) .device-entry { display: none; }
+  :root[lang="en-US"] .top-actions:has(.host-switcher) .primary { width: 40px; padding: 0; overflow: hidden; font-size: 0; }
+  :root[lang="en-US"] .top-actions:has(.host-switcher) .primary::after { content: "+"; font-size: 19px; }
+}

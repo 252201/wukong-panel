@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
+import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -54,7 +55,7 @@ const activeTimelineBucket = ref<number | null>(null)
 const deviceLimit = ref(3)
 const busy = ref(false)
 const toast = ref('')
-const language = ref<'zh-CN' | 'en-US'>('zh-CN')
+const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
 const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | null>(null)
 type FleetHostAction = 'rename' | 'remove' | 'purge'
@@ -529,6 +530,14 @@ watch([fleetEnabledDraft, fleetPublicURL, fleetSubscriptionPublicURL, fleetSelec
 watch(settings, () => {
   if (!syncingSettingsDraft) settingsDraftDirty.value = true
 }, { deep: true, flush: 'sync' })
+watch(() => settings.value.language, value => {
+  const next: Locale = value === 'en-US' ? 'en-US' : 'zh-CN'
+  if (language.value !== next) language.value = next
+}, { flush: 'sync' })
+watch(language, locale => {
+  applyLocale(locale)
+  refreshDocumentLocale(locale)
+}, { flush: 'post' })
 watch(page, (next, previous) => {
   if (next === previous) return
   if (previous === 'fleet') {
@@ -765,8 +774,9 @@ async function copy(value: string) { await navigator.clipboard.writeText(value);
 
 let timer = 0
 let stopObservingTheme = () => {}
-onMounted(async () => { applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
-onBeforeUnmount(() => { stopObservingTheme(); window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
+let stopLocalizing = () => {}
+onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
+onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
 <template>
