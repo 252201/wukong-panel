@@ -526,3 +526,20 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   :root[lang="en-US"] .top-actions:has(.host-switcher) .primary { width: 40px; padding: 0; overflow: hidden; font-size: 0; }
   :root[lang="en-US"] .top-actions:has(.host-switcher) .primary::after { content: "+"; font-size: 19px; }
 }
+
+/* Keep the fleet subscription picker dense on desktop while preserving readable fallbacks. */
+.fleet-scope-hosts > article > div {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+@media (max-width: 1050px) {
+  .fleet-scope-hosts > article > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 460px) {
+  .fleet-scope-hosts > article > div { grid-template-columns: 1fr; }
+}
+
+/* Align the first resource metric with the disk column below it. */
+.fleet-host-metrics span:first-child { padding-left: 13px; }
