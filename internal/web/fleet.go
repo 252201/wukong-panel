@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,21 @@ import (
 const localFleetHostID = "local"
 
 const maxFleetProbeBody = 2 << 20
+
+func localFleetOS() string {
+	osName := runtime.GOOS
+	if data, err := os.ReadFile("/etc/os-release"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "ID=") {
+				value := strings.Trim(strings.TrimPrefix(line, "ID="), "\"")
+				if value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return osName
+}
 
 type fleetSubscriptionEntry struct {
 	Node  model.Node  `json:"node"`
@@ -108,11 +125,16 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_hosts")), &status.SelectedHostIDs)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_nodes")), &status.SelectedNodeIDs)
 	singBoxVersion := s.singBoxVersion(ctx)
-	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", PanelVersion: s.version, SingBoxVersion: singBoxVersion, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
+	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", OS: localFleetOS(), Arch: runtime.GOARCH, PanelVersion: s.version, SingBoxVersion: singBoxVersion, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
 	metrics, _ := s.store.Metrics(80)
 	nodes, _ := s.store.Nodes(ctx)
 	jobs, _ := s.store.Jobs(30)
 	settings, _ := s.store.Settings()
+	billingStart, billingEnd := billingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
+	trafficUsed := int64(0)
+	if rx, tx, trafficErr := s.store.TrafficBetween(billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02")); trafficErr == nil {
+		trafficUsed = rx + tx
+	}
 	var now model.Metric
 	if len(metrics) > 0 {
 		now = metrics[len(metrics)-1]
@@ -123,7 +145,7 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 			online++
 		}
 	}
-	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, SingBoxVersion: singBoxVersion, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
+	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: trafficUsed, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: singBoxVersion, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
 	status.Hosts = append([]model.FleetHost{local}, hosts...)
 	status.ArchivedHosts = archivedHosts
 	subscriptionBaseURL := subscriptionPublicURL

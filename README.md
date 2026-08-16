@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.9.7-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.9.8-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -130,7 +130,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.9.7 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.9.8 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -338,6 +338,8 @@ wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
 wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/probe-config \
   --server 2001:db8::10 --server-name node.example.com
 ```
+
+强制 IPv6 域名规则包含一个兼容性例外：当列表中包含 `claude.ai` 时，`downloads.claude.ai` 不会进入 IPv6-only 路由，而是使用普通 IPv6 优先、IPv4 可回退的出站，避免 Claude 下载和自动更新因该域名缺少可用 IPv6 而失败。
 
 `compat/deploy-hy2.sh` 保留原参数模式入口，并将参数交给 `wukongctl node create`。交互部署改由面板完成。
 
