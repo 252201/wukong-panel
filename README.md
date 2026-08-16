@@ -8,9 +8,11 @@
 
 ## 宣传片 | Product Film
 
-[![观看悟空面板 30 秒中英双语宣传片](assets/wukong-panel-promo-poster.jpg)](assets/wukong-panel-promo.mp4)
+https://github.com/user-attachments/assets/aa6c76f3-990a-451d-adba-f1ab875b53d5
 
-点击上方海报播放 30 秒中英双语品牌短片（1920×1080 · 60fps）。
+[下载原始 1920×1080 版本](assets/wukong-panel-promo.mp4)
+
+点击播放器观看 30 秒中英双语品牌短片（720p · 60fps）。
 
 ## 特性
 
