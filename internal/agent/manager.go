@@ -1884,6 +1884,17 @@ func normalizeDomainList(values []string) []string {
 	return result
 }
 
+// downloads.claude.ai currently has no usable IPv6 endpoint. Keep it out of
+// the Claude parent-domain IPv6-only rule so Claude can fall back to IPv4.
+func forcedIPv6BypassDomains(domains []string) []string {
+	for _, domain := range domains {
+		if strings.Trim(strings.ToLower(strings.TrimSpace(domain)), ".") == "claude.ai" {
+			return []string{"downloads.claude.ai"}
+		}
+	}
+	return nil
+}
+
 func v6OnlyDomainsFromConfig(root map[string]any) []string {
 	route, _ := root["route"].(map[string]any)
 	rules, _ := route["rules"].([]any)
@@ -2076,6 +2087,13 @@ func buildConfigWithInbounds(request model.NodeCreateRequest, inbounds []any, ve
 		outbounds = append(outbounds, direct(final, strategy))
 	}
 	if request.Egress != "socks" && request.Mode == "prefer_v6" && len(request.V6OnlyDomains) > 0 {
+		for _, domain := range forcedIPv6BypassDomains(request.V6OnlyDomains) {
+			rule := map[string]any{"domain": []string{domain}, "outbound": final}
+			if capabilities.RuleActions {
+				rule["action"] = "route"
+			}
+			rules = append(rules, rule)
+		}
 		outbounds = append(outbounds, direct("out-v6only", "ipv6_only"))
 		rule := map[string]any{"domain_suffix": request.V6OnlyDomains, "outbound": "out-v6only"}
 		if capabilities.RuleActions {
