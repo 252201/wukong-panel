@@ -6,6 +6,12 @@
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
+## 宣传片 | Product Film
+
+[![观看悟空面板 30 秒中英双语宣传片](assets/wukong-panel-promo-poster.jpg)](assets/wukong-panel-promo.mp4)
+
+点击上方海报播放 30 秒中英双语品牌短片（1920×1080 · 60fps）。
+
 ## 特性
 
 - 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
