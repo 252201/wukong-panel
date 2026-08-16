@@ -10,9 +10,6 @@
 
 https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 
-[下载原始 1920×1080 版本](assets/wukong-panel-promo.mp4)
-
-未播放时显示视频第 3 秒画面；点击播放器观看 30 秒中英双语品牌短片（720p · 60fps）。
 
 ## 特性
 
