@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -52,8 +53,14 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 	if local.ID != localFleetHostID || local.SingBoxVersion != "1.13.14" {
 		t.Fatalf("local host version=%q host=%q", local.SingBoxVersion, local.ID)
 	}
+	if local.OS == "" || local.Arch != runtime.GOARCH {
+		t.Fatalf("local host platform=%q/%q", local.OS, local.Arch)
+	}
 	if local.Snapshot.Overview.SingBoxVersion != "1.13.14" {
 		t.Fatalf("local snapshot version=%q", local.Snapshot.Overview.SingBoxVersion)
+	}
+	if local.Snapshot.Overview.BillingStart == "" || local.Snapshot.Overview.BillingEnd == "" {
+		t.Fatalf("local snapshot billing period=%q..%q", local.Snapshot.Overview.BillingStart, local.Snapshot.Overview.BillingEnd)
 	}
 }
 

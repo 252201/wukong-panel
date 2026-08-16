@@ -339,6 +339,8 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
   --server 2001:db8::10 --server-name node.example.com
 ```
 
+强制 IPv6 域名规则包含一个兼容性例外：当列表中包含 `claude.ai` 时，`downloads.claude.ai` 不会进入 IPv6-only 路由，而是使用普通 IPv6 优先、IPv4 可回退的出站，避免 Claude 下载和自动更新因该域名缺少可用 IPv6 而失败。
+
 `compat/deploy-hy2.sh` 保留原参数模式入口，并将参数交给 `wukongctl node create`。交互部署改由面板完成。
 
 ## API

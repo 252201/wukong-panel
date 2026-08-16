@@ -76,6 +76,55 @@ func TestBuildModernConfig(t *testing.T) {
 	}
 }
 
+func TestClaudeDownloadsBypassesForcedIPv6AcrossSingBoxVersions(t *testing.T) {
+	for _, test := range []struct {
+		version    string
+		wantAction bool
+	}{
+		{version: "1.10.7"},
+		{version: "1.13.14", wantAction: true},
+	} {
+		t.Run(test.version, func(t *testing.T) {
+			request := baseRequest()
+			request.V6OnlyDomains = []string{"chatgpt.com", "claude.ai"}
+			payload, err := buildConfig(request, 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", test.version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var root map[string]any
+			if err = json.Unmarshal(payload, &root); err != nil {
+				t.Fatal(err)
+			}
+			route := root["route"].(map[string]any)
+			rules := route["rules"].([]any)
+			bypassIndex, v6Index := -1, -1
+			for index, item := range rules {
+				rule := item.(map[string]any)
+				if domains, ok := rule["domain"].([]any); ok && len(domains) == 1 && domains[0] == "downloads.claude.ai" {
+					bypassIndex = index
+					if rule["outbound"] != "out-direct" {
+						t.Fatalf("Claude download exception uses %v, want out-direct", rule["outbound"])
+					}
+					if test.wantAction && rule["action"] != "route" {
+						t.Fatalf("modern Claude download exception action is %v, want route", rule["action"])
+					}
+					if !test.wantAction {
+						if _, exists := rule["action"]; exists {
+							t.Fatalf("legacy Claude download exception unexpectedly has action: %v", rule["action"])
+						}
+					}
+				}
+				if suffixes, ok := rule["domain_suffix"].([]any); ok && len(suffixes) == 2 {
+					v6Index = index
+				}
+			}
+			if bypassIndex < 0 || v6Index < 0 || bypassIndex >= v6Index {
+				t.Fatalf("Claude download exception was not placed before IPv6-only rule: bypass=%d v6=%d rules=%#v", bypassIndex, v6Index, rules)
+			}
+		})
+	}
+}
+
 func TestBuildDeviceGroupConfigContainsMultipleInbounds(t *testing.T) {
 	request := baseRequest()
 	first, err := buildProtocolInbound(request, 45115, protocolCredentials{Password: "first-secret"}, "/tmp/device.cer", "/tmp/device.key")
