@@ -7,6 +7,10 @@ on:
         description: Release version (for example v0.8.1)
         required: true
         type: string
+      release_notes:
+        description: User-facing Markdown summary (what changed, who should upgrade, and important compatibility notes; do not paste raw commit lists)
+        required: true
+        type: string
 
 concurrency:
   group: release-${{ inputs.version }}
@@ -21,6 +25,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_NOTES: ${{ inputs.release_notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +50,10 @@ jobs:
           fi
           if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release version: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
+            echo "release_notes input must not be empty" >&2
             exit 1
           fi
           git fetch origin --tags
@@ -96,6 +105,20 @@ jobs:
             go version -m "$binary" | grep -F "vcs.modified=false" >/dev/null
           done
 
+      - name: Prepare user-facing release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n\n' '## 更新摘要'
+            printf '%s\n\n' "$RELEASE_NOTES"
+            printf '%s\n\n' '## 发布信息'
+            printf '%s\n' "- 版本：$RELEASE_VERSION"
+            printf '%s\n' "- 构建来源：main / $GITHUB_SHA"
+            printf '%s\n' '- 正式资产已由 GitHub Actions 构建并完成校验。'
+          } > release/RELEASE_NOTES.md
+          test -s release/RELEASE_NOTES.md
+
       - name: Create annotated tag and GitHub Release
         shell: bash
         run: |
@@ -107,7 +130,7 @@ jobs:
           gh release create "$RELEASE_VERSION" \
             --verify-tag \
             --title "$RELEASE_VERSION" \
-            --generate-notes \
+            --notes-file release/RELEASE_NOTES.md \
             release/wukong-panel-linux-amd64 \
             release/wukong-panel-linux-arm64 \
             release/SHA256SUMS \
