@@ -301,6 +301,36 @@ func TestShareURIForEverySupportedProtocol(t *testing.T) {
 	}
 }
 
+func TestShareURIForIPv6OnlyUsesLiteralEndpointAndKeepsSNI(t *testing.T) {
+	node := model.Node{
+		Name:       "纯 V6",
+		Protocol:   protocolHysteria2,
+		Mode:       "v6only",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		ListenPort: 39769,
+	}
+	credentials := protocolCredentials{Password: "secret"}
+	endpoint := "2602:faa8:502:5a::a"
+	share, err := buildShareURIWithServer(node, credentials, false, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Hostname() != endpoint || parsed.Port() != "39769" {
+		t.Fatalf("share endpoint=%q port=%q, want %q:39769", parsed.Hostname(), parsed.Port(), endpoint)
+	}
+	if parsed.Query().Get("sni") != node.Domain {
+		t.Fatalf("share SNI=%q, want %q", parsed.Query().Get("sni"), node.Domain)
+	}
+	if !strings.Contains(share, "@["+endpoint+"]:39769") {
+		t.Fatalf("IPv6 endpoint was not bracketed in URI: %s", share)
+	}
+}
+
 func TestValidateCreateRequiresProtocolAddressing(t *testing.T) {
 	request := baseRequest()
 	request.Server = ""
