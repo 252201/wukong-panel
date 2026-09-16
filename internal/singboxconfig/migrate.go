@@ -37,6 +37,8 @@ type Plan struct {
 	Errors            int        `json:"errors"`
 }
 
+const LatestSupportedVersion = "1.14.1"
+
 func newFilePlan(path string) FilePlan {
 	return FilePlan{Path: path, Changes: []string{}, Warnings: []string{}, Errors: []string{}, Interfaces: []string{}}
 }
@@ -120,6 +122,10 @@ func Migrate(data []byte, target, path string) ([]byte, FilePlan, error) {
 		result.Errors = append(result.Errors, "invalid JSON: "+err.Error())
 		return nil, result, err
 	}
+	if root == nil {
+		result.Errors = append(result.Errors, "configuration root must be a JSON object")
+		return data, result, nil
+	}
 	major, minor := parseVersion(target)
 	if major != 1 || minor < 10 {
 		result.Errors = append(result.Errors, "unsupported target version "+target)
@@ -129,6 +135,7 @@ func Migrate(data []byte, target, path string) ([]byte, FilePlan, error) {
 	if !caps.NoLegacyInbound {
 		result.Warnings = append(result.Warnings, "target does not require the 1.13 migration profile")
 	}
+	migrateDNS(root, caps, &result)
 
 	_, routeExisted := root["route"]
 	route := object(root, "route")

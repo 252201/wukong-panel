@@ -205,7 +205,7 @@ func (s *Server) share(w http.ResponseWriter, r *http.Request) {
 func (s *Server) migrationPlan(w http.ResponseWriter, r *http.Request) {
 	target := r.URL.Query().Get("target")
 	if target == "" {
-		target = "1.13.14"
+		target = singboxconfig.LatestSupportedVersion
 	}
 	plan, err := s.manager.MigrationPlan(r.Context(), target)
 	if err != nil {

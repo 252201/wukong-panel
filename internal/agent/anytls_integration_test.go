@@ -40,7 +40,7 @@ func TestGeneratedAnyTLSCompletesFullRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := buildConfig(request, port, credentials, certPath, keyPath, "1.13.14")
+	payload, err := buildConfig(request, port, credentials, certPath, keyPath, singboxconfig.LatestSupportedVersion)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -460,7 +460,7 @@ func (s *Server) scan(w http.ResponseWriter, r *http.Request, session store.Sess
 func (s *Server) singBoxMigration(w http.ResponseWriter, r *http.Request, session store.Session) {
 	target := r.URL.Query().Get("target")
 	if target == "" {
-		target = "1.13.14"
+		target = singboxconfig.LatestSupportedVersion
 	}
 	plan, err := s.agent.MigrationPlan(r.Context(), target)
 	if err != nil {

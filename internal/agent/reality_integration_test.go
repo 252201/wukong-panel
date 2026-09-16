@@ -35,7 +35,7 @@ func TestGeneratedVLESSRealityCompletesFullRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := buildConfig(request, port, credentials, "", "", "1.13.14")
+	payload, err := buildConfig(request, port, credentials, "", "", singboxconfig.LatestSupportedVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
