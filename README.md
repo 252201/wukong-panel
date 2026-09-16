@@ -354,6 +354,7 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 
 - `auth/login|me|password|logout`
 - `overview`、`metrics`、`metrics/endpoints`、`metrics/timeline`
+- `monitor/traffic`（可选，只读，Bearer Token 鉴权）
 - `nodes`、`nodes/batch`、`nodes/{id}/actions`、`nodes/{id}/share`
 - `imports/scan|confirm`
 - `system/sing-box/migration`
@@ -361,7 +362,7 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 - `jobs`、`jobs/{id}/events`
 - `settings`、`settings/subscription-token`
 
-变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。
+变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。只读监控接口默认关闭；配置 `settings.monitor_token_hash` 后，仅接受 `Authorization: Bearer ...`，并只返回整机速率、80 个趋势采样、今日/账期累计、网卡和运行时间，不返回节点、设备、进程或任何凭据。
 
 ## 本地开发
 

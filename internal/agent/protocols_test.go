@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -130,6 +131,73 @@ func TestManagedEditRejectsMismatchedRealityCredentials(t *testing.T) {
 func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
 	if realityDefaultSNI != "www.cloudflare.com" {
 		t.Fatalf("unexpected REALITY default SNI: %s", realityDefaultSNI)
+	}
+}
+
+func TestBuildProtocolInboundUsesModeAwareListenAddress(t *testing.T) {
+	credentials := protocolCredentials{Password: "secret"}
+	for _, test := range []struct {
+		name     string
+		protocol string
+		mode     string
+		want     string
+	}{
+		{name: "ipv4 only", protocol: protocolHysteria2, mode: "v4only", want: "0.0.0.0"},
+		{name: "prefer ipv6", protocol: protocolHysteria2, mode: "prefer_v6", want: "::"},
+		{name: "ipv6 only", protocol: protocolHysteria2, mode: "v6only", want: "2001:db8::5"},
+		{name: "websocket origin", protocol: protocolVLESSWSTunnel, mode: "v4only", want: "127.0.0.1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := baseRequest()
+			request.Protocol = test.protocol
+			request.Mode = test.mode
+			if test.mode == "v6only" {
+				request.IPv4Bind = ""
+				request.IPv6Bind = "2001:db8::5"
+			}
+			if test.protocol == protocolVLESSWSTunnel {
+				credentials.UUID = "00000000-0000-4000-8000-000000000001"
+				request.WebSocketPath = "/wukong-test"
+			}
+			inbound, err := buildProtocolInbound(request, 45123, credentials, "/tmp/cert", "/tmp/key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inbound["listen"] != test.want {
+				t.Fatalf("listen=%v, want %q", inbound["listen"], test.want)
+			}
+		})
+	}
+}
+
+func TestSelectLocalIPv6AddressUsesEndpointIntersection(t *testing.T) {
+	resolved := []net.IP{
+		net.ParseIP("2600:1700:2bc1:409d:a::3188"),
+		net.ParseIP("2602:faa8:502:5a::a"),
+	}
+	local := []net.IP{net.ParseIP("2602:faa8:502:5a::a")}
+	if got := selectLocalIPv6Address(resolved, local); got != "2602:faa8:502:5a::a" {
+		t.Fatalf("selected IPv6 address=%q, want endpoint address", got)
+	}
+}
+
+func TestSelectLocalIPv6AddressRejectsNonLocalEndpoint(t *testing.T) {
+	resolved := []net.IP{net.ParseIP("2602:faa8:502:5a::a")}
+	local := []net.IP{net.ParseIP("2600:1700:2bc1:409d:a::3188")}
+	if got := selectLocalIPv6Address(resolved, local); got != "" {
+		t.Fatalf("selected non-local IPv6 address=%q", got)
+	}
+}
+
+func TestEndpointHostHandlesIPv6LiteralAndHostPort(t *testing.T) {
+	for value, want := range map[string]string{
+		"[2602:faa8:502:5a::a]:443": "2602:faa8:502:5a::a",
+		"2602:faa8:502:5a::a":       "2602:faa8:502:5a::a",
+		"node.example.com:443":      "node.example.com",
+	} {
+		if got := endpointHost(value); got != want {
+			t.Fatalf("endpointHost(%q)=%q, want %q", value, got, want)
+		}
 	}
 }
 
