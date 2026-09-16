@@ -562,7 +562,17 @@ func inboundDomain(protocol string, inbound map[string]any) string {
 }
 
 func buildShareURI(node model.Node, credentials protocolCredentials, insecure bool) (string, error) {
-	server := strings.TrimSpace(node.Server)
+	return buildShareURIWithServer(node, credentials, insecure, "")
+}
+
+// buildShareURIWithServer keeps the public client endpoint separate from the
+// TLS SNI. Pure IPv6 nodes may need to publish a literal address even when
+// their certificate and SNI continue to use the configured domain name.
+func buildShareURIWithServer(node model.Node, credentials protocolCredentials, insecure bool, serverOverride string) (string, error) {
+	server := strings.TrimSpace(serverOverride)
+	if server == "" {
+		server = strings.TrimSpace(node.Server)
+	}
 	if server == "" {
 		server = strings.TrimSpace(node.Domain)
 	}

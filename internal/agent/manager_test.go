@@ -37,6 +37,30 @@ func baseRequest() model.NodeCreateRequest {
 	return model.NodeCreateRequest{Protocol: protocolHysteria2, Name: "Test", Mode: "prefer_v6", IPv4Bind: "192.0.2.5", IPv6Bind: "2001:db8::5", V6OnlyDomains: []string{"chatgpt.com"}}
 }
 
+func TestShareEndpointUsesInboundIPv6InsteadOfOutboundBind(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "node.json")
+	config := []byte(`{"inbounds":[{"type":"hysteria2","listen":"2602:faa8:502:5a::a","listen_port":39769}]}`)
+	if err := os.WriteFile(configPath, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{
+		Protocol:   protocolHysteria2,
+		Mode:       "v6only",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		IPv6Bind:   "2600:1700:2bc1:409d:a::3188",
+		ListenPort: 39769,
+		ConfigPath: configPath,
+	}
+	endpoint, err := shareEndpoint(t.Context(), node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "2602:faa8:502:5a::a" {
+		t.Fatalf("share endpoint=%q, want inbound IPv6 address", endpoint)
+	}
+}
+
 func TestBuildLegacyConfig(t *testing.T) {
 	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.10.7")
 	if err != nil {

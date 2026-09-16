@@ -57,3 +57,26 @@ func TestClashTunnelKeepsPublishedHostnameWithPreferredEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestClashProxyYAMLUsesIPv6LiteralFromShareURI(t *testing.T) {
+	node := model.Node{
+		Name:       "纯 V6",
+		Protocol:   "hysteria2",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		ListenPort: 39769,
+	}
+	share := "hysteria2://secret@[2602:faa8:502:5a::a]:39769/?sni=ac.252202.xyz"
+	value, err := clashProxyYAML(node, share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`server: "2602:faa8:502:5a::a"`, `port: 39769`, `sni: "ac.252202.xyz"`} {
+		if !strings.Contains(value, want) {
+			t.Fatalf("%q missing from YAML:\n%s", want, value)
+		}
+	}
+	if strings.Contains(value, `server: "ac.252202.xyz"`) {
+		t.Fatalf("YAML reverted to the mixed A/AAAA hostname:\n%s", value)
+	}
+}

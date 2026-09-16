@@ -15,12 +15,12 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	if err != nil || parsed.User == nil {
 		return "", errors.New("invalid share URI")
 	}
-	server := node.Server
+	server := strings.TrimSpace(parsed.Hostname())
+	if server == "" {
+		server = strings.TrimSpace(node.Server)
+	}
 	if server == "" {
 		server = node.Domain
-	}
-	if strings.EqualFold(node.Protocol, "vless-ws-tunnel") && strings.TrimSpace(node.PreferredServer) != "" {
-		server = strings.TrimSpace(node.PreferredServer)
 	}
 	query := parsed.Query()
 	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1" || query.Get("allowInsecure") == "1"
