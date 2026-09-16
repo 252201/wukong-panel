@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v0.9.10-d4ad57)
+![Version](https://img.shields.io/badge/version-v0.9.11-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -135,7 +135,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v0.9.10 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v0.9.11 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -354,7 +354,6 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 
 - `auth/login|me|password|logout`
 - `overview`、`metrics`、`metrics/endpoints`、`metrics/timeline`
-- `monitor/traffic`（可选，只读，Bearer Token 鉴权）
 - `nodes`、`nodes/batch`、`nodes/{id}/actions`、`nodes/{id}/share`
 - `imports/scan|confirm`
 - `system/sing-box/migration`
@@ -362,7 +361,7 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 - `jobs`、`jobs/{id}/events`
 - `settings`、`settings/subscription-token`
 
-变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。只读监控接口默认关闭；配置 `settings.monitor_token_hash` 后，仅接受 `Authorization: Bearer ...`，并只返回整机速率、80 个趋势采样、今日/账期累计、网卡和运行时间，不返回节点、设备、进程或任何凭据。
+变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。
 
 ## 本地开发
 
