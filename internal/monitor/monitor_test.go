@@ -30,6 +30,15 @@ func TestEndpointPacketIncludesIPv6Header(t *testing.T) {
 	}
 }
 
+func TestEndpointPacketParsesIPv6WithoutTransportColon(t *testing.T) {
+	var pending int64
+	line := "1783909462.501781 eth0 Out IP6 (flowlabel 0x92a6f, hlim 64, next-header UDP (17) payload length: 1288) 2001:db8::1.55119 > 2001:db8::2.56681 UDP, length 1280"
+	transport, port, host, clientPort, size, ok := endpointPacket(line, &pending)
+	if !ok || transport != "udp" || port != 55119 || host != "2001:db8::2" || clientPort != "56681" || size != 1328 {
+		t.Fatalf("unexpected IPv6 packet without transport colon: %q %d %q %q %d %v", transport, port, host, clientPort, size, ok)
+	}
+}
+
 func TestEndpointPacketRejectsLineWithoutLengthMetadata(t *testing.T) {
 	var pending int64
 	if _, _, _, _, _, ok := endpointPacket("192.0.2.10.45080 > 198.51.100.20.54321: UDP, length 100", &pending); ok {

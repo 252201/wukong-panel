@@ -271,7 +271,7 @@ A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/I
 
 ### sing-box 安全更新与回退
 
-悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.13.14`。全新 VPS 没有 `/etc/s-box/sing-box` 和旧 JSON 时，一键安装会下载官方资产、核对固定 SHA-256、验证包内版本并原子安装；检测到现有二进制则保持原版本不变。若只有旧 JSON 而缺少配套二进制，安装器会拒绝猜测版本，避免用新二进制误启旧配置。面板会按 1.10、1.11、1.12、1.13 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖和 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound 会作为阻断项展示，不会猜测性重写。更新流程会：
+悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.14.1`。全新 VPS 没有 `/etc/s-box/sing-box` 和旧 JSON 时，一键安装会下载官方资产、核对固定 SHA-256、验证包内版本并原子安装；检测到现有二进制则保持原版本不变。若只有旧 JSON 而缺少配套二进制，安装器会拒绝猜测版本，避免用新二进制误启旧配置。面板会按 1.10、1.11、1.12、1.13、1.14 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖、旧 DNS server 地址与 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint、现代 DNS server 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound、旧 DNS 规则地址过滤和未知 1.14 字段会作为阻断项展示，不会猜测性重写。更新流程会：
 
 1. 下载官方 GitHub Release 并核对固定 SHA-256。
 2. 生成逐文件迁移预览，保留未知 JSON 字段，并拒绝存在阻断项的升级。
@@ -333,10 +333,10 @@ wukongctl node create --protocol anytls --name "AC-AnyTLS" \
   --server node.example.com --domain node.example.com --mode prefer_v6
 wukongctl node action --id NODE_ID --action restart
 wukongctl node action --id NODE_ID --action probe
-wukong-panel singbox plan --target 1.13.14 --config-dir /etc/s-box
-wukong-panel singbox migrate --target 1.13.14 \
-  --config-dir /etc/s-box --output-dir /tmp/s-box-1.13
-wukong-panel singbox check-interfaces --target 1.13.14 --config-dir /tmp/s-box-1.13
+wukong-panel singbox plan --target 1.14.1 --config-dir /etc/s-box
+wukong-panel singbox migrate --target 1.14.1 \
+  --config-dir /etc/s-box --output-dir /tmp/s-box-1.14
+wukong-panel singbox check-interfaces --target 1.14.1 --config-dir /tmp/s-box-1.14
 wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
 
 # 从另一台主机按配置中的实际协议验证公网入口；纯 IPv6 节点可直接填写真实 IPv6
@@ -354,6 +354,7 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 
 - `auth/login|me|password|logout`
 - `overview`、`metrics`、`metrics/endpoints`、`metrics/timeline`
+- `monitor/traffic`（可选，只读，Bearer Token 鉴权）
 - `nodes`、`nodes/batch`、`nodes/{id}/actions`、`nodes/{id}/share`
 - `imports/scan|confirm`
 - `system/sing-box/migration`
@@ -361,7 +362,7 @@ wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/prob
 - `jobs`、`jobs/{id}/events`
 - `settings`、`settings/subscription-token`
 
-变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。
+变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。只读监控接口默认关闭；配置 `settings.monitor_token_hash` 后，仅接受 `Authorization: Bearer ...`，并只返回整机速率、80 个趋势采样、今日/账期累计、网卡和运行时间，不返回节点、设备、进程或任何凭据。
 
 ## 本地开发
 

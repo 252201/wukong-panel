@@ -360,6 +360,60 @@ func TestReconcileBindingsUpdatesOnlyDisappearedAddress(t *testing.T) {
 	}
 }
 
+func TestReconcileInboundListenersMigratesV4OnlyNode(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "configs")
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeSingBox := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(fakeSingBox, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	database, err := store.Open(filepath.Join(dir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	configPath := filepath.Join(configDir, "node.json")
+	payload := []byte(`{"inbounds":[{"type":"hysteria2","listen":"::","listen_port":57280}],"outbounds":[]}`)
+	if err = os.WriteFile(configPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{
+		ID: "node-v4", Name: "v4-only", Protocol: protocolHysteria2, Mode: "v4only",
+		ListenPort: 57280, ServiceName: "sing-box-node-v4", ServiceManager: "systemd",
+		ConfigPath: configPath, ConfigVersion: "1.13.16", Ownership: "managed", Status: "active",
+	}
+	if err = database.UpsertNode(t.Context(), node, "encrypted"); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(config.Config{ConfigDir: configDir, DataDir: filepath.Join(dir, "data"), SingBoxBin: fakeSingBox}, database, nil)
+	if err = manager.ReconcileInboundListeners(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updated), `"listen": "0.0.0.0"`) {
+		t.Fatalf("v4only listener was not migrated: %s", updated)
+	}
+	var auditCount int
+	if err = database.DB.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action='reconcile_inbound_listener' AND target=?", node.ID).Scan(&auditCount); err != nil || auditCount != 1 {
+		t.Fatalf("listener migration audit count=%d err=%v", auditCount, err)
+	}
+}
+
 func TestReconcileBindingsReportsAmbiguityOnlyOnce(t *testing.T) {
 	dir := t.TempDir()
 	database, err := store.Open(filepath.Join(dir, "wukong.db"))

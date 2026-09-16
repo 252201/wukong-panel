@@ -18,7 +18,7 @@ func TestGeneratedVLESSRealityCompletesFullRoundTrip(t *testing.T) {
 	if binary == "" {
 		t.Skip("set SING_BOX_TEST_BIN to run the REALITY handshake integration test")
 	}
-	listener, err := net.Listen("tcp", "[::1]:0")
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestGeneratedVLESSRealityCompletesFullRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := buildConfig(request, port, credentials, "", "", "1.13.14")
+	payload, err := buildConfig(request, port, credentials, "", "", singboxconfig.LatestSupportedVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestGeneratedVLESSRealityCompletesFullRoundTrip(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		connection, dialErr := net.DialTimeout("tcp6", net.JoinHostPort("::1", fmt.Sprint(port)), 100*time.Millisecond)
+		connection, dialErr := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)), 100*time.Millisecond)
 		if dialErr == nil {
 			_ = connection.Close()
 			break

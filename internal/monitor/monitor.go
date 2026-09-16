@@ -66,20 +66,27 @@ func (c *Collector) RunEndpoints(ctx context.Context) {
 }
 
 var (
-	endpointLine = regexp.MustCompile(`(?:^|\s)([^\s]+)\.(\d+) > ([^\s]+)\.(\d+):`)
+	// tcpdump emits the colon between the destination port and the transport
+	// name for IPv4 on some builds, but omits it for IPv6 on others. Keep the
+	// separator optional so the parser does not silently drop IPv6 UDP traffic.
+	endpointLine = regexp.MustCompile(`(?:^|\s)([^\s]+)\.(\d+)\s+>\s+([^\s]+)\.(\d+):?`)
 	ipv4Length   = regexp.MustCompile(`proto (?:UDP|TCP) \(\d+\), length (\d+)\)`)
 	ipv6Payload  = regexp.MustCompile(`payload length: (\d+)`)
 	tcpPayload   = regexp.MustCompile(`length (\d+)$`)
+	ipv4Header   = regexp.MustCompile(`(?:^|\s)IP\s`)
+	ipv6Header   = regexp.MustCompile(`(?:^|\s)IP6\s`)
+	udpPacket    = regexp.MustCompile(`(?:^|\s)UDP,`)
+	tcpPacket    = regexp.MustCompile(`(?:^|\s)Flags\s+\[`)
 )
 
 func endpointPacket(line string, pendingBytes *int64) (transport string, sourcePort int, host, port string, packetBytes int64, ok bool) {
-	if strings.Contains(line, " IP6 ") {
+	if ipv6Header.MatchString(line) {
 		if match := ipv6Payload.FindStringSubmatch(line); len(match) == 2 {
 			payload, _ := strconv.ParseInt(match[1], 10, 64)
 			*pendingBytes = payload + 40
 		}
 	}
-	if strings.Contains(line, " IP ") {
+	if ipv4Header.MatchString(line) {
 		if match := ipv4Length.FindStringSubmatch(line); len(match) == 2 {
 			*pendingBytes, _ = strconv.ParseInt(match[1], 10, 64)
 		}
@@ -89,9 +96,9 @@ func endpointPacket(line string, pendingBytes *int64) (transport string, sourceP
 		return "", 0, "", "", 0, false
 	}
 	switch {
-	case strings.Contains(line, ": UDP,"):
+	case udpPacket.MatchString(line):
 		transport = "udp"
-	case strings.Contains(line, ": Flags ["):
+	case tcpPacket.MatchString(line):
 		transport = "tcp"
 	default:
 		*pendingBytes = 0

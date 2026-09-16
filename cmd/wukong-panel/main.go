@@ -292,7 +292,7 @@ func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
 		log.Fatal("usage: wukong-panel singbox plan|migrate|check-interfaces|probe [options]")
 	}
 	flags := flag.NewFlagSet("singbox "+args[0], flag.ExitOnError)
-	target := flags.String("target", "1.13.14", "target sing-box version")
+	target := flags.String("target", singboxconfig.LatestSupportedVersion, "target sing-box version")
 	configDir := flags.String("config-dir", cfg.ConfigDir, "source configuration directory")
 	outputDir := flags.String("output-dir", "", "migration output directory")
 	binary := flags.String("binary", cfg.SingBoxBin, "sing-box binary used for protocol probing")
@@ -353,6 +353,9 @@ func runSingBoxCLI(ctx context.Context, cfg config.Config, args []string) {
 	}
 	if err != nil {
 		log.Fatal(err)
+	}
+	if !plan.Compatible {
+		log.Fatal("sing-box migration preflight found blocking configuration issues")
 	}
 }
 

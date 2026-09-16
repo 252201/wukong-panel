@@ -8,13 +8,15 @@ FUNCTION_BODY=$(awk '
   capture && /^}/ { exit }
 ' "$ROOT/install.sh")
 [ -n "$FUNCTION_BODY" ] || { echo "singbox_expected_sha256 not found" >&2; exit 1; }
-[ "$(sed -n 's/^SINGBOX_VERSION="\([^"]*\)"/\1/p' "$ROOT/install.sh")" = "1.13.14" ]
+[ "$(sed -n 's/^SINGBOX_VERSION="\([^"]*\)"/\1/p' "$ROOT/install.sh")" = "1.14.1" ]
 eval "$FUNCTION_BODY"
 
 [ "$(singbox_expected_sha256 1.11.15 amd64)" = "950af37eb2d7e55dddae34a18411cd617303fd99d2dc75bc76b6dd9fcd97d9c5" ]
 [ "$(singbox_expected_sha256 1.11.15 arm64)" = "20a6a9cd259a95411599f811a5066513a98db63705a51121252ad27daf96c029" ]
 [ "$(singbox_expected_sha256 1.13.14 amd64)" = "f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697" ]
 [ "$(singbox_expected_sha256 1.13.14 arm64)" = "4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e" ]
+[ "$(singbox_expected_sha256 1.14.1 amd64)" = "12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f" ]
+[ "$(singbox_expected_sha256 1.14.1 arm64)" = "6060b42fa84c5dcaeae1799af7f61b0f1ae4855d9d5ddc9e02baba17154b3ae2" ]
 if singbox_expected_sha256 9.9.9 amd64 >/dev/null 2>&1; then
   echo "unsupported sing-box version accepted" >&2
   exit 1
@@ -80,27 +82,27 @@ grep -q '未完成事务已恢复；为便于确认节点连通性，本次不�
 bootstrap_dir="$test_dir/bootstrap"
 mkdir -p "$bootstrap_dir/configs"
 singbox_version_of() { "$1" version 2>/dev/null | sed -n 's/^sing-box version //p' | head -1; }
-SINGBOX_VERSION=1.13.14
+SINGBOX_VERSION=1.14.1
 SINGBOX_RUNTIME_BIN=""
 SINGBOX_RUNTIME_CONFIG_DIR=""
 singbox_binary_path() { printf '%s' "$bootstrap_dir/configs/sing-box"; }
 singbox_config_dir() { printf '%s' "$bootstrap_dir/configs"; }
 download_singbox_binary() {
   SINGBOX_CANDIDATE="$bootstrap_dir/candidate"
-  printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.13.14"\n' >"$SINGBOX_CANDIDATE"
+  printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.14.1"\n' >"$SINGBOX_CANDIDATE"
   chmod 0755 "$SINGBOX_CANDIDATE"
 }
 info() { :; }
 die() { printf '%s\n' "$*" >&2; return 1; }
 ensure_singbox_for_install
-[ "$(singbox_version_of "$bootstrap_dir/configs/sing-box")" = 1.13.14 ]
+[ "$(singbox_version_of "$bootstrap_dir/configs/sing-box")" = 1.14.1 ]
 [ "$SINGBOX_RUNTIME_BIN" = "$bootstrap_dir/configs/sing-box" ]
 download_singbox_binary() { return 99; }
 ensure_singbox_for_install
 
 uninstall_dir="$test_dir/uninstall"
 mkdir -p "$uninstall_dir/configs" "$uninstall_dir/tmp" "$uninstall_dir/backups"
-printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.13.14"\n[ "$1" = check ] && exit 0\n' >"$uninstall_dir/configs/sing-box"
+printf '#!/bin/sh\n[ "$1" = version ] && echo "sing-box version 1.14.1"\n[ "$1" = check ] && exit 0\n' >"$uninstall_dir/configs/sing-box"
 chmod 0755 "$uninstall_dir/configs/sing-box"
 printf '{"inbounds":[]}\n' >"$uninstall_dir/configs/node.json"
 printf 'keep certificate\n' >"$uninstall_dir/configs/cert.pem"
@@ -128,7 +130,7 @@ verify_singbox_backup "$uninstall_backup"
 grep -q 'node.json' "$uninstall_backup/SHA256SUMS"
 check_singbox_configs() { "$1" check -c "$(singbox_config_dir)/node.json"; }
 restore_singbox_after_uninstall_failure "$uninstall_backup" "$uninstall_dir/configs/sing-box"
-[ "$(singbox_version_of "$uninstall_dir/configs/sing-box")" = 1.13.14 ]
+[ "$(singbox_version_of "$uninstall_dir/configs/sing-box")" = 1.14.1 ]
 grep -q 'inbounds' "$uninstall_dir/configs/node.json"
 grep -q -- '--uninstall-sing-box' "$ROOT/install.sh"
 grep -q 'ensure_singbox_for_install' "$ROOT/install.sh"

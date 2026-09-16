@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/252201/wukong-panel/internal/model"
@@ -287,12 +289,29 @@ func credentialsForManagedEdit(protocol string, stored protocolCredentials, inbo
 
 func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath string) (map[string]any, error) {
 	protocol := normalizeProtocol(request.Protocol)
+	listen := protocolInboundListenAddress(protocol, request.Mode, request.IPv4Bind, request.IPv6Bind)
+	return buildProtocolInboundWithListen(request, port, credentials, certPath, keyPath, listen)
+}
+
+// buildProtocolInboundWithContext is used by the managed-node runtime. A pure
+// IPv6 inbound must listen on the IPv6 address clients actually dial, which is
+// derived from Server and verified against the host's local addresses. The
+// IPv6Bind field is intentionally reserved for outbound source selection.
+func buildProtocolInboundWithContext(ctx context.Context, request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath string) (map[string]any, error) {
+	protocol := normalizeProtocol(request.Protocol)
+	listen, err := protocolInboundListenAddressForEndpoint(ctx, protocol, request.Mode, request.Server)
+	if err != nil {
+		return nil, err
+	}
+	return buildProtocolInboundWithListen(request, port, credentials, certPath, keyPath, listen)
+}
+
+func buildProtocolInboundWithListen(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath, listen string) (map[string]any, error) {
+	protocol := normalizeProtocol(request.Protocol)
 	tag := protocolTagPrefix(protocol) + "-" + strings.TrimSpace(request.Name) + "-in"
 	inboundType := protocol
-	listen := "::"
 	if protocol == protocolVLESSWSTunnel {
 		inboundType = protocolVLESS
-		listen = "127.0.0.1"
 	}
 	inbound := map[string]any{"type": inboundType, "tag": tag, "listen": listen, "listen_port": port}
 	switch protocol {
@@ -334,6 +353,177 @@ func buildProtocolInbound(request model.NodeCreateRequest, port int, credentials
 		return nil, fmt.Errorf("unsupported protocol %q", protocol)
 	}
 	return inbound, nil
+}
+
+// protocolInboundListenAddressForEndpoint returns the address used by the
+// server-side inbound socket. For v4only and dual-stack modes the wildcard
+// addresses are intentional. For v6only, using IPv6Bind is incorrect because
+// it controls the source address of outbound connections, not where clients
+// connect. Resolve the public endpoint and select the matching local address
+// instead, failing closed when the endpoint cannot be served locally.
+func protocolInboundListenAddressForEndpoint(ctx context.Context, protocol, mode, server string) (string, error) {
+	base := protocolInboundListenAddress(protocol, mode, "", "")
+	if base != "::" || strings.ToLower(strings.TrimSpace(mode)) != "v6only" {
+		return base, nil
+	}
+
+	return resolveLocalIPv6Endpoint(ctx, server)
+}
+
+func resolveLocalIPv6Endpoint(ctx context.Context, server string) (string, error) {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return "", errors.New("pure IPv6 inbound requires a server endpoint")
+	}
+
+	local, err := localGlobalIPv6Addresses()
+	if err != nil {
+		return "", fmt.Errorf("discover local IPv6 addresses: %w", err)
+	}
+
+	if literal := endpointIPv6Literal(server); literal != nil {
+		if selected := selectLocalIPv6Address([]net.IP{literal}, local); selected != "" {
+			return selected, nil
+		}
+		return "", fmt.Errorf("server IPv6 %q is not assigned to this host", server)
+	}
+
+	host := endpointHost(server)
+	if host == "" {
+		return "", fmt.Errorf("invalid server endpoint %q", server)
+	}
+	resolved, err := net.DefaultResolver.LookupIP(ctx, "ip6", host)
+	if err != nil {
+		return "", fmt.Errorf("resolve IPv6 endpoint %q: %w", host, err)
+	}
+	if selected := selectLocalIPv6Address(resolved, local); selected != "" {
+		return selected, nil
+	}
+	return "", fmt.Errorf("IPv6 endpoint %q does not resolve to a local IPv6 address", host)
+}
+
+func localGlobalIPv6Addresses() ([]net.IP, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	addresses := make([]net.IP, 0)
+	seen := make(map[string]struct{})
+	for _, iface := range interfaces {
+		ifaceAddresses, err := iface.Addrs()
+		if err != nil {
+			return nil, fmt.Errorf("list addresses for %s: %w", iface.Name, err)
+		}
+		for _, address := range ifaceAddresses {
+			ip := addressIP(address)
+			if ip == nil || ip.To4() != nil || !ip.IsGlobalUnicast() {
+				continue
+			}
+			key := ip.String()
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			addresses = append(addresses, ip)
+		}
+	}
+	return addresses, nil
+}
+
+func addressIP(address net.Addr) net.IP {
+	switch value := address.(type) {
+	case *net.IPNet:
+		return value.IP
+	case *net.IPAddr:
+		return value.IP
+	default:
+		valueText := strings.TrimSpace(address.String())
+		if host, _, err := net.SplitHostPort(valueText); err == nil {
+			valueText = host
+		} else if slash := strings.IndexByte(valueText, '/'); slash >= 0 {
+			valueText = valueText[:slash]
+		}
+		return net.ParseIP(strings.Trim(valueText, "[]"))
+	}
+}
+
+func endpointIPv6Literal(value string) net.IP {
+	host := endpointHost(value)
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() != nil || !ip.IsGlobalUnicast() {
+		return nil
+	}
+	return ip
+}
+
+func endpointHost(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "[") {
+		if end := strings.IndexByte(value, ']'); end > 1 {
+			return value[1:end]
+		}
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		return host
+	}
+	return strings.TrimSuffix(value, ".")
+}
+
+// selectLocalIPv6Address returns a stable address from the intersection of
+// resolved endpoint addresses and local addresses. Keeping this logic pure
+// makes the address-family decision independently testable.
+func selectLocalIPv6Address(resolved, local []net.IP) string {
+	localSet := make(map[string]struct{}, len(local))
+	for _, ip := range local {
+		if ip == nil || ip.To4() != nil || !ip.IsGlobalUnicast() {
+			continue
+		}
+		localSet[ip.String()] = struct{}{}
+	}
+
+	candidates := make([]string, 0, len(resolved))
+	seen := make(map[string]struct{})
+	for _, ip := range resolved {
+		if ip == nil || ip.To4() != nil || !ip.IsGlobalUnicast() {
+			continue
+		}
+		key := ip.String()
+		if _, ok := localSet[key]; !ok {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, key)
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Strings(candidates)
+	return candidates[0]
+}
+
+// protocolInboundListenAddress keeps the listener family aligned with the
+// node's addressing mode. prefer_v6 intentionally remains dual-stack so
+// clients can choose the best transport family; v4only is an IPv4 listener;
+// v6only binds the selected IPv6 address, which also prevents Linux from
+// accepting IPv4-mapped connections on an unspecified :: listener. WebSocket
+// tunnel origins are always kept on loopback.
+func protocolInboundListenAddress(protocol, mode, ipv4Bind, ipv6Bind string) string {
+	if normalizeProtocol(protocol) == protocolVLESSWSTunnel {
+		return "127.0.0.1"
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "v4only":
+		return "0.0.0.0"
+	case "v6only":
+		if address := net.ParseIP(strings.TrimSpace(ipv6Bind)); address != nil && address.To4() == nil {
+			return address.String()
+		}
+	}
+	return "::"
 }
 
 func certificateTLS(certPath, keyPath string, h3 bool) map[string]any {

@@ -19,6 +19,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
+	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
@@ -794,7 +795,7 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 	case r.Method == http.MethodGet && resource == "system/sing-box/migration":
 		target := r.URL.Query().Get("target")
 		if target == "" {
-			target = "1.13.14"
+			target = singboxconfig.LatestSupportedVersion
 		}
 		payload, _ := json.Marshal(map[string]string{"target": target})
 		return "migration.plan", payload, false, nil

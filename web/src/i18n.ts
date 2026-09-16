@@ -322,7 +322,7 @@ const english: Record<string, string> = {
   '已连通': 'Connected',
   '保存前会通过上游 SOCKS 完成真实 HTTPS 闭环。配置正被节点使用时禁止修改或删除，请先将引用节点切回其他出口；SOCKS4/4a 只承载 TCP，SOCKS5 的 UDP 流量要求上游支持 UDP ASSOCIATE。': 'Before saving, a real HTTPS request is completed through the upstream SOCKS proxy. Settings in use cannot be changed or deleted; move dependent nodes first. SOCKS4/4a carries TCP only, while SOCKS5 UDP requires upstream UDP ASSOCIATE support.',
   'sing-box 升级预检': 'sing-box upgrade preflight',
-  '目标稳定版 1.13.14 · 只读扫描，不修改配置': 'Target stable release 1.13.14 · Read-only scan',
+  '目标稳定版 1.14.1 · 只读扫描，不修改配置': 'Target stable release 1.14.1 · Read-only scan',
   '扫描中…': 'Scanning…',
   '扫描兼容性': 'Scan compatibility',
   '可以安全生成迁移配置': 'Migration configuration can be generated safely',

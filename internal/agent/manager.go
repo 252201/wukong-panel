@@ -65,8 +65,9 @@ type bindingAddressState struct {
 
 func (m *Manager) RunReconciler(ctx context.Context) {
 	_ = m.ReconcileDeviceGroups(ctx)
-	_ = m.ReconcileRuntimeVersion(ctx)
 	_ = m.ReconcileBindings(ctx)
+	_ = m.ReconcileInboundListeners(ctx)
+	_ = m.ReconcileRuntimeVersion(ctx)
 	_ = m.ReconcileResidentialExit(ctx)
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
@@ -76,8 +77,9 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_ = m.ReconcileDeviceGroups(ctx)
-			_ = m.ReconcileRuntimeVersion(ctx)
 			_ = m.ReconcileBindings(ctx)
+			_ = m.ReconcileInboundListeners(ctx)
+			_ = m.ReconcileRuntimeVersion(ctx)
 			_ = m.ReconcileResidentialExit(ctx)
 		}
 	}
@@ -130,6 +132,128 @@ func deviceGroupAlreadyShared(nodes []model.Node) bool {
 		}
 	}
 	return true
+}
+
+// ReconcileInboundListeners migrates managed nodes created before the listener
+// family was derived from the node mode. In particular, a v4only node that
+// still listens on :: would accept IPv6 clients on Linux when bindv6only is
+// disabled, contradicting its advertised mode; v6only nodes are moved to
+// their selected IPv6 address for the same reason. The migration is
+// deliberately limited to managed configurations; imported and unmanaged
+// services remain under their owner's control.
+func (m *Manager) ReconcileInboundListeners(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
+	if m.cfg.Demo {
+		return nil
+	}
+	nodes, err := m.store.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	byConfig := map[string][]model.Node{}
+	for _, node := range nodes {
+		if node.Ownership != "managed" {
+			continue
+		}
+		normalizedPath := filepath.Clean(node.ConfigPath)
+		byConfig[normalizedPath] = append(byConfig[normalizedPath], node)
+	}
+	paths := make([]string, 0, len(byConfig))
+	for path := range byConfig {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	failures := make([]error, 0)
+	for _, path := range paths {
+		if err := m.reconcileInboundListenersForConfig(ctx, path, byConfig[path]); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (m *Manager) reconcileInboundListenersForConfig(ctx context.Context, path string, nodes []model.Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	for _, node := range nodes {
+		if err := m.validateManagedNode(node); err != nil {
+			return fmt.Errorf("%s: %w", node.Name, err)
+		}
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	var root map[string]any
+	if err = json.Unmarshal(original, &root); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	inbounds, ok := root["inbounds"].([]any)
+	if !ok || len(inbounds) == 0 {
+		return fmt.Errorf("%s: managed configuration has no inbounds", path)
+	}
+	type listenerChange struct {
+		node model.Node
+		from string
+		to   string
+	}
+	changes := make([]listenerChange, 0)
+	for _, node := range nodes {
+		inbound := inboundByPort(inbounds, node.ListenPort)
+		if inbound == nil {
+			return fmt.Errorf("%s: inbound on port %d was not found", node.Name, node.ListenPort)
+		}
+		want, err := protocolInboundListenAddressForEndpoint(ctx, node.Protocol, node.Mode, node.Server)
+		if err != nil {
+			return fmt.Errorf("%s: %w", node.Name, err)
+		}
+		got := stringValue(inbound["listen"])
+		if got == want {
+			continue
+		}
+		inbound["listen"] = want
+		changes = append(changes, listenerChange{node: node, from: got, to: want})
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	if err = m.backup(nodes[0]); err != nil {
+		return fmt.Errorf("backup %s: %w", path, err)
+	}
+	payload, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	tmp := path + ".listen-migrate.tmp"
+	if err = os.WriteFile(tmp, payload, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	defer os.Remove(tmp)
+	if err = command(ctx, m.cfg.SingBoxBin, "check", "-c", tmp); err != nil {
+		return fmt.Errorf("listener migration check failed for %s: %w", path, err)
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("install listener migration for %s: %w", path, err)
+	}
+	service := nodes[0]
+	wasActive := m.serviceStatus(ctx, service.ServiceManager, service.ServiceName) == "active"
+	if wasActive {
+		if err = m.serviceCommand(ctx, service.ServiceManager, "restart", service.ServiceName); err != nil {
+			if restoreErr := os.WriteFile(path, original, 0o600); restoreErr != nil {
+				return fmt.Errorf("listener migration restart failed: %w (rollback failed: %v)", err, restoreErr)
+			}
+			if restoreErr := m.serviceCommand(ctx, service.ServiceManager, "restart", service.ServiceName); restoreErr != nil {
+				return fmt.Errorf("listener migration restart failed and restored config could not start: %w (restore restart: %v)", err, restoreErr)
+			}
+			return fmt.Errorf("listener migration restart failed; previous configuration restored: %w", err)
+		}
+	}
+	for _, change := range changes {
+		_ = m.store.Audit("agent", "reconcile_inbound_listener", change.node.ID, fmt.Sprintf("port=%d listen=%s->%s", change.node.ListenPort, change.from, change.to))
+	}
+	return nil
 }
 
 func (m *Manager) consolidateDeviceGroup(ctx context.Context, group string, nodes []model.Node) error {
@@ -1006,7 +1130,7 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 					return nil, fmt.Errorf("device %d: %w", index+1, err)
 				}
 			}
-			inbound, err := buildProtocolInbound(item.request, item.node.ListenPort, item.credentials, item.certPath, item.keyPath)
+			inbound, err := buildProtocolInboundWithContext(ctx, item.request, item.node.ListenPort, item.credentials, item.certPath, item.keyPath)
 			if err != nil {
 				return nil, fmt.Errorf("device %d: %w", index+1, err)
 			}
@@ -1157,7 +1281,7 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 			}
 		}
 		version := m.Version(ctx)
-		payload, err := buildConfig(request, port, credentials, certPath, keyPath, version)
+		payload, err := buildConfigWithContext(ctx, request, port, credentials, certPath, keyPath, version)
 		if err != nil {
 			return model.Node{}, err
 		}
@@ -1806,7 +1930,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 				return fmt.Errorf("current certificate does not cover TLS domain %s; issue or install a matching certificate before editing", runtimeRequest.Domain)
 			}
 		}
-		inbound, buildErr := buildProtocolInbound(runtimeRequest, runtimeRequest.ListenPort, storedCredentials, certPath, keyPath)
+		inbound, buildErr := buildProtocolInboundWithContext(ctx, runtimeRequest, runtimeRequest.ListenPort, storedCredentials, certPath, keyPath)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -2034,7 +2158,11 @@ func (m *Manager) cleanupFailedCreate(ctx context.Context, node model.Node, remo
 }
 
 func buildConfig(request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath, version string) ([]byte, error) {
-	inbound, err := buildProtocolInbound(request, port, credentials, certPath, keyPath)
+	return buildConfigWithContext(context.Background(), request, port, credentials, certPath, keyPath, version)
+}
+
+func buildConfigWithContext(ctx context.Context, request model.NodeCreateRequest, port int, credentials protocolCredentials, certPath, keyPath, version string) ([]byte, error) {
+	inbound, err := buildProtocolInboundWithContext(ctx, request, port, credentials, certPath, keyPath)
 	if err != nil {
 		return nil, err
 	}

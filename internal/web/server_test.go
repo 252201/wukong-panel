@@ -13,6 +13,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
 )
@@ -215,5 +216,109 @@ func TestBuildTrafficTimeline(t *testing.T) {
 	}
 	if len(result.Billing) != 31 || result.BillingStart != "2026-07-05" || result.BillingEnd != "2026-08-04" || result.BillingRX != 400 || result.BillingTX != 600 {
 		t.Fatalf("unexpected billing timeline: %#v", result)
+	}
+}
+
+func TestMonitorTrafficRequiresBearerTokenAndReturnsReducedPayload(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	token := "monitor-token-for-test-2026"
+	for key, value := range map[string]string{
+		"monitor_token_hash": security.HashToken(token),
+		"timezone":           "Asia/Shanghai",
+		"billing_reset_day":  "1",
+	} {
+		if err := database.SetSetting(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().Add(-time.Second).Truncate(time.Second)
+	metrics := []model.Metric{
+		{Timestamp: now.Add(-10 * time.Second).Unix(), Interface: "eth0", RXBytes: 1_000, TXBytes: 2_000, RXBPS: 10, TXBPS: 20, Uptime: 100},
+		{Timestamp: now.Unix(), Interface: "eth0", RXBytes: 1_300, TXBytes: 2_500, RXBPS: 30, TXBPS: 50, Uptime: 110},
+	}
+	for _, metric := range metrics {
+		if err := database.AddMetric(metric); err != nil {
+			t.Fatal(err)
+		}
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AddDailyTraffic(now.In(location).Format("2006-01-02"), 777, 888, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := New(config.Config{BasePath: "/"}, database, fakeAgent{}, "test").Handler()
+	for name, authorization := range map[string]string{"missing": "", "invalid": "Bearer wrong-monitor-token"} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/traffic", nil)
+			if authorization != "" {
+				request.Header.Set("Authorization", authorization)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/monitor/traffic", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected cache policy %q", recorder.Header().Get("Cache-Control"))
+	}
+	var payload struct {
+		UpdatedAt string `json:"updatedAt"`
+		TimeZone  string `json:"timeZone"`
+		Interface string `json:"iface"`
+		Rates     struct {
+			RXBPS float64 `json:"rxBps"`
+			TXBPS float64 `json:"txBps"`
+		} `json:"rates"`
+		Totals struct {
+			Today struct {
+				RX int64 `json:"rx"`
+				TX int64 `json:"tx"`
+			} `json:"today"`
+			Billing struct {
+				RX int64 `json:"rx"`
+				TX int64 `json:"tx"`
+			} `json:"billingMonth"`
+		} `json:"totals"`
+		History []monitorTrafficSample `json:"history"`
+		System  struct {
+			Uptime int64 `json:"uptimeSeconds"`
+		} `json:"system"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.UpdatedAt == "" || payload.TimeZone != "Asia/Shanghai" || payload.Interface != "eth0" {
+		t.Fatalf("unexpected metadata: %#v", payload)
+	}
+	if payload.Rates.RXBPS != 30 || payload.Rates.TXBPS != 50 || len(payload.History) != 2 {
+		t.Fatalf("unexpected rates/history: %#v", payload)
+	}
+	if payload.Totals.Today.RX != 300 || payload.Totals.Today.TX != 500 || payload.Totals.Billing.RX != 777 || payload.Totals.Billing.TX != 888 {
+		t.Fatalf("unexpected totals: %#v", payload.Totals)
+	}
+	if payload.System.Uptime != 110 {
+		t.Fatalf("unexpected uptime %d", payload.System.Uptime)
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, token) || strings.Contains(body, security.HashToken(token)) || strings.Contains(body, "processes") || strings.Contains(body, "devices") {
+		t.Fatalf("monitor payload contains private fields: %s", body)
 	}
 }

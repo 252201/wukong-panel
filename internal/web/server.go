@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -103,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.metrics, false))
 	mux.HandleFunc("GET /api/v1/metrics/endpoints", s.auth(s.endpoints, false))
 	mux.HandleFunc("GET /api/v1/metrics/timeline", s.auth(s.timeline, false))
+	mux.HandleFunc("GET /api/v1/monitor/traffic", s.monitorTraffic)
 	mux.HandleFunc("GET /api/v1/nodes", s.auth(s.nodes, false))
 	mux.HandleFunc("GET /api/v1/nodes/deployment-defaults", s.auth(s.nodeDeploymentDefaults, false))
 	mux.HandleFunc("POST /api/v1/nodes", s.auth(s.createNode, true))
@@ -291,6 +294,91 @@ func (s *Server) timeline(w http.ResponseWriter, r *http.Request, session store.
 	writeJSON(w, 200, result)
 }
 
+type monitorTrafficSample struct {
+	Timestamp int64   `json:"ts"`
+	RXBPS     float64 `json:"rxBps"`
+	TXBPS     float64 `json:"txBps"`
+}
+
+func (s *Server) monitorTraffic(w http.ResponseWriter, r *http.Request) {
+	expectedHash, err := s.store.Setting("monitor_token_hash")
+	if err != nil || expectedHash == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	authorization := r.Header.Get("Authorization")
+	token, ok := strings.CutPrefix(authorization, "Bearer ")
+	providedHash := security.HashToken(token)
+	if !ok || len(token) < 16 || subtle.ConstantTimeCompare([]byte(expectedHash), []byte(providedHash)) != 1 {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeError(w, http.StatusUnauthorized, "监控令牌无效")
+		return
+	}
+
+	metrics, err := s.store.Metrics(80)
+	if err != nil || len(metrics) == 0 {
+		writeError(w, http.StatusServiceUnavailable, "监控数据尚未就绪")
+		return
+	}
+	settings, err := s.store.Settings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "无法读取流量设置")
+		return
+	}
+	now := metrics[len(metrics)-1]
+	timeline, err := buildTrafficTimeline(s.store, time.Now(), settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "无法生成流量统计")
+		return
+	}
+
+	location, err := time.LoadLocation(settings.Timezone)
+	if err != nil {
+		location = time.Local
+	}
+	history := make([]monitorTrafficSample, 0, len(metrics))
+	for _, metric := range metrics {
+		history = append(history, monitorTrafficSample{
+			Timestamp: metric.Timestamp,
+			RXBPS:     metric.RXBPS,
+			TXBPS:     metric.TXBPS,
+		})
+	}
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "AetherCloud"
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"updatedAt": time.Unix(now.Timestamp, 0).In(location).Format(time.RFC3339),
+		"timeZone":  location.String(),
+		"iface":     now.Interface,
+		"rates": map[string]any{
+			"rxBps": now.RXBPS,
+			"txBps": now.TXBPS,
+		},
+		"totals": map[string]any{
+			"today": map[string]any{
+				"rx": timeline.TodayRX,
+				"tx": timeline.TodayTX,
+			},
+			"billingMonth": map[string]any{
+				"rx":          timeline.BillingRX,
+				"tx":          timeline.BillingTX,
+				"periodStart": timeline.BillingStart,
+				"periodEnd":   timeline.BillingEnd,
+			},
+		},
+		"history": history,
+		"system": map[string]any{
+			"hostname":      hostname,
+			"uptimeSeconds": now.Uptime,
+		},
+	})
+}
+
 func buildTrafficTimeline(s *store.Store, now time.Time, settings model.Settings) (model.TrafficTimeline, error) {
 	location, err := time.LoadLocation(settings.Timezone)
 	if err != nil {
@@ -460,7 +548,7 @@ func (s *Server) scan(w http.ResponseWriter, r *http.Request, session store.Sess
 func (s *Server) singBoxMigration(w http.ResponseWriter, r *http.Request, session store.Session) {
 	target := r.URL.Query().Get("target")
 	if target == "" {
-		target = "1.13.14"
+		target = singboxconfig.LatestSupportedVersion
 	}
 	plan, err := s.agent.MigrationPlan(r.Context(), target)
 	if err != nil {

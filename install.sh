@@ -4,7 +4,7 @@ set -eu
 REPO="252201/wukong-panel"
 VERSION="latest"
 ACTION="auto"
-SINGBOX_VERSION="1.13.14"
+SINGBOX_VERSION="1.14.1"
 DOMAIN=""
 SUBSCRIPTION_DOMAIN=""
 PORT="9443"
@@ -1407,6 +1407,8 @@ singbox_version_of() {
 
 singbox_expected_sha256() {
   case "$1-$2" in
+    1.14.1-amd64) printf '12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f' ;;
+    1.14.1-arm64) printf '6060b42fa84c5dcaeae1799af7f61b0f1ae4855d9d5ddc9e02baba17154b3ae2' ;;
     1.13.14-amd64) printf 'f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697' ;;
     1.13.14-arm64) printf '4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e' ;;
     1.11.15-amd64) printf '950af37eb2d7e55dddae34a18411cd617303fd99d2dc75bc76b6dd9fcd97d9c5' ;;
