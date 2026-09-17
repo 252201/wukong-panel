@@ -2096,11 +2096,12 @@ func (m *Manager) Share(ctx context.Context, id string) (model.Share, error) {
 	return model.Share{URI: uri, ExpiresAt: time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339)}, nil
 }
 
-// shareEndpoint returns the address clients should dial. A pure IPv6 node
-// must publish the actual IPv6 inbound address rather than a hostname that
-// also has an A record. IPv6Bind is deliberately not used here: it selects
-// the source address for the server's outbound connections, while the
-// inbound listener is recorded in the running sing-box configuration.
+// shareEndpoint returns the address clients should dial. Pure IPv4 and IPv6
+// nodes must publish a literal address rather than a dual-stack hostname that
+// leaves the address-family choice to each client. IPv4Bind and IPv6Bind are
+// deliberately not used here: they select source addresses for the server's
+// outbound connections, while the inbound listener is recorded in the
+// running sing-box configuration.
 func shareEndpoint(ctx context.Context, node model.Node) (string, error) {
 	server := strings.TrimSpace(node.Server)
 	if server == "" {
@@ -2109,8 +2110,40 @@ func shareEndpoint(ctx context.Context, node model.Node) (string, error) {
 	if server == "" {
 		server = "127.0.0.1"
 	}
-	if strings.ToLower(strings.TrimSpace(node.Mode)) != "v6only" || normalizeProtocol(node.Protocol) == protocolVLESSWSTunnel {
+	mode := strings.ToLower(strings.TrimSpace(node.Mode))
+	protocol := normalizeProtocol(node.Protocol)
+	if (mode != "v4only" && mode != "v6only") || protocol == protocolVLESSWSTunnel {
 		return server, nil
+	}
+	if mode == "v4only" {
+		if literal := endpointIPv4Literal(server); literal != nil {
+			return literal.String(), nil
+		}
+
+		if path := strings.TrimSpace(node.ConfigPath); path != "" {
+			data, err := os.ReadFile(path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return "", fmt.Errorf("read pure IPv4 inbound configuration: %w", err)
+			}
+			if err == nil {
+				var root map[string]any
+				if err := json.Unmarshal(data, &root); err != nil {
+					return "", fmt.Errorf("parse pure IPv4 inbound configuration: %w", err)
+				}
+				inbounds, _ := root["inbounds"].([]any)
+				if inbound := inboundByPort(inbounds, node.ListenPort); inbound != nil {
+					if literal := endpointIPv4Literal(stringValue(inbound["listen"])); literal != nil {
+						return literal.String(), nil
+					}
+				}
+			}
+		}
+
+		literal, err := resolveIPv4Endpoint(ctx, server)
+		if err != nil {
+			return "", fmt.Errorf("resolve pure IPv4 share endpoint: %w", err)
+		}
+		return literal, nil
 	}
 	if literal := endpointIPv6Literal(server); literal != nil {
 		return literal.String(), nil

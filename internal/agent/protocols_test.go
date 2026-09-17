@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net"
@@ -189,6 +190,46 @@ func TestSelectLocalIPv6AddressRejectsNonLocalEndpoint(t *testing.T) {
 	}
 }
 
+func TestSelectIPv4EndpointUsesStablePublicAddress(t *testing.T) {
+	resolved := []net.IP{
+		net.ParseIP("23.246.167.101"),
+		net.ParseIP("23.246.167.100"),
+		net.ParseIP("23.246.167.100"),
+		net.ParseIP("::1"),
+	}
+	if got := selectIPv4Endpoint(resolved); got != "23.246.167.100" {
+		t.Fatalf("selected IPv4 endpoint=%q, want stable public IPv4", got)
+	}
+}
+
+func TestResolveIPv4EndpointQueriesOnlyARecords(t *testing.T) {
+	var network, host string
+	endpoint, err := resolveIPv4EndpointWithLookup(t.Context(), "ac.252202.xyz", func(_ context.Context, gotNetwork, gotHost string) ([]net.IP, error) {
+		network, host = gotNetwork, gotHost
+		return []net.IP{net.ParseIP("2602:faa8:502:5a::a"), net.ParseIP("23.246.167.100")}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if network != "ip4" || host != "ac.252202.xyz" {
+		t.Fatalf("DNS lookup network=%q host=%q, want ip4/ac.252202.xyz", network, host)
+	}
+	if endpoint != "23.246.167.100" {
+		t.Fatalf("resolved IPv4 endpoint=%q, want 23.246.167.100", endpoint)
+	}
+}
+
+func TestEndpointIPv4LiteralRejectsNonGlobalAddresses(t *testing.T) {
+	for _, value := range []string{"0.0.0.0", "127.0.0.1", "::1", "node.example.com"} {
+		if got := endpointIPv4Literal(value); got != nil {
+			t.Fatalf("endpointIPv4Literal(%q)=%v, want nil", value, got)
+		}
+	}
+	if got := endpointIPv4Literal("23.246.167.100:57280"); got == nil || got.String() != "23.246.167.100" {
+		t.Fatalf("endpointIPv4Literal did not parse IPv4 host: %v", got)
+	}
+}
+
 func TestEndpointHostHandlesIPv6LiteralAndHostPort(t *testing.T) {
 	for value, want := range map[string]string{
 		"[2602:faa8:502:5a::a]:443": "2602:faa8:502:5a::a",
@@ -328,6 +369,36 @@ func TestShareURIForIPv6OnlyUsesLiteralEndpointAndKeepsSNI(t *testing.T) {
 	}
 	if !strings.Contains(share, "@["+endpoint+"]:39769") {
 		t.Fatalf("IPv6 endpoint was not bracketed in URI: %s", share)
+	}
+}
+
+func TestShareURIForIPv4OnlyUsesLiteralEndpointAndKeepsSNI(t *testing.T) {
+	node := model.Node{
+		Name:       "纯 V4",
+		Protocol:   protocolHysteria2,
+		Mode:       "v4only",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		ListenPort: 57280,
+	}
+	credentials := protocolCredentials{Password: "secret"}
+	endpoint := "23.246.167.100"
+	share, err := buildShareURIWithServer(node, credentials, false, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Hostname() != endpoint || parsed.Port() != "57280" {
+		t.Fatalf("share endpoint=%q port=%q, want %q:57280", parsed.Hostname(), parsed.Port(), endpoint)
+	}
+	if parsed.Query().Get("sni") != node.Domain {
+		t.Fatalf("share SNI=%q, want %q", parsed.Query().Get("sni"), node.Domain)
+	}
+	if strings.Contains(share, "@ac.252202.xyz:57280") {
+		t.Fatalf("IPv4-only share URI retained mixed A/AAAA hostname: %s", share)
 	}
 }
 

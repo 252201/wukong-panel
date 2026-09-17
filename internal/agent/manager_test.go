@@ -61,6 +61,30 @@ func TestShareEndpointUsesInboundIPv6InsteadOfOutboundBind(t *testing.T) {
 	}
 }
 
+func TestShareEndpointUsesInboundIPv4InsteadOfDualStackHostname(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "node.json")
+	config := []byte(`{"inbounds":[{"type":"hysteria2","listen":"23.246.167.100","listen_port":57280}]}`)
+	if err := os.WriteFile(configPath, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := model.Node{
+		Protocol:   protocolHysteria2,
+		Mode:       "v4only",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		IPv6Bind:   "2600:1700:2bc1:409d:a::3188",
+		ListenPort: 57280,
+		ConfigPath: configPath,
+	}
+	endpoint, err := shareEndpoint(t.Context(), node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "23.246.167.100" {
+		t.Fatalf("share endpoint=%q, want inbound IPv4 address", endpoint)
+	}
+}
+
 func TestBuildLegacyConfig(t *testing.T) {
 	payload, err := buildConfig(baseRequest(), 45080, protocolCredentials{Password: "secret"}, "/tmp/cert", "/tmp/key", "1.10.7")
 	if err != nil {
