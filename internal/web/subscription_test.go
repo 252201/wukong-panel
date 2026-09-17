@@ -80,3 +80,27 @@ func TestClashProxyYAMLUsesIPv6LiteralFromShareURI(t *testing.T) {
 		t.Fatalf("YAML reverted to the mixed A/AAAA hostname:\n%s", value)
 	}
 }
+
+func TestClashProxyYAMLUsesIPv4LiteralFromShareURI(t *testing.T) {
+	node := model.Node{
+		Name:       "纯 V4",
+		Protocol:   "hysteria2",
+		Mode:       "v4only",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		ListenPort: 57280,
+	}
+	share := "hysteria2://secret@23.246.167.100:57280/?sni=ac.252202.xyz"
+	value, err := clashProxyYAML(node, share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`server: "23.246.167.100"`, `port: 57280`, `sni: "ac.252202.xyz"`} {
+		if !strings.Contains(value, want) {
+			t.Fatalf("%q missing from YAML:\n%s", want, value)
+		}
+	}
+	if strings.Contains(value, `server: "ac.252202.xyz"`) {
+		t.Fatalf("YAML reverted to the mixed A/AAAA hostname:\n%s", value)
+	}
+}

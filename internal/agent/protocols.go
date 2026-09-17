@@ -402,6 +402,33 @@ func resolveLocalIPv6Endpoint(ctx context.Context, server string) (string, error
 	return "", fmt.Errorf("IPv6 endpoint %q does not resolve to a local IPv6 address", host)
 }
 
+// resolveIPv4Endpoint resolves the public client endpoint using only A
+// records. A v4only listener cannot accept a connection sent to the AAAA
+// record of a dual-stack hostname, so publishing the selected IPv4 literal is
+// safer than leaving address-family selection to the client.
+func resolveIPv4Endpoint(ctx context.Context, server string) (string, error) {
+	return resolveIPv4EndpointWithLookup(ctx, server, net.DefaultResolver.LookupIP)
+}
+
+func resolveIPv4EndpointWithLookup(ctx context.Context, server string, lookup func(context.Context, string, string) ([]net.IP, error)) (string, error) {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return "", errors.New("pure IPv4 inbound requires a server endpoint")
+	}
+	host := endpointHost(server)
+	if host == "" {
+		return "", fmt.Errorf("invalid server endpoint %q", server)
+	}
+	resolved, err := lookup(ctx, "ip4", host)
+	if err != nil {
+		return "", fmt.Errorf("resolve IPv4 endpoint %q: %w", host, err)
+	}
+	if endpoint := selectIPv4Endpoint(resolved); endpoint != "" {
+		return endpoint, nil
+	}
+	return "", fmt.Errorf("IPv4 endpoint %q has no usable A record", host)
+}
+
 func localGlobalIPv6Addresses() ([]net.IP, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -457,6 +484,15 @@ func endpointIPv6Literal(value string) net.IP {
 	return ip
 }
 
+func endpointIPv4Literal(value string) net.IP {
+	host := endpointHost(value)
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || !ip.IsGlobalUnicast() {
+		return nil
+	}
+	return ip.To4()
+}
+
 func endpointHost(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "[") {
@@ -492,6 +528,34 @@ func selectLocalIPv6Address(resolved, local []net.IP) string {
 		if _, ok := localSet[key]; !ok {
 			continue
 		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, key)
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Strings(candidates)
+	return candidates[0]
+}
+
+// selectIPv4Endpoint returns a stable usable IPv4 address from DNS results.
+// Sorting prevents resolver response order from changing the published
+// endpoint when a hostname has more than one A record.
+func selectIPv4Endpoint(resolved []net.IP) string {
+	candidates := make([]string, 0, len(resolved))
+	seen := make(map[string]struct{})
+	for _, ip := range resolved {
+		if ip == nil {
+			continue
+		}
+		ip = ip.To4()
+		if ip == nil || !ip.IsGlobalUnicast() {
+			continue
+		}
+		key := ip.String()
 		if _, ok := seen[key]; ok {
 			continue
 		}
