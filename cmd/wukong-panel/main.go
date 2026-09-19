@@ -252,7 +252,7 @@ func runFleetCLI(ctx context.Context, cfg config.Config, args []string) {
 		if err = json.Unmarshal(responseBody, &enrolled); err != nil || enrolled.HostID == "" || enrolled.AgentToken == "" {
 			log.Fatal("controller returned an invalid enrollment response")
 		}
-		clientConfig, _ := json.MarshalIndent(agent.FleetClientConfig{ControllerURL: controllerURL.String(), HostID: enrolled.HostID, HostName: identity.Name}, "", "  ")
+		clientConfig, _ := json.MarshalIndent(agent.FleetClientConfig{ControllerURL: controllerURL.String(), HostID: enrolled.HostID, HostName: identity.Name, ProbeAddress: enrolled.ProbeAddress, ProbeKey: enrolled.ProbeKey}, "", "  ")
 		if err = atomicPrivateWrite(cfg.FleetConfigFile, append(clientConfig, '\n')); err == nil {
 			err = atomicPrivateWrite(cfg.FleetTokenFile, []byte(enrolled.AgentToken+"\n"))
 		}

@@ -121,6 +121,10 @@ CREATE TABLE IF NOT EXISTS fleet_hosts (
   archived_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fleet_hosts_last_seen ON fleet_hosts(last_seen_at);
+CREATE TABLE IF NOT EXISTS fleet_probe_secrets (
+  host_id TEXT PRIMARY KEY, cipher TEXT NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS fleet_metrics (
   host_id TEXT NOT NULL, ts INTEGER NOT NULL, metric_json TEXT NOT NULL,
   PRIMARY KEY(host_id,ts), FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE

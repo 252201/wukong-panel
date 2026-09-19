@@ -66,6 +66,8 @@ type Server struct {
 	limiterMu        sync.Mutex
 	loginAttempts    map[string][]time.Time
 	fleetRequests    map[string][]time.Time
+	fleetProbeMu     sync.RWMutex
+	fleetProbeKeys   map[string][]byte
 }
 
 func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Server {
@@ -85,7 +87,7 @@ func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Ser
 				return http.ErrUseLastResponse
 			},
 		},
-		loginAttempts: map[string][]time.Time{}, fleetRequests: map[string][]time.Time{},
+		loginAttempts: map[string][]time.Time{}, fleetRequests: map[string][]time.Time{}, fleetProbeKeys: map[string][]byte{},
 	}
 }
 
@@ -146,6 +148,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	if err := s.startFleetProbe(ctx); err != nil {
+		log.Printf("fleet UDP probe disabled: %v", err)
+	}
 	server := &http.Server{Addr: s.cfg.Listen, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 70 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		<-ctx.Done()

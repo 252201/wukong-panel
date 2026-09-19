@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -424,7 +425,40 @@ func (s *Server) fleetAgentEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.Audit("fleet-agent", "fleet.host.enroll", hostID, host.Name)
-	writeJSON(w, http.StatusCreated, model.FleetEnrollmentResponse{HostID: hostID, AgentToken: token, ProtocolVersion: model.FleetProtocolVersion, HeartbeatSeconds: 10, EnrolledAt: time.Now()})
+	response := model.FleetEnrollmentResponse{HostID: hostID, AgentToken: token, ProtocolVersion: model.FleetProtocolVersion, HeartbeatSeconds: 10, EnrolledAt: time.Now()}
+	if hasFleetCapability(host.Capabilities, "network.probe") {
+		response.ProbeAddress = s.fleetProbeAddress()
+		response.ProbeKey, _ = s.ensureFleetProbeKey(hostID)
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func hasFleetCapability(capabilities []string, wanted string) bool {
+	for _, capability := range capabilities {
+		if capability == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) fleetProbeAddress() string {
+	if configured := strings.TrimSpace(s.cfg.FleetProbeAddress); configured != "" {
+		if _, err := net.ResolveUDPAddr("udp", configured); err == nil {
+			return configured
+		}
+		return ""
+	}
+	_, port, err := net.SplitHostPort(strings.TrimSpace(s.cfg.FleetProbeListen))
+	if err != nil || port == "" || port == "0" {
+		return ""
+	}
+	controller := strings.TrimSpace(mustSetting(s.store, "fleet_public_url"))
+	parsed, err := url.Parse(controller)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return net.JoinHostPort(parsed.Hostname(), port)
 }
 
 func bearerToken(r *http.Request) string {
@@ -493,6 +527,12 @@ func (s *Server) fleetAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.SaveFleetHeartbeat(r.Context(), hostID, heartbeat); err != nil {
 		writeError(w, http.StatusBadRequest, "心跳无法保存")
+		return
+	}
+	if hasFleetCapability(heartbeat.Capabilities, "network.probe") {
+		response := model.FleetHeartbeatResponse{ProbeAddress: s.fleetProbeAddress()}
+		response.ProbeKey, _ = s.ensureFleetProbeKey(hostID)
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -639,6 +679,7 @@ func (s *Server) archiveFleetHost(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.forgetFleetProbeKey(host.ID)
 	_ = s.store.ClearFleetSubscriptionCaches()
 	_ = s.store.Audit(session.Username, "fleet.host.archive", host.ID, host.Name)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -664,6 +705,7 @@ func (s *Server) purgeFleetHost(w http.ResponseWriter, r *http.Request, session 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.forgetFleetProbeKey(host.ID)
 	_ = s.store.Audit(session.Username, "fleet.host.purge", host.ID, host.Name)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -165,7 +165,7 @@ func TestFleetMigrationIsAdditiveToSingleHostData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"fleet_subscription_cache", "fleet_command_receipts", "fleet_commands", "fleet_metrics", "fleet_hosts", "fleet_enrollment_tokens"} {
+	for _, table := range []string{"fleet_subscription_cache", "fleet_command_receipts", "fleet_commands", "fleet_metrics", "fleet_probe_secrets", "fleet_hosts", "fleet_enrollment_tokens"} {
 		if _, err = raw.Exec("DROP TABLE " + table); err != nil {
 			t.Fatal(err)
 		}

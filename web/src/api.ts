@@ -163,7 +163,16 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
-export interface FleetSnapshot { overview: Overview; nodes: NodeItem[] }
+export interface FleetNetworkHealth {
+  status: 'ok' | 'error' | string
+  latencyMs: number
+  packetLossPct: number
+  packetsSent: number
+  packetsReceived: number
+  checkedAt?: string
+  error?: string
+}
+export interface FleetSnapshot { overview: Overview; network?: FleetNetworkHealth; nodes: NodeItem[] }
 export interface FleetHost {
   id: string; name: string; hostname: string; os: string; arch: string; serviceManager: string
   panelVersion: string; singBoxVersion: string; protocolVersion: number; capabilities: string[]

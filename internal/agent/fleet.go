@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/fleetprobe"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/store"
@@ -27,13 +29,15 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render", "network.probe",
 }
 
 type FleetClientConfig struct {
 	ControllerURL string `json:"controllerUrl"`
 	HostID        string `json:"hostId"`
 	HostName      string `json:"hostName"`
+	ProbeAddress  string `json:"probeAddress,omitempty"`
+	ProbeKey      string `json:"probeKey,omitempty"`
 }
 
 type FleetConnector struct {
@@ -45,6 +49,9 @@ type FleetConnector struct {
 	version    string
 	http       *http.Client
 	mutate     sync.Mutex
+	clientMu   sync.RWMutex
+	networkMu  sync.RWMutex
+	network    model.FleetNetworkHealth
 	heartbeats atomic.Uint64
 }
 
@@ -93,7 +100,38 @@ func NewTrustedFleetHTTPClient(timeout time.Duration) *http.Client {
 
 func (c *FleetConnector) Run(ctx context.Context) {
 	go c.heartbeatLoop(ctx)
+	go c.probeLoop(ctx)
 	c.commandLoop(ctx)
+}
+
+func (c *FleetConnector) probeLoop(ctx context.Context) {
+	delay := 5 * time.Second
+	for ctx.Err() == nil {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		client := c.clientConfig()
+		if client.ProbeAddress == "" || client.ProbeKey == "" {
+			delay = 10 * time.Second
+			continue
+		}
+		result, err := fleetprobe.Probe(ctx, client.ProbeAddress, client.HostID, client.ProbeKey)
+		if err != nil && ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			log.Printf("fleet network probe: %v", err)
+		}
+		c.networkMu.Lock()
+		c.network = result
+		c.networkMu.Unlock()
+		delay = 30 * time.Second
+	}
 }
 
 func (c *FleetConnector) heartbeatLoop(ctx context.Context) {
@@ -151,7 +189,19 @@ func (c *FleetConnector) commandLoop(ctx context.Context) {
 }
 
 func (c *FleetConnector) endpoint(path string) string {
-	return c.client.ControllerURL + "api/v1/fleet/agent/" + path
+	return c.clientConfig().ControllerURL + "api/v1/fleet/agent/" + path
+}
+
+func (c *FleetConnector) clientConfig() FleetClientConfig {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.client
+}
+
+func (c *FleetConnector) networkHealth() model.FleetNetworkHealth {
+	c.networkMu.RLock()
+	defer c.networkMu.RUnlock()
+	return c.network
 }
 
 func (c *FleetConnector) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -168,7 +218,7 @@ func (c *FleetConnector) request(ctx context.Context, method, path string, body 
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("X-Wukong-Host-ID", c.client.HostID)
+	req.Header.Set("X-Wukong-Host-ID", c.clientConfig().HostID)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -181,17 +231,79 @@ func (c *FleetConnector) sendHeartbeat(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	request := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: c.version, SingBoxVersion: c.manager.Version(ctx), Capabilities: FleetCapabilities, Snapshot: snapshot}
+	network := c.networkHealth()
+	var networkReport *model.FleetNetworkHealth
+	if network.Status != "" || !network.CheckedAt.IsZero() {
+		networkReport = &network
+	}
+	request := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: c.version, SingBoxVersion: c.manager.Version(ctx), Capabilities: FleetCapabilities, Network: networkReport, Snapshot: snapshot}
 	response, err := c.request(ctx, http.MethodPost, "heartbeat", request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
+	if response.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if response.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
+	var result model.FleetHeartbeatResponse
+	if err = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&result); err != nil {
+		return fmt.Errorf("invalid heartbeat response: %w", err)
+	}
+	c.updateProbeConfig(result)
 	return nil
+}
+
+func (c *FleetConnector) updateProbeConfig(response model.FleetHeartbeatResponse) {
+	if response.ProbeAddress == "" && response.ProbeKey == "" {
+		return
+	}
+	c.clientMu.Lock()
+	updated := c.client
+	if response.ProbeAddress != "" {
+		updated.ProbeAddress = response.ProbeAddress
+	}
+	if response.ProbeKey != "" {
+		updated.ProbeKey = response.ProbeKey
+	}
+	changed := updated.ProbeAddress != c.client.ProbeAddress || updated.ProbeKey != c.client.ProbeKey
+	c.client = updated
+	c.clientMu.Unlock()
+	if !changed || strings.TrimSpace(c.cfg.FleetConfigFile) == "" {
+		return
+	}
+	if err := saveFleetClientConfig(c.cfg.FleetConfigFile, updated); err != nil {
+		log.Printf("fleet probe config persist: %v", err)
+	}
+}
+
+func saveFleetClientConfig(path string, client FleetClientConfig) error {
+	data, err := json.MarshalIndent(client, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".wukong-fleet-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err = temporary.Chmod(0o600); err == nil {
+		_, err = temporary.Write(append(data, '\n'))
+	}
+	if closeErr := temporary.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 func (c *FleetConnector) nextCommand(ctx context.Context) (model.FleetCommand, bool, error) {
@@ -423,7 +535,7 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 	if actor == "" {
 		actor = "fleet-controller"
 	}
-	_ = c.store.Audit(actor, "fleet.command."+command.Kind, c.client.HostID, command.ID+" "+status)
+	_ = c.store.Audit(actor, "fleet.command."+command.Kind, c.clientConfig().HostID, command.ID+" "+status)
 	return commandResult
 }
 
