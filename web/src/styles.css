@@ -672,7 +672,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-host-card > header .fleet-network-bars {
   display: grid;
   grid-template-columns: repeat(20, minmax(0, 1fr));
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .fleet-host-card > header .fleet-network-bars .fleet-network-bar {
