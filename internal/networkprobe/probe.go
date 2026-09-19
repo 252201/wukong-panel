@@ -110,7 +110,14 @@ type targetResult struct {
 	sent      int
 	received  int
 	latencies []time.Duration
+	samples   []targetSample
 	err       error
+}
+
+type targetSample struct {
+	sent     int
+	received int
+	latency  time.Duration
 }
 
 // Probe sends SampleCount ICMP echo requests to every configured target. The
@@ -135,15 +142,30 @@ func Probe(ctx context.Context, targets []string) model.FleetNetworkHealth {
 	}
 
 	latencies := make([]time.Duration, 0, len(targets)*SampleCount)
+	sampleLatencies := make([][]time.Duration, SampleCount)
+	samples := make([]model.FleetNetworkSample, SampleCount)
 	var errorsFound []string
 	for range targets {
 		current := <-results
 		result.PacketsSent += current.sent
 		result.PacketsReceived += current.received
 		latencies = append(latencies, current.latencies...)
+		for sequence, sample := range current.samples {
+			if sequence >= len(samples) {
+				break
+			}
+			samples[sequence].PacketsSent += sample.sent
+			samples[sequence].PacketsReceived += sample.received
+			if sample.received > 0 {
+				sampleLatencies[sequence] = append(sampleLatencies[sequence], sample.latency)
+			}
+		}
 		if current.err != nil {
 			errorsFound = append(errorsFound, current.err.Error())
 		}
+	}
+	for sequence := range samples {
+		samples[sequence].LatencyMS = medianMilliseconds(sampleLatencies[sequence])
 	}
 	if result.PacketsSent == 0 {
 		result.Error = strings.Join(errorsFound, "; ")
@@ -156,6 +178,7 @@ func Probe(ctx context.Context, targets []string) model.FleetNetworkHealth {
 	result.Status = "ok"
 	result.PacketLossPct = float64(result.PacketsSent-result.PacketsReceived) * 100 / float64(result.PacketsSent)
 	result.LatencyMS = medianMilliseconds(latencies)
+	result.Samples = samples
 	if len(errorsFound) > 0 {
 		result.Error = strings.Join(errorsFound, "; ")
 	}
@@ -180,7 +203,10 @@ func probeTarget(ctx context.Context, target string) targetResult {
 
 	id := int(time.Now().UnixNano() & 0xffff)
 	sentAt := make(map[int]time.Time, SampleCount)
-	result := targetResult{latencies: make([]time.Duration, 0, SampleCount)}
+	result := targetResult{
+		latencies: make([]time.Duration, 0, SampleCount),
+		samples:   make([]targetSample, SampleCount),
+	}
 	for sequence := 0; sequence < SampleCount; sequence++ {
 		if err := ctx.Err(); err != nil {
 			return resultWithError(result, err)
@@ -199,6 +225,7 @@ func probeTarget(ctx context.Context, target string) targetResult {
 		}
 		sentAt[sequence] = time.Now()
 		result.sent++
+		result.samples[sequence].sent = 1
 		if sequence+1 < SampleCount {
 			timer := time.NewTimer(SampleInterval)
 			select {
@@ -244,7 +271,10 @@ func probeTarget(ctx context.Context, target string) targetResult {
 		}
 		seen[echo.Seq] = struct{}{}
 		result.received++
-		result.latencies = append(result.latencies, time.Since(sent))
+		latency := time.Since(sent)
+		result.latencies = append(result.latencies, latency)
+		result.samples[echo.Seq].received = 1
+		result.samples[echo.Seq].latency = latency
 	}
 	return result
 }
