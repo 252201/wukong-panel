@@ -662,6 +662,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   letter-spacing: -.045em;
   font-variant-numeric: tabular-nums;
 }
+.fleet-host-card > header .fleet-network-metric-head .fleet-network-number {
+  font-size: .58em;
+}
 .fleet-host-card > header .fleet-network-metric-head .fleet-network-unit {
   color: inherit;
   font-size: .58em;
