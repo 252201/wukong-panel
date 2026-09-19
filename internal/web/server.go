@@ -55,10 +55,6 @@ type socksExitAgent interface {
 	RemoveSOCKSExit(context.Context, model.SOCKSExitDeleteRequest) error
 }
 
-type networkHealthAgent interface {
-	NetworkHealth(context.Context) (model.FleetNetworkHealth, error)
-}
-
 type Server struct {
 	cfg              config.Config
 	store            *store.Store

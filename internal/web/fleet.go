@@ -147,11 +147,6 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 		}
 	}
 	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: trafficUsed, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: singBoxVersion, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
-	if source, ok := s.agent.(networkHealthAgent); ok {
-		if health, healthErr := source.NetworkHealth(ctx); healthErr == nil && !health.CheckedAt.IsZero() {
-			local.Snapshot.Network = &health
-		}
-	}
 	status.Hosts = append([]model.FleetHost{local}, hosts...)
 	status.ArchivedHosts = archivedHosts
 	subscriptionBaseURL := subscriptionPublicURL
@@ -429,8 +424,7 @@ func (s *Server) fleetAgentEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.Audit("fleet-agent", "fleet.host.enroll", hostID, host.Name)
-	response := model.FleetEnrollmentResponse{HostID: hostID, AgentToken: token, ProtocolVersion: model.FleetProtocolVersion, HeartbeatSeconds: 10, EnrolledAt: time.Now()}
-	writeJSON(w, http.StatusCreated, response)
+	writeJSON(w, http.StatusCreated, model.FleetEnrollmentResponse{HostID: hostID, AgentToken: token, ProtocolVersion: model.FleetProtocolVersion, HeartbeatSeconds: 10, EnrolledAt: time.Now()})
 }
 
 func bearerToken(r *http.Request) string {

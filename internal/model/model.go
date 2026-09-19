@@ -322,7 +322,6 @@ type FleetHost struct {
 type FleetSnapshot struct {
 	Full               bool                       `json:"full"`
 	Overview           Overview                   `json:"overview"`
-	Network            *FleetNetworkHealth        `json:"network,omitempty"`
 	Nodes              []Node                     `json:"nodes"`
 	NodeDetails        map[string]NodeEditDetails `json:"nodeDetails,omitempty"`
 	Jobs               []Job                      `json:"jobs"`
@@ -332,29 +331,6 @@ type FleetSnapshot struct {
 	SOCKSExit          *SOCKSExit                 `json:"socksExit,omitempty"`
 	Timeline           TrafficTimeline            `json:"timeline"`
 	Endpoints          []EndpointStat             `json:"endpoints"`
-}
-
-// FleetNetworkSample is one position in the fixed local ICMP sample window.
-// PacketsSent/PacketsReceived are aggregated across all configured targets for
-// that position, while LatencyMS is the median of successful replies.
-type FleetNetworkSample struct {
-	LatencyMS       int64 `json:"latencyMs"`
-	PacketsSent     int   `json:"packetsSent"`
-	PacketsReceived int   `json:"packetsReceived"`
-}
-
-// FleetNetworkHealth is the most recent local ICMP round-trip sample performed
-// by the VPS itself. Packet loss is the exact missing-response ratio for the
-// fixed sample window; no retries are counted as successful packets.
-type FleetNetworkHealth struct {
-	Status          string               `json:"status"`
-	LatencyMS       int64                `json:"latencyMs"`
-	PacketLossPct   float64              `json:"packetLossPct"`
-	PacketsSent     int                  `json:"packetsSent"`
-	PacketsReceived int                  `json:"packetsReceived"`
-	Samples         []FleetNetworkSample `json:"samples,omitempty"`
-	CheckedAt       time.Time            `json:"checkedAt,omitempty"`
-	Error           string               `json:"error,omitempty"`
 }
 
 type FleetEnrollmentRequest struct {
@@ -378,12 +354,11 @@ type FleetEnrollmentResponse struct {
 }
 
 type FleetHeartbeat struct {
-	ProtocolVersion int                 `json:"protocolVersion"`
-	PanelVersion    string              `json:"panelVersion"`
-	SingBoxVersion  string              `json:"singBoxVersion"`
-	Capabilities    []string            `json:"capabilities"`
-	Network         *FleetNetworkHealth `json:"network,omitempty"`
-	Snapshot        FleetSnapshot       `json:"snapshot"`
+	ProtocolVersion int           `json:"protocolVersion"`
+	PanelVersion    string        `json:"panelVersion"`
+	SingBoxVersion  string        `json:"singBoxVersion"`
+	Capabilities    []string      `json:"capabilities"`
+	Snapshot        FleetSnapshot `json:"snapshot"`
 }
 
 type FleetCommand struct {
