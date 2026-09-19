@@ -1,6 +1,6 @@
 .PHONY: web test build release clean
 
-VERSION ?= 1.3.0
+VERSION ?= 1.3.1
 export GOTOOLCHAIN := go1.26.5
 
 web:

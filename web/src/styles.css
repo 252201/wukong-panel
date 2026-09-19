@@ -654,15 +654,25 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   letter-spacing: .04em;
 }
 .fleet-host-card > header .fleet-network-metric-head .fleet-network-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .22em;
   flex: 0 0 auto;
   font: 700 clamp(21px, 2.15vw, 30px)/1.08 "IBM Plex Mono", monospace;
   letter-spacing: -.045em;
   font-variant-numeric: tabular-nums;
 }
+.fleet-host-card > header .fleet-network-metric-head .fleet-network-unit {
+  color: inherit;
+  font-size: .58em;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1;
+}
 .fleet-host-card > header .fleet-network-bars {
   display: grid;
   grid-template-columns: repeat(20, minmax(0, 1fr));
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .fleet-host-card > header .fleet-network-bars .fleet-network-bar {
