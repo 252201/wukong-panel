@@ -223,13 +223,19 @@ function fleetLatency(host: FleetHost) {
   if (fleetNetworkState(host) === 'error') return '失败'
   if (!fleetNetworkFresh(host) || !health) return '—'
   if (health.packetsReceived <= 0) return '—'
-  return `${Math.max(0, Math.round(health.latencyMs))} ms`
+  return `${Math.max(0, Math.round(health.latencyMs))}`
 }
 function fleetPacketLoss(host: FleetHost) {
   const health = host.snapshot?.network
   if (fleetNetworkState(host) === 'error') return '失败'
   if (!fleetNetworkFresh(host) || !health) return '—'
-  return `${Math.max(0, Math.min(100, health.packetLossPct)).toFixed(1)}%`
+  return `${Math.max(0, Math.min(100, health.packetLossPct)).toFixed(1)}`
+}
+function fleetNetworkUnit(host: FleetHost, kind: 'latency' | 'loss') {
+  const health = host.snapshot?.network
+  if (!fleetNetworkFresh(host) || !health) return ''
+  if (kind === 'latency' && health.packetsReceived <= 0) return ''
+  return kind === 'latency' ? 'ms' : '%'
 }
 function fleetNetworkTone(host: FleetHost, kind: 'latency' | 'loss') {
   const state = fleetNetworkState(host)
@@ -904,11 +910,11 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <header>
               <div class="fleet-host-identity"><i></i><span><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <div class="fleet-network-metric">
-                <div class="fleet-network-metric-head"><small>延迟</small><b class="fleet-network-value" :class="fleetNetworkTone(host, 'latency')">{{ fleetLatency(host) }}</b></div>
+                <div class="fleet-network-metric-head"><small>延迟</small><b class="fleet-network-value" :class="fleetNetworkTone(host, 'latency')"><span>{{ fleetLatency(host) }}</span><span v-if="fleetNetworkUnit(host, 'latency')" class="fleet-network-unit">{{ fleetNetworkUnit(host, 'latency') }}</span></b></div>
                 <div class="fleet-network-bars" role="img" aria-label="历史延迟色块"><i v-for="(sample, index) in fleetNetworkSamples(host)" :key="`latency-${index}`" class="fleet-network-bar" :class="fleetNetworkSampleTone(host, sample, 'latency')" :title="fleetNetworkSampleLabel(host, sample, index, 'latency')"></i></div>
               </div>
               <div class="fleet-network-metric">
-                <div class="fleet-network-metric-head"><small>丢包</small><b class="fleet-network-value" :class="fleetNetworkTone(host, 'loss')">{{ fleetPacketLoss(host) }}</b></div>
+                <div class="fleet-network-metric-head"><small>丢包</small><b class="fleet-network-value" :class="fleetNetworkTone(host, 'loss')"><span>{{ fleetPacketLoss(host) }}</span><span v-if="fleetNetworkUnit(host, 'loss')" class="fleet-network-unit">{{ fleetNetworkUnit(host, 'loss') }}</span></b></div>
                 <div class="fleet-network-bars" role="img" aria-label="历史丢包色块"><i v-for="(sample, index) in fleetNetworkSamples(host)" :key="`loss-${index}`" class="fleet-network-bar" :class="fleetNetworkSampleTone(host, sample, 'loss')" :title="fleetNetworkSampleLabel(host, sample, index, 'loss')"></i></div>
               </div>
               <em class="fleet-host-state"><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
