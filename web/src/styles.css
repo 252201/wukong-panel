@@ -624,3 +624,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 /* Align the first resource metric with the disk column below it. */
 .fleet-host-metrics span:first-child { padding-left: 13px; }
+
+.fleet-host-card > header .fleet-network-value { font-variant-numeric: tabular-nums; }
+.fleet-host-card > header .fleet-network-value.good { color: var(--jade); }
+.fleet-host-card > header .fleet-network-value.warn { color: var(--gold-muted-text); }
+.fleet-host-card > header .fleet-network-value.bad { color: var(--danger-text); }
+.fleet-host-card > header .fleet-network-value.muted { color: var(--muted); }

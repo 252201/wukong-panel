@@ -9,25 +9,27 @@ import (
 )
 
 type Config struct {
-	Command         string
-	Listen          string
-	AgentSocket     string
-	AgentToken      string
-	AgentTokenFile  string
-	DataDir         string
-	SecretDir       string
-	ConfigDir       string
-	SingBoxBin      string
-	CloudflaredBin  string
-	TLSCertFile     string
-	TLSKeyFile      string
-	PanelDomain     string
-	BasePath        string
-	SecureCookie    bool
-	Demo            bool
-	FleetConfigFile string
-	FleetTokenFile  string
-	Args            []string
+	Command           string
+	Listen            string
+	AgentSocket       string
+	AgentToken        string
+	AgentTokenFile    string
+	DataDir           string
+	SecretDir         string
+	ConfigDir         string
+	SingBoxBin        string
+	CloudflaredBin    string
+	TLSCertFile       string
+	TLSKeyFile        string
+	PanelDomain       string
+	BasePath          string
+	SecureCookie      bool
+	Demo              bool
+	FleetConfigFile   string
+	FleetTokenFile    string
+	FleetProbeListen  string
+	FleetProbeAddress string
+	Args              []string
 }
 
 func Parse(version string) Config {
@@ -62,6 +64,8 @@ func Parse(version string) Config {
 	flag.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
 	flag.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
 	flag.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
+	flag.StringVar(&cfg.FleetProbeListen, "fleet-probe-listen", env("WUKONG_FLEET_PROBE_LISTEN", "0.0.0.0:8789"), "central fleet UDP probe listen address")
+	flag.StringVar(&cfg.FleetProbeAddress, "fleet-probe-address", env("WUKONG_FLEET_PROBE_ADDRESS", ""), "public central fleet UDP probe address (host:port)")
 	flag.Parse()
 	if cfg.AgentTokenFile == "" {
 		cfg.AgentTokenFile = filepath.Join(cfg.DataDir, "agent.token")

@@ -248,6 +248,66 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 	}
 }
 
+func TestFleetAgentNetworkProbeHeartbeat(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	if err := database.CreateFleetEnrollmentToken("network-probe", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	requestBody, _ := json.Marshal(model.FleetEnrollmentRequest{Token: "network-probe", Name: "Probe VPS", Hostname: "probe-vps", OS: "debian", Arch: "amd64", PanelVersion: "1.0.1", ProtocolVersion: model.FleetProtocolVersion, Capabilities: []string{"overview", "network.probe"}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/enroll", bytes.NewReader(requestBody))
+	request.RemoteAddr = "192.0.2.20:1234"
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("enroll status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var enrolled model.FleetEnrollmentResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &enrolled); err != nil {
+		t.Fatal(err)
+	}
+	if enrolled.ProbeKey == "" {
+		t.Fatal("network-capable enrollment did not receive a probe key")
+	}
+	var storedCipher string
+	if err := database.DB.QueryRow(`SELECT cipher FROM fleet_probe_secrets WHERE host_id=?`, enrolled.HostID).Scan(&storedCipher); err != nil {
+		t.Fatal(err)
+	}
+	if storedCipher == "" || storedCipher == enrolled.ProbeKey {
+		t.Fatal("probe key was not encrypted at rest")
+	}
+
+	network := &model.FleetNetworkHealth{Status: "ok", LatencyMS: 42, PacketLossPct: 2.5, PacketsSent: 20, PacketsReceived: 19, CheckedAt: time.Now().UTC()}
+	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "1.0.1",
+		Capabilities:    []string{"overview", "network.probe"},
+		Network:         network,
+		Snapshot:        model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix()}}, Nodes: []model.Node{}},
+	})
+	heartbeat := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/heartbeat", bytes.NewReader(heartbeatBody))
+	heartbeat.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
+	heartbeat.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
+	heartbeatRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(heartbeatRecorder, heartbeat)
+	if heartbeatRecorder.Code != http.StatusOK {
+		t.Fatalf("heartbeat status=%d body=%s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
+	}
+	var response model.FleetHeartbeatResponse
+	if err := json.Unmarshal(heartbeatRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.ProbeKey != enrolled.ProbeKey {
+		t.Fatalf("heartbeat rotated probe key: %q != %q", response.ProbeKey, enrolled.ProbeKey)
+	}
+	host, err := database.FleetHost(enrolled.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Snapshot.Network == nil || host.Snapshot.Network.PacketLossPct != 2.5 || host.Snapshot.Network.PacketsReceived != 19 {
+		t.Fatalf("network health was not stored: %+v", host.Snapshot.Network)
+	}
+}
+
 func TestFleetCommandPayloadEncryptionLongPollAndHostIsolation(t *testing.T) {
 	server, database := fleetWebTestServer(t)
 	first := enrollFleetAgent(t, server, database, "first", "Edge A")

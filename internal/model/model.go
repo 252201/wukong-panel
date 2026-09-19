@@ -322,6 +322,7 @@ type FleetHost struct {
 type FleetSnapshot struct {
 	Full               bool                       `json:"full"`
 	Overview           Overview                   `json:"overview"`
+	Network            *FleetNetworkHealth        `json:"network,omitempty"`
 	Nodes              []Node                     `json:"nodes"`
 	NodeDetails        map[string]NodeEditDetails `json:"nodeDetails,omitempty"`
 	Jobs               []Job                      `json:"jobs"`
@@ -331,6 +332,20 @@ type FleetSnapshot struct {
 	SOCKSExit          *SOCKSExit                 `json:"socksExit,omitempty"`
 	Timeline           TrafficTimeline            `json:"timeline"`
 	Endpoints          []EndpointStat             `json:"endpoints"`
+}
+
+// FleetNetworkHealth is the most recent authenticated UDP round-trip sample
+// between a satellite VPS and the central controller. Packet loss is the
+// exact missing-response ratio for the sample window; no retries are counted
+// as successful packets.
+type FleetNetworkHealth struct {
+	Status          string    `json:"status"`
+	LatencyMS       int64     `json:"latencyMs"`
+	PacketLossPct   float64   `json:"packetLossPct"`
+	PacketsSent     int       `json:"packetsSent"`
+	PacketsReceived int       `json:"packetsReceived"`
+	CheckedAt       time.Time `json:"checkedAt,omitempty"`
+	Error           string    `json:"error,omitempty"`
 }
 
 type FleetEnrollmentRequest struct {
@@ -351,14 +366,22 @@ type FleetEnrollmentResponse struct {
 	ProtocolVersion  int       `json:"protocolVersion"`
 	HeartbeatSeconds int       `json:"heartbeatSeconds"`
 	EnrolledAt       time.Time `json:"enrolledAt"`
+	ProbeAddress     string    `json:"probeAddress,omitempty"`
+	ProbeKey         string    `json:"probeKey,omitempty"`
 }
 
 type FleetHeartbeat struct {
-	ProtocolVersion int           `json:"protocolVersion"`
-	PanelVersion    string        `json:"panelVersion"`
-	SingBoxVersion  string        `json:"singBoxVersion"`
-	Capabilities    []string      `json:"capabilities"`
-	Snapshot        FleetSnapshot `json:"snapshot"`
+	ProtocolVersion int                 `json:"protocolVersion"`
+	PanelVersion    string              `json:"panelVersion"`
+	SingBoxVersion  string              `json:"singBoxVersion"`
+	Capabilities    []string            `json:"capabilities"`
+	Network         *FleetNetworkHealth `json:"network,omitempty"`
+	Snapshot        FleetSnapshot       `json:"snapshot"`
+}
+
+type FleetHeartbeatResponse struct {
+	ProbeAddress string `json:"probeAddress,omitempty"`
+	ProbeKey     string `json:"probeKey,omitempty"`
 }
 
 type FleetCommand struct {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -9,7 +10,27 @@ import (
 	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/model"
 )
+
+func TestFleetHeartbeatOmitsOptionalProbeFieldsUntilConfigured(t *testing.T) {
+	body, err := json.Marshal(model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, Capabilities: FleetCapabilities, Snapshot: model.FleetSnapshot{Full: false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) == "" || containsJSONField(body, "network") {
+		t.Fatalf("optional probe fields were serialized before configuration: %s", body)
+	}
+}
+
+func containsJSONField(data []byte, field string) bool {
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(data, &value); err != nil {
+		return false
+	}
+	_, ok := value[field]
+	return ok
+}
 
 func TestTrustedFleetHTTPClientRejectsHTTPSDowngrade(t *testing.T) {
 	client := NewTrustedFleetHTTPClient(time.Second)

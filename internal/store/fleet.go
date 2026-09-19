@@ -51,13 +51,28 @@ func (s *Store) AuthenticateFleetHost(hostID, token string) bool {
 	return len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1
 }
 
+func (s *Store) SetFleetProbeSecret(hostID, cipher string) error {
+	_, err := s.DB.Exec(`INSERT INTO fleet_probe_secrets(host_id,cipher,updated_at) VALUES(?,?,?) ON CONFLICT(host_id) DO UPDATE SET cipher=excluded.cipher,updated_at=excluded.updated_at`, hostID, cipher, time.Now().Unix())
+	return err
+}
+
+func (s *Store) FleetProbeSecret(hostID string) (string, error) {
+	var cipher string
+	err := s.DB.QueryRow(`SELECT secret.cipher FROM fleet_probe_secrets secret JOIN fleet_hosts host ON host.id=secret.host_id WHERE secret.host_id=? AND host.archived_at=0`, hostID).Scan(&cipher)
+	return cipher, err
+}
+
 func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat model.FleetHeartbeat) error {
+	hasNetwork := heartbeat.Network != nil && (heartbeat.Network.Status != "" || !heartbeat.Network.CheckedAt.IsZero())
 	if !heartbeat.Snapshot.Full {
 		var existingRaw string
 		if err := s.DB.QueryRowContext(ctx, `SELECT snapshot_json FROM fleet_hosts WHERE id=? AND archived_at=0`, hostID).Scan(&existingRaw); err == nil {
 			var existing model.FleetSnapshot
 			if json.Unmarshal([]byte(existingRaw), &existing) == nil {
 				existing.Overview = heartbeat.Snapshot.Overview
+				if hasNetwork {
+					existing.Network = heartbeat.Network
+				}
 				states := make(map[string]model.Node, len(heartbeat.Snapshot.Nodes))
 				for _, node := range heartbeat.Snapshot.Nodes {
 					states[node.ID] = node
@@ -75,6 +90,9 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 				heartbeat.Snapshot = existing
 			}
 		}
+	}
+	if hasNetwork {
+		heartbeat.Snapshot.Network = heartbeat.Network
 	}
 	snapshot, err := json.Marshal(heartbeat.Snapshot)
 	if err != nil {
