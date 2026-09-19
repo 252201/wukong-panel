@@ -209,13 +209,14 @@ function fleetBillingPercent(data?: Overview) {
 }
 function fleetNetworkFresh(host: FleetHost) {
   const health = host.snapshot?.network
-  if (host.id === 'local' || !host.online || health?.status !== 'ok' || !health.checkedAt) return false
+  if (!host.online || health?.status !== 'ok' || !health.checkedAt || health.packetsSent <= 0) return false
   const checkedAt = Date.parse(health.checkedAt)
   return Number.isFinite(checkedAt) && Date.now() - checkedAt <= 90_000
 }
 function fleetLatency(host: FleetHost) {
   const health = host.snapshot?.network
   if (!fleetNetworkFresh(host) || !health) return '—'
+  if (health.packetsReceived <= 0) return '—'
   return `${Math.max(0, Math.round(health.latencyMs))} ms`
 }
 function fleetPacketLoss(host: FleetHost) {
