@@ -6,31 +6,28 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/252201/wukong-panel/internal/networkprobe"
 )
 
 type Config struct {
-	Command             string
-	Listen              string
-	AgentSocket         string
-	AgentToken          string
-	AgentTokenFile      string
-	DataDir             string
-	SecretDir           string
-	ConfigDir           string
-	SingBoxBin          string
-	CloudflaredBin      string
-	TLSCertFile         string
-	TLSKeyFile          string
-	PanelDomain         string
-	BasePath            string
-	SecureCookie        bool
-	Demo                bool
-	FleetConfigFile     string
-	FleetTokenFile      string
-	NetworkProbeTargets []string
-	Args                []string
+	Command         string
+	Listen          string
+	AgentSocket     string
+	AgentToken      string
+	AgentTokenFile  string
+	DataDir         string
+	SecretDir       string
+	ConfigDir       string
+	SingBoxBin      string
+	CloudflaredBin  string
+	TLSCertFile     string
+	TLSKeyFile      string
+	PanelDomain     string
+	BasePath        string
+	SecureCookie    bool
+	Demo            bool
+	FleetConfigFile string
+	FleetTokenFile  string
+	Args            []string
 }
 
 func Parse(version string) Config {
@@ -65,13 +62,7 @@ func Parse(version string) Config {
 	flag.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
 	flag.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
 	flag.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
-	var networkProbeTargets string
-	flag.StringVar(&networkProbeTargets, "network-probe-targets", env("WUKONG_NETWORK_PROBE_TARGETS", strings.Join(networkprobe.DefaultTargets(), ",")), "comma-separated IPv4 targets used for local network probes")
 	flag.Parse()
-	cfg.NetworkProbeTargets = networkprobe.ParseTargets(networkProbeTargets)
-	if len(cfg.NetworkProbeTargets) == 0 {
-		cfg.NetworkProbeTargets = networkprobe.DefaultTargets()
-	}
 	if cfg.AgentTokenFile == "" {
 		cfg.AgentTokenFile = filepath.Join(cfg.DataDir, "agent.token")
 	}

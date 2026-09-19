@@ -52,16 +52,12 @@ func (s *Store) AuthenticateFleetHost(hostID, token string) bool {
 }
 
 func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat model.FleetHeartbeat) error {
-	hasNetwork := heartbeat.Network != nil && (heartbeat.Network.Status != "" || !heartbeat.Network.CheckedAt.IsZero())
 	if !heartbeat.Snapshot.Full {
 		var existingRaw string
 		if err := s.DB.QueryRowContext(ctx, `SELECT snapshot_json FROM fleet_hosts WHERE id=? AND archived_at=0`, hostID).Scan(&existingRaw); err == nil {
 			var existing model.FleetSnapshot
 			if json.Unmarshal([]byte(existingRaw), &existing) == nil {
 				existing.Overview = heartbeat.Snapshot.Overview
-				if hasNetwork {
-					existing.Network = heartbeat.Network
-				}
 				states := make(map[string]model.Node, len(heartbeat.Snapshot.Nodes))
 				for _, node := range heartbeat.Snapshot.Nodes {
 					states[node.ID] = node
@@ -79,9 +75,6 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 				heartbeat.Snapshot = existing
 			}
 		}
-	}
-	if hasNetwork {
-		heartbeat.Snapshot.Network = heartbeat.Network
 	}
 	snapshot, err := json.Marshal(heartbeat.Snapshot)
 	if err != nil {

@@ -21,14 +21,13 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
-	"github.com/252201/wukong-panel/internal/networkprobe"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render", "network.probe",
+	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 }
 
 type FleetClientConfig struct {
@@ -46,8 +45,6 @@ type FleetConnector struct {
 	version    string
 	http       *http.Client
 	mutate     sync.Mutex
-	clientMu   sync.RWMutex
-	network    *networkprobe.State
 	heartbeats atomic.Uint64
 }
 
@@ -74,12 +71,12 @@ func LoadFleetClientConfig(cfg config.Config) (FleetClientConfig, string, error)
 	return client, strings.TrimSpace(string(token)), nil
 }
 
-func NewFleetConnector(cfg config.Config, s *store.Store, manager *Manager, version string, network *networkprobe.State) (*FleetConnector, error) {
+func NewFleetConnector(cfg config.Config, s *store.Store, manager *Manager, version string) (*FleetConnector, error) {
 	client, token, err := LoadFleetClientConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, version: version, network: network, http: NewTrustedFleetHTTPClient(40 * time.Second)}, nil
+	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, version: version, http: NewTrustedFleetHTTPClient(40 * time.Second)}, nil
 }
 
 func NewTrustedFleetHTTPClient(timeout time.Duration) *http.Client {
@@ -154,20 +151,7 @@ func (c *FleetConnector) commandLoop(ctx context.Context) {
 }
 
 func (c *FleetConnector) endpoint(path string) string {
-	return c.clientConfig().ControllerURL + "api/v1/fleet/agent/" + path
-}
-
-func (c *FleetConnector) clientConfig() FleetClientConfig {
-	c.clientMu.RLock()
-	defer c.clientMu.RUnlock()
-	return c.client
-}
-
-func (c *FleetConnector) networkHealth() (model.FleetNetworkHealth, bool) {
-	if c.network == nil {
-		return model.FleetNetworkHealth{}, false
-	}
-	return c.network.Health()
+	return c.client.ControllerURL + "api/v1/fleet/agent/" + path
 }
 
 func (c *FleetConnector) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -184,7 +168,7 @@ func (c *FleetConnector) request(ctx context.Context, method, path string, body 
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("X-Wukong-Host-ID", c.clientConfig().HostID)
+	req.Header.Set("X-Wukong-Host-ID", c.client.HostID)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -197,21 +181,13 @@ func (c *FleetConnector) sendHeartbeat(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	network, networkReady := c.networkHealth()
-	var networkReport *model.FleetNetworkHealth
-	if networkReady {
-		networkReport = &network
-	}
-	request := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: c.version, SingBoxVersion: c.manager.Version(ctx), Capabilities: FleetCapabilities, Network: networkReport, Snapshot: snapshot}
+	request := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: c.version, SingBoxVersion: c.manager.Version(ctx), Capabilities: FleetCapabilities, Snapshot: snapshot}
 	response, err := c.request(ctx, http.MethodPost, "heartbeat", request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+	if response.StatusCode != http.StatusNoContent {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
@@ -447,7 +423,7 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 	if actor == "" {
 		actor = "fleet-controller"
 	}
-	_ = c.store.Audit(actor, "fleet.command."+command.Kind, c.clientConfig().HostID, command.ID+" "+status)
+	_ = c.store.Audit(actor, "fleet.command."+command.Kind, c.client.HostID, command.ID+" "+status)
 	return commandResult
 }
 

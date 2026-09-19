@@ -91,8 +91,6 @@ const english: Record<string, string> = {
   '聚合内存': 'Aggregate memory',
   '实时流量': 'Live traffic',
   '中央本机': 'Controller host',
-  '延迟': 'Latency',
-  '丢包': 'Packet loss',
   '内存': 'Memory',
   '磁盘': 'Disk',
   '节点': 'Nodes',

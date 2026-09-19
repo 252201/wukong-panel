@@ -23,10 +23,6 @@ func (fleetHealthAgent) Health(context.Context) (map[string]any, error) {
 	return map[string]any{"version": "1.13.14"}, nil
 }
 
-func (fleetHealthAgent) NetworkHealth(context.Context) (model.FleetNetworkHealth, error) {
-	return model.FleetNetworkHealth{Status: "ok", LatencyMS: 18, PacketLossPct: 1.7, PacketsSent: 60, PacketsReceived: 59, CheckedAt: time.Now().UTC()}, nil
-}
-
 func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -65,9 +61,6 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 	}
 	if local.Snapshot.Overview.BillingStart == "" || local.Snapshot.Overview.BillingEnd == "" {
 		t.Fatalf("local snapshot billing period=%q..%q", local.Snapshot.Overview.BillingStart, local.Snapshot.Overview.BillingEnd)
-	}
-	if local.Snapshot.Network == nil || local.Snapshot.Network.LatencyMS != 18 || local.Snapshot.Network.PacketsReceived != 59 {
-		t.Fatalf("local network health=%+v", local.Snapshot.Network)
 	}
 }
 
@@ -252,48 +245,6 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 	host, err := database.FleetHost(enrolled.HostID)
 	if err != nil || !host.Online || host.Snapshot.Nodes[0].ID != "node-a" {
 		t.Fatalf("host=%+v err=%v", host, err)
-	}
-}
-
-func TestFleetAgentNetworkHeartbeatStoresLocalResult(t *testing.T) {
-	server, database := fleetWebTestServer(t)
-	if err := database.CreateFleetEnrollmentToken("network-probe", time.Now().Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	requestBody, _ := json.Marshal(model.FleetEnrollmentRequest{Token: "network-probe", Name: "Probe VPS", Hostname: "probe-vps", OS: "debian", Arch: "amd64", PanelVersion: "1.0.1", ProtocolVersion: model.FleetProtocolVersion, Capabilities: []string{"overview", "network.probe"}})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/enroll", bytes.NewReader(requestBody))
-	request.RemoteAddr = "192.0.2.20:1234"
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("enroll status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	var enrolled model.FleetEnrollmentResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &enrolled); err != nil {
-		t.Fatal(err)
-	}
-	network := &model.FleetNetworkHealth{Status: "ok", LatencyMS: 42, PacketLossPct: 2.5, PacketsSent: 20, PacketsReceived: 19, CheckedAt: time.Now().UTC()}
-	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{
-		ProtocolVersion: model.FleetProtocolVersion,
-		PanelVersion:    "1.0.1",
-		Capabilities:    []string{"overview", "network.probe"},
-		Network:         network,
-		Snapshot:        model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix()}}, Nodes: []model.Node{}},
-	})
-	heartbeat := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/heartbeat", bytes.NewReader(heartbeatBody))
-	heartbeat.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
-	heartbeat.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
-	heartbeatRecorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(heartbeatRecorder, heartbeat)
-	if heartbeatRecorder.Code != http.StatusNoContent {
-		t.Fatalf("heartbeat status=%d body=%s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
-	}
-	host, err := database.FleetHost(enrolled.HostID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if host.Snapshot.Network == nil || host.Snapshot.Network.PacketLossPct != 2.5 || host.Snapshot.Network.PacketsReceived != 19 {
-		t.Fatalf("network health was not stored: %+v", host.Snapshot.Network)
 	}
 }
 
