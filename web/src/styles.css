@@ -546,9 +546,23 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   font-size: 11px;
 }
 
-.fleet-host-card > header em {
+.fleet-host-card > header .fleet-host-status {
   display: flex;
   align-items: center;
+  gap: 4px;
+}
+
+.fleet-host-card > header .fleet-online-state {
+  display: inline;
+}
+
+.fleet-host-card.offline > header .fleet-online-state {
+  color: #888d82;
+}
+
+.fleet-host-card > header em {
+  display: grid;
+  justify-items: end;
   gap: 4px;
   white-space: nowrap;
   min-width: max-content;
