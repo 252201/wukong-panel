@@ -23,6 +23,7 @@ import (
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/monitor"
+	"github.com/252201/wukong-panel/internal/networkprobe"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
 	"github.com/252201/wukong-panel/internal/store"
@@ -31,10 +32,23 @@ import (
 
 var version = "dev"
 
-type directAgent struct{ manager *agent.Manager }
+type directAgent struct {
+	manager *agent.Manager
+	network *networkprobe.State
+}
 
 func (d directAgent) Health(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"ok": true, "version": d.manager.Version(ctx)}, nil
+}
+func (d directAgent) NetworkHealth(context.Context) (model.FleetNetworkHealth, error) {
+	if d.network == nil {
+		return model.FleetNetworkHealth{}, networkprobe.ErrNotReady
+	}
+	health, ready := d.network.Health()
+	if !ready {
+		return model.FleetNetworkHealth{}, networkprobe.ErrNotReady
+	}
+	return health, nil
 }
 func (d directAgent) Scan(ctx context.Context) ([]model.NodeCandidate, error) {
 	return d.manager.Scan(ctx)
@@ -156,12 +170,14 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
-		if connector, fleetErr := agent.NewFleetConnector(cfg, s, manager, version); fleetErr == nil {
+		network := networkprobe.NewState(cfg.NetworkProbeTargets)
+		go network.Run(ctx)
+		if connector, fleetErr := agent.NewFleetConnector(cfg, s, manager, version, network); fleetErr == nil {
 			go connector.Run(ctx)
 		} else if !errors.Is(fleetErr, os.ErrNotExist) {
 			log.Printf("fleet connector disabled: %v", fleetErr)
 		}
-		server := agent.NewServer(manager, cfg.AgentToken)
+		server := agent.NewServer(manager, cfg.AgentToken, network)
 		fatalServe(server.ListenAndServe(ctx, cfg.AgentSocket))
 		return
 	case "web":
@@ -189,8 +205,10 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
+		network := networkprobe.NewState(cfg.NetworkProbeTargets)
+		go network.Run(ctx)
 		go func() { <-ctx.Done() }()
-		server := webserver.New(cfg, s, directAgent{manager}, version)
+		server := webserver.New(cfg, s, directAgent{manager: manager, network: network}, version)
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:
@@ -252,7 +270,7 @@ func runFleetCLI(ctx context.Context, cfg config.Config, args []string) {
 		if err = json.Unmarshal(responseBody, &enrolled); err != nil || enrolled.HostID == "" || enrolled.AgentToken == "" {
 			log.Fatal("controller returned an invalid enrollment response")
 		}
-		clientConfig, _ := json.MarshalIndent(agent.FleetClientConfig{ControllerURL: controllerURL.String(), HostID: enrolled.HostID, HostName: identity.Name, ProbeAddress: enrolled.ProbeAddress, ProbeKey: enrolled.ProbeKey}, "", "  ")
+		clientConfig, _ := json.MarshalIndent(agent.FleetClientConfig{ControllerURL: controllerURL.String(), HostID: enrolled.HostID, HostName: identity.Name}, "", "  ")
 		if err = atomicPrivateWrite(cfg.FleetConfigFile, append(clientConfig, '\n')); err == nil {
 			err = atomicPrivateWrite(cfg.FleetTokenFile, []byte(enrolled.AgentToken+"\n"))
 		}

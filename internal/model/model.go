@@ -334,10 +334,9 @@ type FleetSnapshot struct {
 	Endpoints          []EndpointStat             `json:"endpoints"`
 }
 
-// FleetNetworkHealth is the most recent authenticated UDP round-trip sample
-// between a satellite VPS and the central controller. Packet loss is the
-// exact missing-response ratio for the sample window; no retries are counted
-// as successful packets.
+// FleetNetworkHealth is the most recent local ICMP round-trip sample performed
+// by the VPS itself. Packet loss is the exact missing-response ratio for the
+// fixed sample window; no retries are counted as successful packets.
 type FleetNetworkHealth struct {
 	Status          string    `json:"status"`
 	LatencyMS       int64     `json:"latencyMs"`
@@ -366,8 +365,6 @@ type FleetEnrollmentResponse struct {
 	ProtocolVersion  int       `json:"protocolVersion"`
 	HeartbeatSeconds int       `json:"heartbeatSeconds"`
 	EnrolledAt       time.Time `json:"enrolledAt"`
-	ProbeAddress     string    `json:"probeAddress,omitempty"`
-	ProbeKey         string    `json:"probeKey,omitempty"`
 }
 
 type FleetHeartbeat struct {
@@ -377,11 +374,6 @@ type FleetHeartbeat struct {
 	Capabilities    []string            `json:"capabilities"`
 	Network         *FleetNetworkHealth `json:"network,omitempty"`
 	Snapshot        FleetSnapshot       `json:"snapshot"`
-}
-
-type FleetHeartbeatResponse struct {
-	ProbeAddress string `json:"probeAddress,omitempty"`
-	ProbeKey     string `json:"probeKey,omitempty"`
 }
 
 type FleetCommand struct {

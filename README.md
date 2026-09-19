@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.1.0-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.2.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -135,7 +135,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.1.0 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.2.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -196,15 +196,9 @@ sudo sh install.sh --firewall-off
 
 两个地址都必须使用操作系统信任链可验证的 HTTPS 证书，不提供跳过 TLS 校验的选项。订阅公开地址可以留空，此时继续复用主控通信地址，兼容已有安装；需要标准 `HTTPS 443` 入口时，建议使用独立域名。保存中央设置后可点击“检测订阅入口”，由主控验证 TLS、HTTP 状态、订阅格式、节点数量与响应延迟；检测不会跟随重定向，避免把订阅 Token 带到其他域名。
 
-舰队卡片上的延迟与丢包来自独立的 VPS 网络探针，不经过代理节点：远端 Agent 每轮发送 20 个带 HMAC 的 UDP 序号包，中央只回显、绝不重试，Agent 以响应序号计算固定窗口内的 RTT 中位数和 `未收到响应 / 已发送` 的精确丢包比例。中央默认监听 `0.0.0.0:8789/udp`，因此只需在中央 VPS 的主机防火墙和云安全组放行该 UDP 端口；远端 VPS 不需要新增入站端口。
+舰队卡片上的延迟与丢包由每台 VPS 自己完成检测，不经过代理节点，也不依赖中央开放额外端口：每台 VPS 的 Root Agent 会直接向 `1.1.1.1`、`8.8.8.8`、`9.9.9.9` 发送每目标 20 个 ICMP 请求，以固定窗口内的 RTT 中位数和 `未收到响应 / 已发送` 计算结果，再通过既有的 HTTPS 心跳上报给中央；中央和本机卡片只展示返回结果。
 
-安装器会把中央探针监听地址写入 `/etc/wukong-panel/env`。例如启用防火墙时，中央还需要显式放行：
-
-```bash
-sudo sh install.sh --firewall-on --firewall-ports 8789/udp
-```
-
-如果主控通信地址经过只支持 HTTPS 的反向代理或 Tunnel，不能直接把同一个域名作为 UDP 目标。此时在中央的环境文件中设置一个能直达 UDP 端口的公网地址，例如 `WUKONG_FLEET_PROBE_ADDRESS=203.0.113.10:8789`，然后重启中央 Web/Agent 服务；探针密钥仍通过受信 HTTPS 心跳下发并在中央加密保存。
+默认目标可以在 `/etc/wukong-panel/env` 中通过 `WUKONG_NETWORK_PROBE_TARGETS` 覆盖，例如 `WUKONG_NETWORK_PROBE_TARGETS=1.1.1.1,8.8.8.8,9.9.9.9`。ICMP 探测由 Root Agent 执行，因此不需要新增公网入站端口；如果目标网络屏蔽 ICMP，卡片会显示该采样窗口的真实丢包率，完全无响应时延迟显示为 `—`，不会把 `0 ms` 当作有效延迟。
 
 已经安装悟空面板的 VPS 可以运行安装器菜单中的“配置独立订阅 443 域名”，或直接执行：
 
