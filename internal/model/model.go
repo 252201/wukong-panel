@@ -334,17 +334,27 @@ type FleetSnapshot struct {
 	Endpoints          []EndpointStat             `json:"endpoints"`
 }
 
+// FleetNetworkSample is one position in the fixed local ICMP sample window.
+// PacketsSent/PacketsReceived are aggregated across all configured targets for
+// that position, while LatencyMS is the median of successful replies.
+type FleetNetworkSample struct {
+	LatencyMS       int64 `json:"latencyMs"`
+	PacketsSent     int   `json:"packetsSent"`
+	PacketsReceived int   `json:"packetsReceived"`
+}
+
 // FleetNetworkHealth is the most recent local ICMP round-trip sample performed
 // by the VPS itself. Packet loss is the exact missing-response ratio for the
 // fixed sample window; no retries are counted as successful packets.
 type FleetNetworkHealth struct {
-	Status          string    `json:"status"`
-	LatencyMS       int64     `json:"latencyMs"`
-	PacketLossPct   float64   `json:"packetLossPct"`
-	PacketsSent     int       `json:"packetsSent"`
-	PacketsReceived int       `json:"packetsReceived"`
-	CheckedAt       time.Time `json:"checkedAt,omitempty"`
-	Error           string    `json:"error,omitempty"`
+	Status          string               `json:"status"`
+	LatencyMS       int64                `json:"latencyMs"`
+	PacketLossPct   float64              `json:"packetLossPct"`
+	PacketsSent     int                  `json:"packetsSent"`
+	PacketsReceived int                  `json:"packetsReceived"`
+	Samples         []FleetNetworkSample `json:"samples,omitempty"`
+	CheckedAt       time.Time            `json:"checkedAt,omitempty"`
+	Error           string               `json:"error,omitempty"`
 }
 
 type FleetEnrollmentRequest struct {

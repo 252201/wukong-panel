@@ -11,6 +11,8 @@
   --gold-bright: #f1cf7d;
   --gold-dark: #72592a;
   --gold-muted-text: #72592a;
+  --network-warning: #d7b64c;
+  --network-orange: #d98435;
   --cinnabar: #c44635;
   --jade: #52b690;
   --sky: #69a7b8;
@@ -63,6 +65,8 @@
   --gold-bright: #df7600;
   --gold-dark: #ffd6a5;
   --gold-muted-text: #bd6804;
+  --network-warning: #a77b00;
+  --network-orange: #d56800;
   --cinnabar: #f05f67;
   --jade: #29b49f;
   --sky: #57a9bb;
@@ -627,6 +631,58 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 .fleet-host-card > header .fleet-network-value { font-variant-numeric: tabular-nums; }
 .fleet-host-card > header .fleet-network-value.good { color: var(--jade); }
-.fleet-host-card > header .fleet-network-value.warn { color: var(--gold-muted-text); }
+.fleet-host-card > header .fleet-network-value.warn { color: var(--network-warning); }
+.fleet-host-card > header .fleet-network-value.orange { color: var(--network-orange); }
 .fleet-host-card > header .fleet-network-value.bad { color: var(--danger-text); }
 .fleet-host-card > header .fleet-network-value.muted { color: var(--muted); }
+
+/* Keep the current value aligned to the right and the fixed probe window below it. */
+.fleet-host-card > header .fleet-network-metric {
+  min-height: 70px;
+  align-content: start;
+  gap: 8px;
+}
+.fleet-host-card > header .fleet-network-metric-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.fleet-host-card > header .fleet-network-metric-head small {
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+.fleet-host-card > header .fleet-network-metric-head .fleet-network-value {
+  flex: 0 0 auto;
+  font: 700 clamp(21px, 2.15vw, 30px)/1.08 "IBM Plex Mono", monospace;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.fleet-host-card > header .fleet-network-bars {
+  display: grid;
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+}
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar {
+  display: block;
+  width: auto;
+  height: 18px;
+  min-width: 0;
+  border: 0;
+  border-radius: 1px;
+  box-shadow: none;
+  background: var(--muted-2);
+  opacity: .45;
+}
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar.good { background: var(--jade); opacity: 1; }
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar.warn { background: var(--network-warning); opacity: 1; }
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar.orange { background: var(--network-orange); opacity: 1; }
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar.bad { background: var(--danger-text); opacity: 1; }
+.fleet-host-card > header .fleet-network-bars .fleet-network-bar.muted { background: var(--muted-2); opacity: .45; }
+
+@media (max-width: 700px) {
+  .fleet-host-card > header .fleet-network-metric { padding: 8px 0; background: transparent; }
+  .fleet-host-card > header .fleet-network-metric + .fleet-network-metric { padding-left: 13px; }
+}

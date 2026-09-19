@@ -163,12 +163,18 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
+export interface FleetNetworkSample {
+  latencyMs: number
+  packetsSent: number
+  packetsReceived: number
+}
 export interface FleetNetworkHealth {
   status: 'ok' | 'error' | string
   latencyMs: number
   packetLossPct: number
   packetsSent: number
   packetsReceived: number
+  samples?: FleetNetworkSample[]
   checkedAt?: string
   error?: string
 }
