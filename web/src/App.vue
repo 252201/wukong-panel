@@ -165,7 +165,7 @@ const networkHistorySlots = computed<(NetworkSample | null)[]>(() => {
 })
 const networkHistoryCount = computed(() => networkHistorySlots.value.filter(Boolean).length)
 function networkHistoryTone(sample: NetworkSample | null, metric: 'latency' | 'loss') {
-  if (!sample) return 'empty'
+  if (!sample) return 'network-history-empty'
   if (sample.status === 'error' || !sample.packetsSent) return 'unavailable'
   if (metric === 'latency') {
     if (!sample.packetsReceived || sample.latencyMs >= 200) return 'bad'

@@ -272,7 +272,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .network-history-bars i { display: block; min-width: 0; border-radius: 1px; cursor: help; }
 .network-history-bars i.good { background: var(--jade); }.network-history-bars i.warn { background: var(--gold); }.network-history-bars i.bad { background: var(--cinnabar); }
 .network-history-bars i.partial { background: repeating-linear-gradient(135deg, var(--gold) 0 3px, var(--muted-2) 3px 5px); }
-.network-history-bars i.unavailable { background: var(--muted-2); opacity: .72; }.network-history-bars i.empty { background: rgba(var(--wash-rgb), .09); }
+.network-history-bars i.unavailable { background: var(--muted-2); opacity: .72; }.network-history-bars i.network-history-empty { background: rgba(var(--wash-rgb), .09); }
 
 .trend-card { margin-top: 18px; padding: 22px 24px 17px; }
 .card-head > div { display: flex; align-items: center; gap: 12px; }.card-head h3, .card-head p { margin: 0; }.card-head h3 { font-size: 15px; }.card-head p { margin-top: 3px; color: var(--muted-2); font-size: 10px; letter-spacing: .05em; }
