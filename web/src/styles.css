@@ -244,7 +244,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .quota-ring > div { position: relative; z-index: 1; display: grid; justify-items: center; }
 .quota-ring small { color: var(--muted); font-size: 12px; }.quota-ring strong { margin: 3px 0; font: 600 46px/1 "IBM Plex Mono", monospace; }.quota-ring sup { color: var(--gold); font-size: 16px; }.quota-ring span { color: var(--muted); font: 500 11px "IBM Plex Mono", monospace; }
 .oracle-meta { display: flex; justify-content: center; gap: 30px; color: var(--muted-2); font-size: 11px; }.oracle-meta b { display: block; margin-top: 3px; color: var(--text-detail); font: 500 12px "IBM Plex Mono", monospace; }
-.stat-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto minmax(128px, 1fr); gap: 18px; }
+.stat-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(max-content, 1fr)); gap: 18px; }
 .metric-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 142px), 1fr)); align-content: center; column-gap: 12px; min-width: 0; padding: 14px; background: var(--panel); border: 1px solid var(--line); container-type: inline-size; }
 .metric-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 0; }
 .metric-row + .metric-row { position: relative; padding-left: 12px; }
