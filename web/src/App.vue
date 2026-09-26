@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NetworkSample, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NetworkHealth, type NetworkSample, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
@@ -129,13 +129,16 @@ const quotaRing = computed(() => ({ '--progress': `${trafficPercent.value * 3.6}
 const networkHealth = computed(() => overview.value?.network)
 type NetworkGroupName = 'international' | 'domestic'
 const networkGroups: NetworkGroupName[] = ['international', 'domestic']
-function networkGroup(group: NetworkGroupName): NetworkGroupHealth | undefined {
-  const health = networkHealth.value
+const networkMetrics = ['latency', 'loss'] as const
+function networkGroupFrom(health: NetworkHealth | undefined, group: NetworkGroupName): NetworkGroupHealth | undefined {
   if (!health) return undefined
   if (group === 'domestic') return health.domestic
   if (health.international) return health.international
   // Only label a legacy flat result as international when its targets are known.
   return health.targets?.length && health.targets.every(target => target === '1.1.1.1' || target === '8.8.8.8') ? health : undefined
+}
+function networkGroup(group: NetworkGroupName): NetworkGroupHealth | undefined {
+  return networkGroupFrom(networkHealth.value, group)
 }
 function networkGroupLabel(group: NetworkGroupName) {
   return group === 'international' ? (language.value === 'en-US' ? 'International' : '国际') : (language.value === 'en-US' ? 'Domestic' : '国内')
@@ -166,9 +169,8 @@ function networkHistoryLabel(group: NetworkGroupName) {
   if (networkState(group) === 'error') return english ? 'ICMP unavailable' : 'ICMP 不可用'
   return english ? 'Last 30 minutes' : '近 30 分钟'
 }
-function networkHistorySlots(group: NetworkGroupName): (NetworkSample | null)[] {
+function historySlotsFor(health: NetworkGroupHealth | undefined): (NetworkSample | null)[] {
   const slots: (NetworkSample | null)[] = Array(30).fill(null)
-  const health = networkGroup(group)
   if (!health) return slots
   const samples = health.history?.length ? health.history : [health]
   const now = Date.now()
@@ -179,6 +181,7 @@ function networkHistorySlots(group: NetworkGroupName): (NetworkSample | null)[] 
   }
   return slots
 }
+function networkHistorySlots(group: NetworkGroupName) { return historySlotsFor(networkGroup(group)) }
 function networkHistoryCount(group: NetworkGroupName) { return networkHistorySlots(group).filter(Boolean).length }
 function networkHistoryTone(sample: NetworkSample | null, metric: 'latency' | 'loss') {
   if (!sample) return 'network-history-empty'
@@ -215,6 +218,58 @@ function networkLossTone(group: NetworkGroupName) {
   const health = networkGroup(group)
   if (!networkReadable(group) || !health) return 'muted'
   return health.packetLossPct >= 5 ? 'bad' : health.packetLossPct > 0 ? 'warn' : 'good'
+}
+function fleetNetworkGroup(host: FleetHost, group: NetworkGroupName) {
+  return networkGroupFrom(host.snapshot?.overview?.network, group)
+}
+function fleetNetworkState(host: FleetHost, group: NetworkGroupName) {
+  if (!host.online) return 'offline'
+  const health = fleetNetworkGroup(host, group)
+  if (!health) return 'pending'
+  const checkedAt = Date.parse(health.checkedAt)
+  if (!Number.isFinite(checkedAt) || Date.now() - checkedAt > 150_000) return 'stale'
+  return health.status
+}
+function fleetNetworkReadable(host: FleetHost, group: NetworkGroupName) {
+  const state = fleetNetworkState(host, group)
+  return state === 'ok' || state === 'partial'
+}
+function fleetNetworkValue(host: FleetHost, group: NetworkGroupName, metric: 'latency' | 'loss') {
+  const health = fleetNetworkGroup(host, group)
+  if (!fleetNetworkReadable(host, group) || !health) return '—'
+  if (metric === 'loss') return `${health.packetLossPct.toFixed(1)}%`
+  return health.packetsReceived ? `${health.latencyMs.toFixed(1)} ms` : (language.value === 'en-US' ? 'No reply' : '无响应')
+}
+function fleetNetworkTone(host: FleetHost, group: NetworkGroupName, metric: 'latency' | 'loss') {
+  const health = fleetNetworkGroup(host, group)
+  if (!fleetNetworkReadable(host, group) || !health) return 'muted'
+  if (metric === 'loss') return health.packetLossPct >= 5 ? 'bad' : health.packetLossPct > 0 ? 'warn' : 'good'
+  if (!health.packetsReceived || health.latencyMs >= 200) return 'bad'
+  return health.latencyMs >= 100 ? 'warn' : 'good'
+}
+function fleetNetworkHistorySlots(host: FleetHost, group: NetworkGroupName) {
+  return historySlotsFor(fleetNetworkGroup(host, group))
+}
+function fleetNetworkHistoryCount(host: FleetHost, group: NetworkGroupName) {
+  return fleetNetworkHistorySlots(host, group).filter(Boolean).length
+}
+function fleetNetworkStateLabel(host: FleetHost, group: NetworkGroupName) {
+  const english = language.value === 'en-US'
+  switch (fleetNetworkState(host, group)) {
+    case 'offline': return english ? 'Offline' : '离线'
+    case 'pending': return english ? 'No sample' : '未采样'
+    case 'stale': return english ? 'Stale' : '已过期'
+    case 'error': return english ? 'Unavailable' : '不可用'
+    default: return `${fleetNetworkHistoryCount(host, group)}/30`
+  }
+}
+function fleetNetworkHint(host: FleetHost, group: NetworkGroupName) {
+  const health = fleetNetworkGroup(host, group)
+  const state = fleetNetworkState(host, group)
+  if (state === 'offline') return language.value === 'en-US' ? 'Host offline' : '主机离线'
+  if (state === 'pending') return language.value === 'en-US' ? 'Waiting for probe' : '等待首次采样'
+  if (state === 'stale') return language.value === 'en-US' ? 'Stale sample' : '采样已过期'
+  return health?.error || health?.targets?.join(' / ') || 'ICMP'
 }
 const chartPeak = computed(() => Math.max(0, ...(overview.value?.history || []).flatMap(row => [row.rxBps, row.txBps])))
 function makeChartPath(field: 'rxBps' | 'txBps') {
@@ -927,7 +982,34 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <div v-if="page === 'fleet'" class="page-content fleet-page">
         <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><button class="primary" @click="createFleetEnrollment">＋ 接入 VPS</button></div>
         <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>平均 CPU</small><strong>{{ fleetAggregate.cpu.toFixed(1) }}<span>%</span></strong><em>仅统计在线主机</em></article><article><small>聚合内存</small><strong>{{ bytes(fleetAggregate.memoryUsed) }}</strong><em>/ {{ bytes(fleetAggregate.memoryTotal) }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }} · {{ fleetAggregate.nodes }} 节点</em></article></section>
-        <section class="fleet-host-grid"><article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }"><header><div><i></i><span><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div><em><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em></header><div class="fleet-host-metrics"><span><small>CPU</small><b class="fleet-cpu-value">{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}% <small class="fleet-cpu-load">· 负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</small></b></span><span><small>内存</small><b class="fleet-resource-value">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0) }}</b><small class="fleet-resource-percent">{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0) }}</small></span><span><small>磁盘</small><b class="fleet-resource-value">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><small class="fleet-resource-percent">{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</small></span><span><small>本账期流量</small><b class="fleet-resource-value">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><small class="fleet-resource-percent">{{ fleetBillingPercent(host.snapshot?.overview) }}</small></span></div><footer><span>Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }} · sing-box {{ host.singBoxVersion || '—' }}</span><div><button @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer><p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p></article></section>
+        <section class="fleet-host-grid">
+          <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
+            <header>
+              <div><i></i><span><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <em><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+            </header>
+            <div class="fleet-host-body">
+              <section class="fleet-resource-grid" aria-label="主机资源">
+                <div class="fleet-resource"><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b><em>负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</em></div>
+                <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0) }}</em></div>
+                <div class="fleet-resource"><small>磁盘</small><b :title="resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</em></div>
+                <div class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
+              </section>
+              <section class="fleet-host-network" aria-label="网络质量">
+                <div class="fleet-network-heading"><strong>网络质量</strong><small>ICMP · 近 30 分钟</small></div>
+                <div v-for="group in networkGroups" :key="group" class="fleet-network-group" :title="fleetNetworkHint(host, group)">
+                  <div class="fleet-network-summary">
+                    <div class="fleet-network-region"><strong>{{ networkGroupLabel(group) }}</strong><small>{{ fleetNetworkStateLabel(host, group) }}</small></div>
+                    <dl><div v-for="metric in networkMetrics" :key="metric"><dt>{{ metric === 'latency' ? '延迟' : '丢包' }}</dt><dd :class="fleetNetworkTone(host, group, metric)">{{ fleetNetworkValue(host, group, metric) }}</dd></div></dl>
+                  </div>
+                  <div v-for="metric in networkMetrics" :key="metric" class="fleet-network-track"><span>{{ metric === 'latency' ? '延迟' : '丢包' }}</span><div class="network-history-bars" role="img" :aria-label="`${networkGroupLabel(group)}${metric === 'latency' ? '延迟' : '丢包'}近 30 分钟历史`"><i v-for="(sample, index) in fleetNetworkHistorySlots(host, group)" :key="index" :class="networkHistoryTone(sample, metric)" :title="networkHistoryTitle(sample, metric, group)"></i></div></div>
+                </div>
+              </section>
+            </div>
+            <footer><span>Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }} · sing-box {{ host.singBoxVersion || '—' }}</span><div><button @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer>
+            <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
+          </article>
+        </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
         <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
         <section v-if="enrollmentCommand" class="panel-card enrollment-card"><div><span class="section-mark">令</span><div><h3>一次性接入命令</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div><button @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>在远端 VPS 以 root 执行。Agent 只会主动连接上方可信 HTTPS 主控，不开放公网管理端口。</small><div class="enrollment-leave"><div class="enrollment-leave-head"><div class="enrollment-leave-title"><span class="section-mark red">撤</span><div><h4>取消中央接入</h4><p>仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
