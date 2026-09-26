@@ -21,6 +21,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/netcheck"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/store"
 )
@@ -42,6 +43,7 @@ type FleetConnector struct {
 	token      string
 	store      *store.Store
 	manager    *Manager
+	network    *netcheck.Service
 	version    string
 	http       *http.Client
 	mutate     sync.Mutex
@@ -71,12 +73,12 @@ func LoadFleetClientConfig(cfg config.Config) (FleetClientConfig, string, error)
 	return client, strings.TrimSpace(string(token)), nil
 }
 
-func NewFleetConnector(cfg config.Config, s *store.Store, manager *Manager, version string) (*FleetConnector, error) {
+func NewFleetConnector(cfg config.Config, s *store.Store, manager *Manager, version string, network *netcheck.Service) (*FleetConnector, error) {
 	client, token, err := LoadFleetClientConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, version: version, http: NewTrustedFleetHTTPClient(40 * time.Second)}, nil
+	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, network: network, version: version, http: NewTrustedFleetHTTPClient(40 * time.Second)}, nil
 }
 
 func NewTrustedFleetHTTPClient(timeout time.Duration) *http.Client {
@@ -254,6 +256,9 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 		}
 	}
 	snapshot := model.FleetSnapshot{Full: full, Overview: model.Overview{Now: now, Devices: devices, Processes: processes, ProcessCount: count, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: usedRX + usedTX, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: c.manager.Version(ctx), PanelVersion: c.version}, Nodes: nodes}
+	if c.network != nil {
+		snapshot.Overview.Network = c.network.Current()
+	}
 	if !full {
 		for index := range snapshot.Nodes {
 			node := snapshot.Nodes[index]

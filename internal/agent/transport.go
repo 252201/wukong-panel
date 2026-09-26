@@ -16,16 +16,18 @@ import (
 	"time"
 
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/netcheck"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
 )
 
 type Server struct {
 	manager *Manager
 	token   string
+	network *netcheck.Service
 }
 
-func NewServer(manager *Manager, token string) *Server {
-	return &Server{manager: manager, token: token}
+func NewServer(manager *Manager, token string, network *netcheck.Service) *Server {
+	return &Server{manager: manager, token: token, network: network}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
@@ -48,6 +50,7 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /health", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.manager.Version(r.Context())})
 	}))
+	mux.HandleFunc("GET /network-health", s.authorize(s.networkHealth))
 	mux.HandleFunc("GET /scan", s.authorize(s.scan))
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))
 	mux.HandleFunc("POST /import", s.authorize(s.importNodes))
@@ -74,6 +77,10 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	return server.Serve(listener)
+}
+
+func (s *Server) networkHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.network.Current())
 }
 
 func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
@@ -322,6 +329,11 @@ func (c *Client) request(ctx context.Context, method, path string, body any, out
 func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.request(ctx, "GET", "/health", nil, &result)
+	return result, err
+}
+func (c *Client) NetworkHealth(ctx context.Context) (*model.NetworkHealth, error) {
+	var result *model.NetworkHealth
+	err := c.request(ctx, "GET", "/network-health", nil, &result)
 	return result, err
 }
 func (c *Client) Scan(ctx context.Context) ([]model.NodeCandidate, error) {

@@ -126,6 +126,44 @@ const trafficPercent = computed(() => {
   return Math.min(100, data.trafficUsed / data.trafficQuota * 100)
 })
 const quotaRing = computed(() => ({ '--progress': `${trafficPercent.value * 3.6}deg` }))
+const networkHealth = computed(() => overview.value?.network)
+const networkState = computed(() => {
+  if (remoteHost.value && !currentFleetHost.value?.online) return 'offline'
+  const health = networkHealth.value
+  if (!health) return 'pending'
+  const checkedAt = Date.parse(health.checkedAt)
+  if (!Number.isFinite(checkedAt) || Date.now() - checkedAt > 150_000) return 'stale'
+  return health.status
+})
+const networkReadable = computed(() => networkState.value === 'ok' || networkState.value === 'partial')
+const networkLatency = computed(() => {
+  if (!networkReadable.value) return '—'
+  return networkHealth.value?.packetsReceived ? networkHealth.value.latencyMs.toFixed(1) : (language.value === 'en-US' ? 'No reply' : '无响应')
+})
+const networkLoss = computed(() => networkReadable.value ? (networkHealth.value?.packetLossPct || 0).toFixed(1) : '—')
+const networkTargets = computed(() => networkHealth.value?.targets?.join(' / ') || '—')
+const networkNote = computed(() => {
+  const english = language.value === 'en-US'
+  const health = networkHealth.value
+  if (networkState.value === 'offline') return english ? 'Host offline' : '主机离线'
+  if (networkState.value === 'pending') return english ? 'Waiting for local probe' : '等待本机首次采样'
+  if (networkState.value === 'stale') return english ? 'Probe data is stale' : '采样数据已过期'
+  if (networkState.value === 'error') return english ? 'ICMP unavailable' : 'ICMP 不可用'
+  if (!health) return '—'
+  const count = `${health.packetsReceived}/${health.packetsSent}`
+  if (health.demo) return english ? `Demo · ${count} replies` : `演示数据 · 回包 ${count}`
+  if (networkState.value === 'partial') return english ? `Partial failure · ${count} replies` : `部分目标异常 · 回包 ${count}`
+  return english ? `${count} replies · every 60s` : `回包 ${count} · 每 60 秒`
+})
+const networkLatencyTone = computed(() => {
+  if (!networkReadable.value) return 'muted'
+  if (!networkHealth.value?.packetsReceived) return 'bad'
+  return (networkHealth.value.latencyMs || 0) >= 200 ? 'bad' : (networkHealth.value.latencyMs || 0) >= 100 ? 'warn' : 'good'
+})
+const networkLossTone = computed(() => {
+  if (!networkReadable.value) return 'muted'
+  return (networkHealth.value?.packetLossPct || 0) >= 5 ? 'bad' : (networkHealth.value?.packetLossPct || 0) > 0 ? 'warn' : 'good'
+})
 const chartPeak = computed(() => Math.max(0, ...(overview.value?.history || []).flatMap(row => [row.rxBps, row.txBps])))
 function makeChartPath(field: 'rxBps' | 'txBps') {
   const rows = overview.value?.history || []
@@ -856,8 +894,16 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <div class="metric-row up"><span>↑</span><div><small>实时上传</small><strong>{{ rate(overview?.now.txBps) }}</strong></div></div>
             </article>
             <article class="node-balance"><div><small>节点阵列</small><strong>{{ overview?.onlineNodes || 0 }}<span>/{{ overview?.nodeCount || 0 }}</span></strong></div><div class="node-dots"><i v-for="node in nodes" :key="node.id" :class="node.status"></i></div><p>{{ overview?.onlineNodes === overview?.nodeCount ? '阵列稳定，诸节点皆在位' : '存在离线节点，请检查任务日志' }}</p></article>
-            <article class="panel-card overview-slot" aria-hidden="true"></article>
-            <article class="panel-card overview-slot" aria-hidden="true"></article>
+            <article class="panel-card overview-slot network-card" :title="networkHealth?.error || networkTargets">
+              <div class="network-card-head"><span>网络延迟</span><small>ICMP</small></div>
+              <div class="network-card-value" :class="networkLatencyTone"><strong>{{ networkLatency }}</strong><em v-if="networkReadable && !!networkHealth?.packetsReceived">ms</em></div>
+              <div class="network-card-meta"><span>{{ networkNote }}</span><small :title="networkTargets">VPS → {{ networkTargets }}</small></div>
+            </article>
+            <article class="panel-card overview-slot network-card" :title="networkHealth?.error || networkTargets">
+              <div class="network-card-head"><span>丢包率</span><small>ICMP</small></div>
+              <div class="network-card-value" :class="networkLossTone"><strong>{{ networkLoss }}</strong><em v-if="networkReadable">%</em></div>
+              <div class="network-card-meta"><span>{{ networkNote }}</span><small :title="networkTargets">VPS → {{ networkTargets }}</small></div>
+            </article>
           </div>
         </section>
 

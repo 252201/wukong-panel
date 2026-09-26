@@ -49,6 +49,7 @@ export interface Metric {
 
 export interface Overview {
   now: Metric
+  network?: NetworkHealth
   history: Metric[]
   devices: DeviceTraffic[]
   processes: ProcessStat[]
@@ -61,6 +62,18 @@ export interface Overview {
   billingEnd: string
   singBoxVersion: string
   panelVersion: string
+}
+
+export interface NetworkHealth {
+  status: 'ok' | 'partial' | 'error'
+  latencyMs: number
+  packetLossPct: number
+  packetsSent: number
+  packetsReceived: number
+  targets?: string[]
+  checkedAt: string
+  error?: string
+  demo?: boolean
 }
 
 export interface ProcessStat { pid: number; name: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }

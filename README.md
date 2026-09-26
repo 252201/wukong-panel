@@ -27,6 +27,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
+- 网络质量：各 VPS 的 Root Agent 每约 60 秒向公网 IPv4 目标执行 5 次/目标 ICMP Echo，取成功回包的 RTT 中位数和实际发包的丢包比例；总览的两张卡片显示当前所选 VPS 的结果。默认目标为 `1.1.1.1,8.8.8.8`，可通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置最多 4 个 IPv4 地址。ICMP 被禁止时显示不可用；此指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。

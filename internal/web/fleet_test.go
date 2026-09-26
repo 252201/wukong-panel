@@ -23,6 +23,15 @@ func (fleetHealthAgent) Health(context.Context) (map[string]any, error) {
 	return map[string]any{"version": "1.13.14"}, nil
 }
 
+type networkTestAgent struct {
+	fleetHealthAgent
+	health model.NetworkHealth
+}
+
+func (a networkTestAgent) NetworkHealth(context.Context) (*model.NetworkHealth, error) {
+	return &a.health, nil
+}
+
 func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -61,6 +70,34 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 	}
 	if local.Snapshot.Overview.BillingStart == "" || local.Snapshot.Overview.BillingEnd == "" {
 		t.Fatalf("local snapshot billing period=%q..%q", local.Snapshot.Overview.BillingStart, local.Snapshot.Overview.BillingEnd)
+	}
+}
+
+func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
+	server, _ := fleetWebTestServer(t)
+	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC()}
+	server.agent = networkTestAgent{health: want}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	recorder := httptest.NewRecorder()
+	server.overview(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var overview model.Overview
+	if err := json.Unmarshal(recorder.Body.Bytes(), &overview); err != nil {
+		t.Fatal(err)
+	}
+	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct {
+		t.Fatalf("overview network=%+v", overview.Network)
+	}
+
+	status, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived {
+		t.Fatalf("fleet local network=%+v", status.Hosts)
 	}
 }
 

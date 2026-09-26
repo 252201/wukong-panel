@@ -257,6 +257,16 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .node-balance small { color: var(--muted); font-size: 11px; }.node-balance strong { display: block; font: 600 34px "IBM Plex Mono", monospace; }.node-balance strong span { color: var(--muted-2); font-size: 17px; }.node-balance p { grid-column: 1/-1; margin: 0; color: var(--muted); font-size: 12px; }.node-dots { display: flex; gap: 9px; align-items: center; }.node-dots i { width: 12px; height: 12px; border: 2px solid var(--switch-track); border-radius: 50%; }.node-dots i.active { border-color: var(--jade); box-shadow: inset 0 0 0 2px var(--panel), 0 0 12px rgba(82,182,144,.45); background: var(--jade); }.node-dots i.inactive { border-color: var(--cinnabar); }
 .node-balance .node-dots { flex-wrap: wrap; min-width: 0; }
 .overview-slot { min-height: 128px; }
+.network-card { display: flex; flex-direction: column; justify-content: space-between; gap: 7px; min-width: 0; padding: 15px 18px; overflow: hidden; }
+.network-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.network-card-head small { color: var(--muted-2); font: 500 9px "IBM Plex Mono", monospace; }
+.network-card-value { display: flex; align-items: baseline; gap: 4px; min-width: 0; line-height: 1; }
+.network-card-value strong { font: 600 clamp(26px, 2.4vw, 38px)/1 "IBM Plex Mono", monospace; white-space: nowrap; }
+.network-card-value em { font: 500 13px "IBM Plex Mono", monospace; font-style: normal; }
+.network-card-value.good { color: var(--jade-text); }.network-card-value.warn { color: var(--gold); }.network-card-value.bad { color: var(--danger-text); }.network-card-value.muted { color: var(--muted); }
+.network-card-meta { display: grid; gap: 3px; min-width: 0; color: var(--muted); font-size: 10px; }
+.network-card-meta span, .network-card-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-card-meta small { color: var(--muted-2); font: 500 9px "IBM Plex Mono", monospace; }
 
 .trend-card { margin-top: 18px; padding: 22px 24px 17px; }
 .card-head > div { display: flex; align-items: center; gap: 12px; }.card-head h3, .card-head p { margin: 0; }.card-head h3 { font-size: 15px; }.card-head p { margin-top: 3px; color: var(--muted-2); font-size: 10px; letter-spacing: .05em; }
