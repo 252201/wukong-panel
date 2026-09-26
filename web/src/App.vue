@@ -851,9 +851,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <div class="oracle-meta"><span>距离重置 <b>{{ overview?.billingEnd || '—' }}</b></span><span>出口网卡 <b>{{ overview?.now.interface || '—' }}</b></span></div>
           </article>
           <div class="stat-column">
-            <article class="metric-card down"><span>↓</span><div><small>实时下载</small><strong>{{ rate(overview?.now.rxBps) }}</strong></div><em>DOWNLINK</em></article>
-            <article class="metric-card up"><span>↑</span><div><small>实时上传</small><strong>{{ rate(overview?.now.txBps) }}</strong></div><em>UPLINK</em></article>
+            <article class="metric-card">
+              <div class="metric-row down"><span>↓</span><div><small>实时下载</small><strong>{{ rate(overview?.now.rxBps) }}</strong></div></div>
+              <div class="metric-row up"><span>↑</span><div><small>实时上传</small><strong>{{ rate(overview?.now.txBps) }}</strong></div></div>
+            </article>
             <article class="node-balance"><div><small>节点阵列</small><strong>{{ overview?.onlineNodes || 0 }}<span>/{{ overview?.nodeCount || 0 }}</span></strong></div><div class="node-dots"><i v-for="node in nodes" :key="node.id" :class="node.status"></i></div><p>{{ overview?.onlineNodes === overview?.nodeCount ? '阵列稳定，诸节点皆在位' : '存在离线节点，请检查任务日志' }}</p></article>
+            <article class="panel-card overview-slot" aria-hidden="true"></article>
+            <article class="panel-card overview-slot" aria-hidden="true"></article>
           </div>
         </section>
 
