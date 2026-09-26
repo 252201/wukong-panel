@@ -42,6 +42,8 @@ const english: Record<string, string> = {
   '从一束流量，到一方节点。部署、管理与观测，在同一座控制台完成。': 'From traffic to every node—deploy, manage, and observe it all from one control plane.',
   '种协议驱动': 'protocols',
   '实时采样': 'live sampling',
+  '网络延迟': 'Network latency',
+  '丢包率': 'Packet loss',
   '单机自治': 'standalone control',
   '悟空面板': 'Wukong Panel',
   '进入控制台': 'Enter the console',

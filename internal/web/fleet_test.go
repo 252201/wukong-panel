@@ -23,6 +23,15 @@ func (fleetHealthAgent) Health(context.Context) (map[string]any, error) {
 	return map[string]any{"version": "1.13.14"}, nil
 }
 
+type networkTestAgent struct {
+	fleetHealthAgent
+	health model.NetworkHealth
+}
+
+func (a networkTestAgent) NetworkHealth(context.Context) (*model.NetworkHealth, error) {
+	return &a.health, nil
+}
+
 func fleetWebTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -61,6 +70,34 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 	}
 	if local.Snapshot.Overview.BillingStart == "" || local.Snapshot.Overview.BillingEnd == "" {
 		t.Fatalf("local snapshot billing period=%q..%q", local.Snapshot.Overview.BillingStart, local.Snapshot.Overview.BillingEnd)
+	}
+}
+
+func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
+	server, _ := fleetWebTestServer(t)
+	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC(), History: []model.NetworkSample{{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC()}}}
+	server.agent = networkTestAgent{health: want}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	recorder := httptest.NewRecorder()
+	server.overview(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var overview model.Overview
+	if err := json.Unmarshal(recorder.Body.Bytes(), &overview); err != nil {
+		t.Fatal(err)
+	}
+	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct || len(overview.Network.History) != 1 {
+		t.Fatalf("overview network=%+v", overview.Network)
+	}
+
+	status, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived || len(status.Hosts[0].Snapshot.Overview.Network.History) != 1 {
+		t.Fatalf("fleet local network=%+v", status.Hosts)
 	}
 }
 
@@ -233,7 +270,8 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 	if replayRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("replay status=%d", replayRecorder.Code)
 	}
-	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{ProtocolVersion: 1, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix(), CPU: 18}}, Nodes: []model.Node{{ID: "node-a", Name: "A", Status: "active"}}}})
+	networkSample := model.NetworkSample{Status: "ok", LatencyMS: 42, PacketsSent: 10, PacketsReceived: 10, CheckedAt: time.Now().UTC()}
+	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{ProtocolVersion: 1, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix(), CPU: 18}, Network: &model.NetworkHealth{Status: "ok", LatencyMS: 42, History: []model.NetworkSample{networkSample}}}, Nodes: []model.Node{{ID: "node-a", Name: "A", Status: "active"}}}})
 	heartbeat := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/heartbeat", bytes.NewReader(heartbeatBody))
 	heartbeat.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
 	heartbeat.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
@@ -243,7 +281,7 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 		t.Fatalf("heartbeat status=%d body=%s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
 	}
 	host, err := database.FleetHost(enrolled.HostID)
-	if err != nil || !host.Online || host.Snapshot.Nodes[0].ID != "node-a" {
+	if err != nil || !host.Online || host.Snapshot.Nodes[0].ID != "node-a" || host.Snapshot.Overview.Network == nil || len(host.Snapshot.Overview.Network.History) != 1 || host.Snapshot.Overview.Network.History[0].LatencyMS != 42 {
 		t.Fatalf("host=%+v err=%v", host, err)
 	}
 }

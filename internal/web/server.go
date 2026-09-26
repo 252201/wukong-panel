@@ -55,6 +55,10 @@ type socksExitAgent interface {
 	RemoveSOCKSExit(context.Context, model.SOCKSExitDeleteRequest) error
 }
 
+type networkHealthAgent interface {
+	NetworkHealth(context.Context) (*model.NetworkHealth, error)
+}
+
 type Server struct {
 	cfg              config.Config
 	store            *store.Store
@@ -239,7 +243,11 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, session store.
 		used = rx + tx
 	}
 	version := s.singBoxVersion(r.Context())
-	writeJSON(w, 200, model.Overview{Now: now, History: metrics, Devices: devices, Processes: processes, ProcessCount: processCount, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version})
+	response := model.Overview{Now: now, History: metrics, Devices: devices, Processes: processes, ProcessCount: processCount, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: used, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: start.Format("2006-01-02"), BillingEnd: end.Format("2006-01-02"), SingBoxVersion: version, PanelVersion: s.version}
+	if source, ok := s.agent.(networkHealthAgent); ok {
+		response.Network, _ = source.NetworkHealth(r.Context())
+	}
+	writeJSON(w, 200, response)
 }
 
 func (s *Server) singBoxVersion(ctx context.Context) string {

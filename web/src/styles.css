@@ -244,14 +244,35 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .quota-ring > div { position: relative; z-index: 1; display: grid; justify-items: center; }
 .quota-ring small { color: var(--muted); font-size: 12px; }.quota-ring strong { margin: 3px 0; font: 600 46px/1 "IBM Plex Mono", monospace; }.quota-ring sup { color: var(--gold); font-size: 16px; }.quota-ring span { color: var(--muted); font: 500 11px "IBM Plex Mono", monospace; }
 .oracle-meta { display: flex; justify-content: center; gap: 30px; color: var(--muted-2); font-size: 11px; }.oracle-meta b { display: block; margin-top: 3px; color: var(--text-detail); font: 500 12px "IBM Plex Mono", monospace; }
-.stat-column { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.metric-card { position: relative; display: flex; align-items: center; gap: 16px; min-height: 134px; padding: 24px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }
-.metric-card::after { content: attr(class); position: absolute; right: -15px; bottom: -18px; font: 700 62px "IBM Plex Mono", monospace; color: rgba(var(--wash-rgb),.018); text-transform: uppercase; }
-.metric-card > span { display: grid; place-items: center; width: 41px; height: 41px; border: 1px solid currentColor; border-radius: 50%; font: 400 19px "IBM Plex Mono", monospace; }
-.metric-card.down > span { color: var(--jade); }.metric-card.up > span { color: var(--cinnabar); }
-.metric-card small, .metric-card strong { display: block; }.metric-card small { margin-bottom: 7px; color: var(--muted); font-size: 11px; }.metric-card strong { font: 600 clamp(19px,2vw,26px) "IBM Plex Mono", monospace; }.metric-card em { position: absolute; right: 13px; top: 13px; color: var(--muted-2); font: 500 9px "IBM Plex Mono", monospace; font-style: normal; letter-spacing: .1em; }
-.node-balance { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px 28px; padding: 24px; background: linear-gradient(105deg, var(--surface-card-start), var(--surface-card-end)); border: 1px solid var(--line); }
+.stat-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(max-content, 1fr)); gap: 18px; }
+.metric-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 142px), 1fr)); align-content: center; column-gap: 12px; min-width: 0; padding: 14px; background: var(--panel); border: 1px solid var(--line); container-type: inline-size; }
+.metric-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 0; }
+.metric-row + .metric-row { position: relative; padding-left: 12px; }
+.metric-row + .metric-row::before { position: absolute; top: 0; bottom: 0; left: -6px; width: 1px; background: var(--line); content: ""; }
+.metric-row > span { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 1px solid currentColor; border-radius: 50%; font: 400 17px "IBM Plex Mono", monospace; }
+.metric-row.down > span { color: var(--jade); }.metric-row.up > span { color: var(--cinnabar); }
+.metric-row small, .metric-row strong { display: block; }.metric-row small { margin-bottom: 4px; color: var(--muted); font-size: 11px; }.metric-row strong { font: 600 clamp(16px,5cqi,22px) "IBM Plex Mono", monospace; white-space: nowrap; }
+@container (max-width: 295px) { .metric-row + .metric-row { padding-left: 0; border-top: 1px solid var(--line); } .metric-row + .metric-row::before { display: none; } }
+.node-balance { display: grid; grid-template-columns: auto 1fr; align-content: center; align-items: center; gap: 12px 18px; min-width: 0; padding: 20px; background: linear-gradient(105deg, var(--surface-card-start), var(--surface-card-end)); border: 1px solid var(--line); }
 .node-balance small { color: var(--muted); font-size: 11px; }.node-balance strong { display: block; font: 600 34px "IBM Plex Mono", monospace; }.node-balance strong span { color: var(--muted-2); font-size: 17px; }.node-balance p { grid-column: 1/-1; margin: 0; color: var(--muted); font-size: 12px; }.node-dots { display: flex; gap: 9px; align-items: center; }.node-dots i { width: 12px; height: 12px; border: 2px solid var(--switch-track); border-radius: 50%; }.node-dots i.active { border-color: var(--jade); box-shadow: inset 0 0 0 2px var(--panel), 0 0 12px rgba(82,182,144,.45); background: var(--jade); }.node-dots i.inactive { border-color: var(--cinnabar); }
+.node-balance .node-dots { flex-wrap: wrap; min-width: 0; }
+.overview-slot { min-height: 128px; }
+.network-card { display: flex; flex-direction: column; justify-content: space-between; gap: 7px; min-width: 0; padding: 15px 18px; overflow: hidden; }
+.network-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.network-card-head small { color: var(--muted-2); font: 500 9px "IBM Plex Mono", monospace; }
+.network-card-value { display: flex; align-items: baseline; gap: 4px; min-width: 0; line-height: 1; }
+.network-card-value strong { font: 600 clamp(26px, 2.4vw, 38px)/1 "IBM Plex Mono", monospace; white-space: nowrap; }
+.network-card-value em { font: 500 13px "IBM Plex Mono", monospace; font-style: normal; }
+.network-card-value.good { color: var(--jade-text); }.network-card-value.warn { color: var(--gold); }.network-card-value.bad { color: var(--danger-text); }.network-card-value.muted { color: var(--muted); }
+.network-card-history { display: grid; gap: 5px; width: 100%; min-width: 0; }
+.network-history-head, .network-history-axis { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font: 500 9px "IBM Plex Mono", monospace; }
+.network-history-head small { color: var(--muted-2); font: inherit; }
+.network-history-axis { color: var(--muted-2); font-size: 8px; }
+.network-history-bars { display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); gap: 2px; min-width: 0; height: 13px; }
+.network-history-bars i { display: block; min-width: 0; border-radius: 1px; cursor: help; }
+.network-history-bars i.good { background: var(--jade); }.network-history-bars i.warn { background: var(--gold); }.network-history-bars i.bad { background: var(--cinnabar); }
+.network-history-bars i.partial { background: repeating-linear-gradient(135deg, var(--gold) 0 3px, var(--muted-2) 3px 5px); }
+.network-history-bars i.unavailable { background: var(--muted-2); opacity: .72; }.network-history-bars i.empty { background: rgba(var(--wash-rgb), .09); }
 
 .trend-card { margin-top: 18px; padding: 22px 24px 17px; }
 .card-head > div { display: flex; align-items: center; gap: 12px; }.card-head h3, .card-head p { margin: 0; }.card-head h3 { font-size: 15px; }.card-head p { margin-top: 3px; color: var(--muted-2); font-size: 10px; letter-spacing: .05em; }
@@ -496,8 +517,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .quota-ring::before { border-color: rgba(242, 138, 11, .2); }
 :root[data-effective-theme="light"] .quota-ring::after { border-color: rgba(242, 138, 11, .16); border-left-color: transparent; border-right-color: transparent; }
-:root[data-effective-theme="light"] .metric-card.down { background: linear-gradient(145deg, #fff, rgba(41, 180, 159, .045)); }
-:root[data-effective-theme="light"] .metric-card.up { background: linear-gradient(145deg, #fff, rgba(240, 95, 103, .045)); }
+:root[data-effective-theme="light"] .metric-card { background: linear-gradient(145deg, rgba(41, 180, 159, .045), #fff 48%, rgba(240, 95, 103, .045)); }
 :root[data-effective-theme="light"] .timeline-switch { border-radius: 7px; background: #f4f6f5; }
 :root[data-effective-theme="light"] .timeline-switch button { border-radius: 4px; }
 :root[data-effective-theme="light"] .timeline-switch button.active { color: #fff; background: linear-gradient(110deg, #ff8510, #ffa42c); }
@@ -586,6 +606,18 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 @media (max-width: 460px) {
   .fleet-scope-hosts > article > div { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 650px) {
+  .stat-column .metric-card { padding: 12px 14px; }
+  .stat-column .metric-row { gap: 8px; }
+  .stat-column .metric-row > span { display: none; }
+  .stat-column .metric-row strong { font-size: 18px; }
+  .stat-column .node-balance { gap: 8px; padding: 12px; }
+  .stat-column .node-balance strong { font-size: 30px; }
+  .stat-column .node-balance strong span { font-size: 14px; }
+  .stat-column .node-dots { gap: 6px; }
+  .stat-column .overview-slot { min-height: 110px; }
 }
 
 /* Align the first resource metric with the disk column below it. */
