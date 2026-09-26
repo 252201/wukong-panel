@@ -28,12 +28,18 @@ const (
 )
 
 const defaultTargets = "1.1.1.1,8.8.8.8"
+const defaultDomesticTargets = "194.138.202.35,159.27.255.225"
+
+const (
+	internationalGroup = "international"
+	domesticGroup      = "domestic"
+)
 
 const historyWindow = 30 * time.Minute
 
 type historyStore interface {
-	AddNetworkSample(model.NetworkSample) error
-	RecentNetworkSamples(time.Time, int) ([]model.NetworkSample, error)
+	AddNetworkSample(string, model.NetworkSample) error
+	RecentNetworkSamples(string, time.Time, int) ([]model.NetworkSample, error)
 }
 
 type targetResult struct {
@@ -48,29 +54,45 @@ type targetProbe func(context.Context, net.IP) targetResult
 // Service keeps one recent outbound ICMP measurement for this VPS. Probes run
 // in the local root agent; the web process only reads the resulting snapshot.
 type Service struct {
-	targets  []net.IP
-	labels   []string
-	setupErr error
-	demo     bool
-	store    historyStore
+	targets          []net.IP
+	labels           []string
+	setupErr         error
+	domesticTargets  []net.IP
+	domesticLabels   []string
+	domesticSetupErr error
+	demo             bool
+	store            historyStore
+	probe            targetProbe
 
-	mu      sync.RWMutex
-	current *model.NetworkHealth
-	history []model.NetworkSample
+	mu              sync.RWMutex
+	current         *model.NetworkHealth
+	history         []model.NetworkSample
+	domesticHistory []model.NetworkSample
 }
 
-func NewService(rawTargets string, demo bool, repository historyStore) *Service {
+func NewService(rawTargets, rawDomesticTargets string, demo bool, repository historyStore) *Service {
 	if strings.TrimSpace(rawTargets) == "" {
 		rawTargets = defaultTargets
 	}
+	if strings.TrimSpace(rawDomesticTargets) == "" {
+		rawDomesticTargets = defaultDomesticTargets
+	}
 	targets, labels, err := parseTargets(rawTargets)
-	service := &Service{targets: targets, labels: labels, setupErr: err, demo: demo, store: repository}
+	domesticTargets, domesticLabels, domesticErr := parseTargets(rawDomesticTargets)
+	service := &Service{targets: targets, labels: labels, setupErr: err,
+		domesticTargets: domesticTargets, domesticLabels: domesticLabels,
+		domesticSetupErr: domesticErr, demo: demo, store: repository, probe: probeTarget}
 	if demo {
-		service.history = demoHistory(time.Now().UTC(), labels)
+		service.history = demoHistory(time.Now().UTC(), labels, false)
+		service.domesticHistory = demoHistory(time.Now().UTC(), domesticLabels, true)
 	} else if repository != nil {
-		service.history, err = repository.RecentNetworkSamples(time.Now().Add(-historyWindow), 60)
+		service.history, err = repository.RecentNetworkSamples(internationalGroup, time.Now().Add(-historyWindow), 60)
 		if err != nil {
-			log.Printf("network history unavailable: %v", err)
+			log.Printf("international network history unavailable: %v", err)
+		}
+		service.domesticHistory, err = repository.RecentNetworkSamples(domesticGroup, time.Now().Add(-historyWindow), 60)
+		if err != nil {
+			log.Printf("domestic network history unavailable: %v", err)
 		}
 	}
 	return service
@@ -111,44 +133,75 @@ func (s *Service) Current() *model.NetworkHealth {
 	}
 	copy := *s.current
 	copy.Targets = append([]string(nil), s.current.Targets...)
-	copy.History = make([]model.NetworkSample, 0, len(s.history))
-	for _, sample := range s.history {
-		if sample.CheckedAt.After(time.Now().Add(-historyWindow)) {
-			item := sample
-			item.Targets = append([]string(nil), sample.Targets...)
-			copy.History = append(copy.History, item)
-		}
+	copy.History = recentCopy(s.history)
+	copy.International = groupHealth(copy, copy.History)
+	if s.current.Domestic != nil {
+		domestic := *s.current.Domestic
+		domestic.Targets = append([]string(nil), domestic.Targets...)
+		domestic.History = recentCopy(s.domesticHistory)
+		copy.Domestic = &domestic
 	}
 	return &copy
 }
 
+func recentCopy(history []model.NetworkSample) []model.NetworkSample {
+	result := make([]model.NetworkSample, 0, len(history))
+	cutoff := time.Now().Add(-historyWindow)
+	for _, sample := range history {
+		if sample.CheckedAt.Before(cutoff) {
+			continue
+		}
+		item := sample
+		item.Targets = append([]string(nil), sample.Targets...)
+		result = append(result, item)
+	}
+	return result
+}
+
+func groupHealth(health model.NetworkHealth, history []model.NetworkSample) *model.NetworkGroupHealth {
+	return &model.NetworkGroupHealth{
+		Status: health.Status, LatencyMS: health.LatencyMS,
+		PacketLossPct: health.PacketLossPct, PacketsSent: health.PacketsSent,
+		PacketsReceived: health.PacketsReceived, Targets: append([]string(nil), health.Targets...),
+		CheckedAt: health.CheckedAt, Error: health.Error, History: history,
+	}
+}
+
 func (s *Service) Run(ctx context.Context) {
 	for ctx.Err() == nil {
-		var health model.NetworkHealth
-		switch {
-		case s.setupErr != nil:
-			health = model.NetworkHealth{Status: "error", Error: s.setupErr.Error(), CheckedAt: time.Now().UTC()}
-		case s.demo:
-			health = model.NetworkHealth{Status: "ok", LatencyMS: 41.8, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), s.labels...), Demo: true}
-		default:
-			health = measure(ctx, s.targets, s.labels, probeTarget)
+		type groupResult struct {
+			name   string
+			health model.NetworkHealth
 		}
-		sample := sampleOf(health)
+		results := make(chan groupResult, 2)
+		go func() {
+			results <- groupResult{internationalGroup, s.measureGroup(ctx, s.targets, s.labels, s.setupErr, false)}
+		}()
+		go func() {
+			results <- groupResult{domesticGroup, s.measureGroup(ctx, s.domesticTargets, s.domesticLabels, s.domesticSetupErr, true)}
+		}()
+		first, second := <-results, <-results
+		international, domestic := first.health, second.health
+		if first.name == domesticGroup {
+			international, domestic = second.health, first.health
+		}
+		domesticGroupHealth := groupHealth(domestic, nil)
+		international.Domestic = domesticGroupHealth
+		international.Demo = s.demo
+		internationalSample := sampleOf(international)
+		domesticSample := sampleOf(domestic)
 		if s.store != nil && !s.demo {
-			if err := s.store.AddNetworkSample(sample); err != nil {
-				log.Printf("network history save failed: %v", err)
+			if err := s.store.AddNetworkSample(internationalGroup, internationalSample); err != nil {
+				log.Printf("international network history save failed: %v", err)
+			}
+			if err := s.store.AddNetworkSample(domesticGroup, domesticSample); err != nil {
+				log.Printf("domestic network history save failed: %v", err)
 			}
 		}
 		s.mu.Lock()
-		s.current = &health
-		s.history = append(s.history, sample)
-		cutoff := health.CheckedAt.Add(-historyWindow)
-		for len(s.history) > 0 && s.history[0].CheckedAt.Before(cutoff) {
-			s.history = s.history[1:]
-		}
-		if len(s.history) > 60 {
-			s.history = s.history[len(s.history)-60:]
-		}
+		s.current = &international
+		s.history = appendRecent(s.history, internationalSample)
+		s.domesticHistory = appendRecent(s.domesticHistory, domesticSample)
 		s.mu.Unlock()
 
 		timer := time.NewTimer(refreshInterval)
@@ -161,6 +214,31 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+func (s *Service) measureGroup(ctx context.Context, targets []net.IP, labels []string, setupErr error, domestic bool) model.NetworkHealth {
+	if setupErr != nil {
+		return model.NetworkHealth{Status: "error", Error: setupErr.Error(), CheckedAt: time.Now().UTC()}
+	}
+	if s.demo {
+		if domestic {
+			return model.NetworkHealth{Status: "ok", LatencyMS: 162.4, PacketLossPct: 0, PacketsSent: 10, PacketsReceived: 10, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...)}
+		}
+		return model.NetworkHealth{Status: "ok", LatencyMS: 41.8, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...)}
+	}
+	return measure(ctx, targets, labels, s.probe)
+}
+
+func appendRecent(history []model.NetworkSample, sample model.NetworkSample) []model.NetworkSample {
+	history = append(history, sample)
+	cutoff := sample.CheckedAt.Add(-historyWindow)
+	for len(history) > 0 && history[0].CheckedAt.Before(cutoff) {
+		history = history[1:]
+	}
+	if len(history) > 60 {
+		history = history[len(history)-60:]
+	}
+	return history
+}
+
 func sampleOf(health model.NetworkHealth) model.NetworkSample {
 	return model.NetworkSample{
 		Status: health.Status, LatencyMS: health.LatencyMS,
@@ -170,17 +248,23 @@ func sampleOf(health model.NetworkHealth) model.NetworkSample {
 	}
 }
 
-func demoHistory(now time.Time, targets []string) []model.NetworkSample {
+func demoHistory(now time.Time, targets []string, domestic bool) []model.NetworkSample {
 	result := make([]model.NetworkSample, 0, 29)
 	for minute := 29; minute >= 1; minute-- {
 		loss := 0.0
-		if minute%11 == 0 {
+		if domestic && minute%19 == 0 {
 			loss = 10
-		} else if minute%7 == 0 {
+		} else if !domestic && minute%11 == 0 {
+			loss = 10
+		} else if !domestic && minute%7 == 0 {
 			loss = 20
 		}
+		latency := float64(35 + (minute*7)%31)
+		if domestic {
+			latency = float64(150 + (minute*7)%31)
+		}
 		result = append(result, model.NetworkSample{
-			Status: "ok", LatencyMS: float64(35 + (minute*7)%31), PacketLossPct: loss,
+			Status: "ok", LatencyMS: latency, PacketLossPct: loss,
 			PacketsSent: 10, PacketsReceived: 10 - int(loss/10),
 			Targets: append([]string(nil), targets...), CheckedAt: now.Add(-time.Duration(minute) * time.Minute),
 		})

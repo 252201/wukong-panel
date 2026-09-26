@@ -75,7 +75,7 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 
 func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	server, _ := fleetWebTestServer(t)
-	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC(), History: []model.NetworkSample{{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC()}}}
+	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC(), History: []model.NetworkSample{{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC()}}, International: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 42.5, Targets: []string{"1.1.1.1"}}, Domestic: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 160, Targets: []string{"194.138.202.35"}, History: []model.NetworkSample{{Status: "ok", LatencyMS: 160, CheckedAt: time.Now().UTC()}}}}
 	server.agent = networkTestAgent{health: want}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
@@ -88,7 +88,7 @@ func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &overview); err != nil {
 		t.Fatal(err)
 	}
-	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct || len(overview.Network.History) != 1 {
+	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct || len(overview.Network.History) != 1 || overview.Network.Domestic == nil || overview.Network.Domestic.LatencyMS != 160 || len(overview.Network.Domestic.History) != 1 {
 		t.Fatalf("overview network=%+v", overview.Network)
 	}
 
@@ -96,7 +96,7 @@ func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived || len(status.Hosts[0].Snapshot.Overview.Network.History) != 1 {
+	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived || len(status.Hosts[0].Snapshot.Overview.Network.History) != 1 || status.Hosts[0].Snapshot.Overview.Network.Domestic == nil || status.Hosts[0].Snapshot.Overview.Network.Domestic.LatencyMS != 160 {
 		t.Fatalf("fleet local network=%+v", status.Hosts)
 	}
 }
@@ -271,7 +271,7 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 		t.Fatalf("replay status=%d", replayRecorder.Code)
 	}
 	networkSample := model.NetworkSample{Status: "ok", LatencyMS: 42, PacketsSent: 10, PacketsReceived: 10, CheckedAt: time.Now().UTC()}
-	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{ProtocolVersion: 1, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix(), CPU: 18}, Network: &model.NetworkHealth{Status: "ok", LatencyMS: 42, History: []model.NetworkSample{networkSample}}}, Nodes: []model.Node{{ID: "node-a", Name: "A", Status: "active"}}}})
+	heartbeatBody, _ := json.Marshal(model.FleetHeartbeat{ProtocolVersion: 1, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix(), CPU: 18}, Network: &model.NetworkHealth{Status: "ok", LatencyMS: 42, History: []model.NetworkSample{networkSample}, Domestic: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 160, History: []model.NetworkSample{{Status: "ok", LatencyMS: 160, CheckedAt: time.Now().UTC()}}}}}, Nodes: []model.Node{{ID: "node-a", Name: "A", Status: "active"}}}})
 	heartbeat := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/heartbeat", bytes.NewReader(heartbeatBody))
 	heartbeat.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
 	heartbeat.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
@@ -281,7 +281,7 @@ func TestFleetAgentEnrollmentHeartbeatAndOneTimeToken(t *testing.T) {
 		t.Fatalf("heartbeat status=%d body=%s", heartbeatRecorder.Code, heartbeatRecorder.Body.String())
 	}
 	host, err := database.FleetHost(enrolled.HostID)
-	if err != nil || !host.Online || host.Snapshot.Nodes[0].ID != "node-a" || host.Snapshot.Overview.Network == nil || len(host.Snapshot.Overview.Network.History) != 1 || host.Snapshot.Overview.Network.History[0].LatencyMS != 42 {
+	if err != nil || !host.Online || host.Snapshot.Nodes[0].ID != "node-a" || host.Snapshot.Overview.Network == nil || len(host.Snapshot.Overview.Network.History) != 1 || host.Snapshot.Overview.Network.History[0].LatencyMS != 42 || host.Snapshot.Overview.Network.Domestic == nil || len(host.Snapshot.Overview.Network.Domestic.History) != 1 || host.Snapshot.Overview.Network.Domestic.LatencyMS != 160 {
 		t.Fatalf("host=%+v err=%v", host, err)
 	}
 }
