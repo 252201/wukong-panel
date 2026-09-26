@@ -629,5 +629,104 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .stat-column .overview-slot { min-height: 110px; }
 }
 
-/* Align the first resource metric with the disk column below it. */
-.fleet-host-metrics span:first-child { padding-left: 13px; }
+/* Fleet cards: resource snapshot and independent network histories share the main canvas. */
+.fleet-host-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  container-type: inline-size;
+}
+.fleet-host-card > header { min-height: 78px; padding-block: 15px; }
+.fleet-host-card > header > div { min-width: 0; }
+.fleet-host-card > header > div > span { min-width: 0; }
+.fleet-host-card > header > div b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-host-body {
+  display: grid;
+  grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+  flex: 1;
+  min-width: 0;
+  padding: 16px 22px 18px;
+}
+.fleet-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  padding-right: 18px;
+}
+.fleet-resource {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 9px 9px 0;
+}
+.fleet-resource:nth-child(even) { padding-left: 13px; border-left: 1px solid var(--line); }
+.fleet-resource:nth-child(n+3) { border-top: 1px solid var(--line); }
+.fleet-resource small { color: var(--muted); font-size: 10px; }
+.fleet-resource b {
+  overflow: hidden;
+  color: var(--paper);
+  font: 600 12px/1.3 "IBM Plex Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-resource:first-child b { font-size: 17px; }
+.fleet-resource em {
+  overflow: hidden;
+  color: var(--gold-muted-text);
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-host-network {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+}
+.fleet-network-heading, .fleet-network-region, .fleet-network-summary, .fleet-network-summary dl {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+.fleet-network-heading strong { color: var(--paper); font-size: 11px; }
+.fleet-network-heading > small, .fleet-network-region small {
+  color: var(--muted-2);
+  font: 500 9px "IBM Plex Mono", monospace;
+}
+.fleet-network-group { display: grid; gap: 5px; min-width: 0; }
+.fleet-network-group + .fleet-network-group { padding-top: 9px; border-top: 1px solid var(--line); }
+.fleet-network-summary { gap: 8px; }
+.fleet-network-region { flex: 0 0 61px; gap: 5px; }
+.fleet-network-region strong { color: var(--text-detail); font-size: 11px; white-space: nowrap; }
+.fleet-network-summary dl { flex: 1; gap: 10px; margin: 0; }
+.fleet-network-summary dl > div { display: flex; align-items: baseline; justify-content: flex-end; gap: 4px; min-width: 0; }
+.fleet-network-summary dt { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.fleet-network-summary dd { margin: 0; font: 600 11px "IBM Plex Mono", monospace; white-space: nowrap; }
+.fleet-network-summary dd.good { color: var(--jade-text); }
+.fleet-network-summary dd.warn { color: var(--gold); }
+.fleet-network-summary dd.bad { color: var(--danger-text); }
+.fleet-network-summary dd.muted { color: var(--muted); }
+.fleet-network-track { display: grid; grid-template-columns: 25px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
+.fleet-network-track > span { color: var(--muted-2); font-size: 9px; }
+.fleet-host-network .network-history-bars { height: 8px; }
+.fleet-host-card footer { margin-top: auto; }
+@container (max-width: 800px) {
+  .fleet-host-body { grid-template-columns: 1fr; gap: 16px; }
+  .fleet-resource-grid { padding-right: 0; }
+  .fleet-resource { min-height: 57px; }
+  .fleet-host-network { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+@container (max-width: 390px) {
+  .fleet-host-card > header { gap: 8px; padding-inline: 15px; }
+  .fleet-host-card > header b { font-size: 13px; }
+  .fleet-host-card > header em { font-size: 9px; }
+  .fleet-host-body { padding-inline: 15px; }
+  .fleet-host-card footer { padding-inline: 15px; }
+}
