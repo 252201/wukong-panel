@@ -281,6 +281,20 @@ type Overview struct {
 // NetworkHealth is measured by the selected VPS, never by the browser or the
 // fleet controller. Loss is based only on ICMP requests that were actually sent.
 type NetworkHealth struct {
+	Status          string          `json:"status"`
+	LatencyMS       float64         `json:"latencyMs"`
+	PacketLossPct   float64         `json:"packetLossPct"`
+	PacketsSent     int             `json:"packetsSent"`
+	PacketsReceived int             `json:"packetsReceived"`
+	Targets         []string        `json:"targets,omitempty"`
+	CheckedAt       time.Time       `json:"checkedAt"`
+	Error           string          `json:"error,omitempty"`
+	Demo            bool            `json:"demo,omitempty"`
+	History         []NetworkSample `json:"history,omitempty"`
+}
+
+// NetworkSample is one completed VPS-local measurement in the recent timeline.
+type NetworkSample struct {
 	Status          string    `json:"status"`
 	LatencyMS       float64   `json:"latencyMs"`
 	PacketLossPct   float64   `json:"packetLossPct"`
@@ -288,8 +302,6 @@ type NetworkHealth struct {
 	PacketsReceived int       `json:"packetsReceived"`
 	Targets         []string  `json:"targets,omitempty"`
 	CheckedAt       time.Time `json:"checkedAt"`
-	Error           string    `json:"error,omitempty"`
-	Demo            bool      `json:"demo,omitempty"`
 }
 
 type Job struct {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkSample, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
@@ -142,19 +142,53 @@ const networkLatency = computed(() => {
 })
 const networkLoss = computed(() => networkReadable.value ? (networkHealth.value?.packetLossPct || 0).toFixed(1) : '—')
 const networkTargets = computed(() => networkHealth.value?.targets?.join(' / ') || '—')
-const networkNote = computed(() => {
+const networkHistoryLabel = computed(() => {
   const english = language.value === 'en-US'
-  const health = networkHealth.value
   if (networkState.value === 'offline') return english ? 'Host offline' : '主机离线'
   if (networkState.value === 'pending') return english ? 'Waiting for local probe' : '等待本机首次采样'
   if (networkState.value === 'stale') return english ? 'Probe data is stale' : '采样数据已过期'
   if (networkState.value === 'error') return english ? 'ICMP unavailable' : 'ICMP 不可用'
-  if (!health) return '—'
-  const count = `${health.packetsReceived}/${health.packetsSent}`
-  if (health.demo) return english ? `Demo · ${count} replies` : `演示数据 · 回包 ${count}`
-  if (networkState.value === 'partial') return english ? `Partial failure · ${count} replies` : `部分目标异常 · 回包 ${count}`
-  return english ? `${count} replies · every 60s` : `回包 ${count} · 每 60 秒`
+  return english ? 'Last 30 minutes' : '近 30 分钟'
 })
+const networkHistorySlots = computed<(NetworkSample | null)[]>(() => {
+  const slots: (NetworkSample | null)[] = Array(30).fill(null)
+  const health = networkHealth.value
+  if (!health) return slots
+  const samples = health.history?.length ? health.history : [health]
+  const now = Date.now()
+  for (const sample of samples) {
+    const age = now - Date.parse(sample.checkedAt)
+    if (!Number.isFinite(age) || age < 0 || age >= 30 * 60_000) continue
+    slots[29 - Math.floor(age / 60_000)] = sample
+  }
+  return slots
+})
+const networkHistoryCount = computed(() => networkHistorySlots.value.filter(Boolean).length)
+function networkHistoryTone(sample: NetworkSample | null, metric: 'latency' | 'loss') {
+  if (!sample) return 'empty'
+  if (sample.status === 'error' || !sample.packetsSent) return 'unavailable'
+  if (metric === 'latency') {
+    if (!sample.packetsReceived || sample.latencyMs >= 200) return 'bad'
+    if (sample.status === 'partial') return 'partial'
+    return sample.latencyMs >= 100 ? 'warn' : 'good'
+  }
+  if (sample.packetLossPct >= 5) return 'bad'
+  if (sample.status === 'partial') return 'partial'
+  return sample.packetLossPct > 0 ? 'warn' : 'good'
+}
+function networkHistoryTitle(sample: NetworkSample | null, metric: 'latency' | 'loss') {
+  const english = language.value === 'en-US'
+  if (!sample) return english ? 'No sample in this minute' : '该分钟没有采样'
+  const time = new Date(sample.checkedAt).toLocaleString(language.value, { hour: '2-digit', minute: '2-digit' })
+  const value = sample.status === 'error' || !sample.packetsSent
+    ? (english ? 'ICMP unavailable' : 'ICMP 不可用')
+    : metric === 'latency'
+      ? (sample.packetsReceived ? `${sample.latencyMs.toFixed(1)} ms` : (english ? 'No reply' : '无响应'))
+      : `${sample.packetLossPct.toFixed(1)}%`
+  const partial = sample.status === 'partial' ? (english ? ' · partial failure' : ' · 部分目标异常') : ''
+  const targets = sample.targets?.length ? ` · ${sample.targets.join(' / ')}` : ''
+  return `${time} · ${value} · ${sample.packetsReceived}/${sample.packetsSent}${partial}${targets}`
+}
 const networkLatencyTone = computed(() => {
   if (!networkReadable.value) return 'muted'
   if (!networkHealth.value?.packetsReceived) return 'bad'
@@ -895,14 +929,14 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </article>
             <article class="node-balance"><div><small>节点阵列</small><strong>{{ overview?.onlineNodes || 0 }}<span>/{{ overview?.nodeCount || 0 }}</span></strong></div><div class="node-dots"><i v-for="node in nodes" :key="node.id" :class="node.status"></i></div><p>{{ overview?.onlineNodes === overview?.nodeCount ? '阵列稳定，诸节点皆在位' : '存在离线节点，请检查任务日志' }}</p></article>
             <article class="panel-card overview-slot network-card" :title="networkHealth?.error || networkTargets">
-              <div class="network-card-head"><span>网络延迟</span><small>ICMP</small></div>
+              <div class="network-card-head"><span>网络延迟</span><small>{{ networkHealth?.demo ? 'DEMO · ' : '' }}ICMP</small></div>
               <div class="network-card-value" :class="networkLatencyTone"><strong>{{ networkLatency }}</strong><em v-if="networkReadable && !!networkHealth?.packetsReceived">ms</em></div>
-              <div class="network-card-meta"><span>{{ networkNote }}</span><small :title="networkTargets">VPS → {{ networkTargets }}</small></div>
+              <div class="network-card-history"><div class="network-history-head"><span>{{ networkHistoryLabel }}</span><small>{{ networkHistoryCount }}/30</small></div><div class="network-history-bars" :aria-label="language === 'en-US' ? 'Latency history for the last 30 minutes' : '近 30 分钟延迟历史'"><i v-for="(sample, index) in networkHistorySlots" :key="index" :class="networkHistoryTone(sample, 'latency')" :title="networkHistoryTitle(sample, 'latency')"></i></div><div class="network-history-axis"><span>30m</span><span>{{ language === 'en-US' ? 'now' : '现在' }}</span></div></div>
             </article>
             <article class="panel-card overview-slot network-card" :title="networkHealth?.error || networkTargets">
-              <div class="network-card-head"><span>丢包率</span><small>ICMP</small></div>
+              <div class="network-card-head"><span>丢包率</span><small>{{ networkHealth?.demo ? 'DEMO · ' : '' }}ICMP</small></div>
               <div class="network-card-value" :class="networkLossTone"><strong>{{ networkLoss }}</strong><em v-if="networkReadable">%</em></div>
-              <div class="network-card-meta"><span>{{ networkNote }}</span><small :title="networkTargets">VPS → {{ networkTargets }}</small></div>
+              <div class="network-card-history"><div class="network-history-head"><span>{{ networkHistoryLabel }}</span><small>{{ networkHistoryCount }}/30</small></div><div class="network-history-bars" :aria-label="language === 'en-US' ? 'Packet loss history for the last 30 minutes' : '近 30 分钟丢包历史'"><i v-for="(sample, index) in networkHistorySlots" :key="index" :class="networkHistoryTone(sample, 'loss')" :title="networkHistoryTitle(sample, 'loss')"></i></div><div class="network-history-axis"><span>30m</span><span>{{ language === 'en-US' ? 'now' : '现在' }}</span></div></div>
             </article>
           </div>
         </section>

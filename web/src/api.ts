@@ -74,6 +74,17 @@ export interface NetworkHealth {
   checkedAt: string
   error?: string
   demo?: boolean
+  history?: NetworkSample[]
+}
+
+export interface NetworkSample {
+  status: 'ok' | 'partial' | 'error'
+  latencyMs: number
+  packetLossPct: number
+  packetsSent: number
+  packetsReceived: number
+  targets?: string[]
+  checkedAt: string
 }
 
 export interface ProcessStat { pid: number; name: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }

@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS metrics (
   disk REAL NOT NULL, disk_used_bytes INTEGER NOT NULL DEFAULT 0, disk_total_bytes INTEGER NOT NULL DEFAULT 0,
   load1 REAL NOT NULL, uptime INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS network_samples (
+  ts INTEGER PRIMARY KEY, status TEXT NOT NULL, latency_ms REAL NOT NULL,
+  packet_loss_pct REAL NOT NULL, packets_sent INTEGER NOT NULL,
+  packets_received INTEGER NOT NULL, targets_json TEXT NOT NULL DEFAULT '[]'
+);
 CREATE TABLE IF NOT EXISTS process_recent (
   pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
   memory_percent REAL NOT NULL, node_names TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL

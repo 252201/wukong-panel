@@ -5,9 +5,36 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/252201/wukong-panel/internal/model"
 )
+
+type fakeHistoryStore struct {
+	mu      sync.Mutex
+	samples []model.NetworkSample
+}
+
+func (f *fakeHistoryStore) AddNetworkSample(sample model.NetworkSample) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.samples = append(f.samples, sample)
+	return nil
+}
+
+func (f *fakeHistoryStore) RecentNetworkSamples(time.Time, int) ([]model.NetworkSample, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.NetworkSample(nil), f.samples...), nil
+}
+
+func (f *fakeHistoryStore) Count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.samples)
+}
 
 func TestParseTargets(t *testing.T) {
 	targets, labels, err := parseTargets(" 1.1.1.1, 8.8.8.8,1.1.1.1 ")
@@ -56,7 +83,7 @@ func TestMeasureAllSentWithoutRepliesIsFullLoss(t *testing.T) {
 }
 
 func TestCurrentReturnsDefensiveCopy(t *testing.T) {
-	service := NewService("1.1.1.1", true)
+	service := NewService("1.1.1.1", true, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go service.Run(ctx)
@@ -69,7 +96,31 @@ func TestCurrentReturnsDefensiveCopy(t *testing.T) {
 		t.Fatal("demo service did not produce a sample")
 	}
 	first.Targets[0] = "changed"
+	first.History[0].Targets[0] = "changed"
 	if service.Current().Targets[0] != "1.1.1.1" {
 		t.Fatal("Current shared mutable targets")
+	}
+	if service.Current().History[0].Targets[0] != "1.1.1.1" {
+		t.Fatal("Current shared mutable history")
+	}
+}
+
+func TestServiceRestoresAndRecordsHistory(t *testing.T) {
+	repository := &fakeHistoryStore{samples: []model.NetworkSample{{Status: "ok", CheckedAt: time.Now().Add(-time.Minute), Targets: []string{"1.1.1.1"}}}}
+	service := NewService("invalid-target", false, repository)
+	if len(service.history) != 1 {
+		t.Fatalf("history was not restored: %+v", service.history)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go service.Run(ctx)
+	deadline := time.Now().Add(time.Second)
+	for (repository.Count() < 2 || service.Current() == nil) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	current := service.Current()
+	if current == nil || current.Status != "error" || len(current.History) != 2 || repository.Count() != 2 {
+		t.Fatalf("new measurement was not stored: current=%+v count=%d", current, repository.Count())
 	}
 }

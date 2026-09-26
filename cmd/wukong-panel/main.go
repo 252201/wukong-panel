@@ -163,7 +163,7 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
-		network := netcheck.NewService(cfg.NetworkProbeTargets, cfg.Demo)
+		network := netcheck.NewService(cfg.NetworkProbeTargets, cfg.Demo, s)
 		go network.Run(ctx)
 		if connector, fleetErr := agent.NewFleetConnector(cfg, s, manager, version, network); fleetErr == nil {
 			go connector.Run(ctx)
@@ -198,7 +198,7 @@ func main() {
 		go collector.Run(ctx)
 		go collector.RunEndpoints(ctx)
 		go manager.RunReconciler(ctx)
-		network := netcheck.NewService(cfg.NetworkProbeTargets, cfg.Demo)
+		network := netcheck.NewService(cfg.NetworkProbeTargets, cfg.Demo, s)
 		go network.Run(ctx)
 		go func() { <-ctx.Done() }()
 		server := webserver.New(cfg, s, directAgent{manager: manager, network: network}, version)

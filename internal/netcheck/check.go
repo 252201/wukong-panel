@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"sort"
@@ -28,6 +29,13 @@ const (
 
 const defaultTargets = "1.1.1.1,8.8.8.8"
 
+const historyWindow = 30 * time.Minute
+
+type historyStore interface {
+	AddNetworkSample(model.NetworkSample) error
+	RecentNetworkSamples(time.Time, int) ([]model.NetworkSample, error)
+}
+
 type targetResult struct {
 	sent       int
 	received   int
@@ -44,17 +52,28 @@ type Service struct {
 	labels   []string
 	setupErr error
 	demo     bool
+	store    historyStore
 
 	mu      sync.RWMutex
 	current *model.NetworkHealth
+	history []model.NetworkSample
 }
 
-func NewService(rawTargets string, demo bool) *Service {
+func NewService(rawTargets string, demo bool, repository historyStore) *Service {
 	if strings.TrimSpace(rawTargets) == "" {
 		rawTargets = defaultTargets
 	}
 	targets, labels, err := parseTargets(rawTargets)
-	return &Service{targets: targets, labels: labels, setupErr: err, demo: demo}
+	service := &Service{targets: targets, labels: labels, setupErr: err, demo: demo, store: repository}
+	if demo {
+		service.history = demoHistory(time.Now().UTC(), labels)
+	} else if repository != nil {
+		service.history, err = repository.RecentNetworkSamples(time.Now().Add(-historyWindow), 60)
+		if err != nil {
+			log.Printf("network history unavailable: %v", err)
+		}
+	}
+	return service
 }
 
 func parseTargets(raw string) ([]net.IP, []string, error) {
@@ -92,6 +111,14 @@ func (s *Service) Current() *model.NetworkHealth {
 	}
 	copy := *s.current
 	copy.Targets = append([]string(nil), s.current.Targets...)
+	copy.History = make([]model.NetworkSample, 0, len(s.history))
+	for _, sample := range s.history {
+		if sample.CheckedAt.After(time.Now().Add(-historyWindow)) {
+			item := sample
+			item.Targets = append([]string(nil), sample.Targets...)
+			copy.History = append(copy.History, item)
+		}
+	}
 	return &copy
 }
 
@@ -106,8 +133,22 @@ func (s *Service) Run(ctx context.Context) {
 		default:
 			health = measure(ctx, s.targets, s.labels, probeTarget)
 		}
+		sample := sampleOf(health)
+		if s.store != nil && !s.demo {
+			if err := s.store.AddNetworkSample(sample); err != nil {
+				log.Printf("network history save failed: %v", err)
+			}
+		}
 		s.mu.Lock()
 		s.current = &health
+		s.history = append(s.history, sample)
+		cutoff := health.CheckedAt.Add(-historyWindow)
+		for len(s.history) > 0 && s.history[0].CheckedAt.Before(cutoff) {
+			s.history = s.history[1:]
+		}
+		if len(s.history) > 60 {
+			s.history = s.history[len(s.history)-60:]
+		}
 		s.mu.Unlock()
 
 		timer := time.NewTimer(refreshInterval)
@@ -118,6 +159,33 @@ func (s *Service) Run(ctx context.Context) {
 		case <-timer.C:
 		}
 	}
+}
+
+func sampleOf(health model.NetworkHealth) model.NetworkSample {
+	return model.NetworkSample{
+		Status: health.Status, LatencyMS: health.LatencyMS,
+		PacketLossPct: health.PacketLossPct, PacketsSent: health.PacketsSent,
+		PacketsReceived: health.PacketsReceived,
+		Targets:         append([]string(nil), health.Targets...), CheckedAt: health.CheckedAt,
+	}
+}
+
+func demoHistory(now time.Time, targets []string) []model.NetworkSample {
+	result := make([]model.NetworkSample, 0, 29)
+	for minute := 29; minute >= 1; minute-- {
+		loss := 0.0
+		if minute%11 == 0 {
+			loss = 10
+		} else if minute%7 == 0 {
+			loss = 20
+		}
+		result = append(result, model.NetworkSample{
+			Status: "ok", LatencyMS: float64(35 + (minute*7)%31), PacketLossPct: loss,
+			PacketsSent: 10, PacketsReceived: 10 - int(loss/10),
+			Targets: append([]string(nil), targets...), CheckedAt: now.Add(-time.Duration(minute) * time.Minute),
+		})
+	}
+	return result
 }
 
 func measure(ctx context.Context, targets []net.IP, labels []string, probe targetProbe) (health model.NetworkHealth) {
