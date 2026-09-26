@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS network_samples (
   packet_loss_pct REAL NOT NULL, packets_sent INTEGER NOT NULL,
   packets_received INTEGER NOT NULL, targets_json TEXT NOT NULL DEFAULT '[]'
 );
+CREATE TABLE IF NOT EXISTS network_group_samples (
+  group_name TEXT NOT NULL, ts INTEGER NOT NULL, status TEXT NOT NULL,
+  latency_ms REAL NOT NULL, packet_loss_pct REAL NOT NULL,
+  packets_sent INTEGER NOT NULL, packets_received INTEGER NOT NULL,
+  targets_json TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(group_name, ts)
+);
 CREATE TABLE IF NOT EXISTS process_recent (
   pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
   memory_percent REAL NOT NULL, node_names TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL

@@ -64,7 +64,7 @@ export interface Overview {
   panelVersion: string
 }
 
-export interface NetworkHealth {
+export interface NetworkGroupHealth {
   status: 'ok' | 'partial' | 'error'
   latencyMs: number
   packetLossPct: number
@@ -73,8 +73,13 @@ export interface NetworkHealth {
   targets?: string[]
   checkedAt: string
   error?: string
-  demo?: boolean
   history?: NetworkSample[]
+}
+
+export interface NetworkHealth extends NetworkGroupHealth {
+  demo?: boolean
+  international?: NetworkGroupHealth
+  domestic?: NetworkGroupHealth
 }
 
 export interface NetworkSample {
