@@ -159,6 +159,9 @@ func TestServiceMeasuresGroupsIndependently(t *testing.T) {
 	if current.International.Targets[0] != "1.1.1.1" || current.Domestic.Targets[0] != "194.138.202.35" {
 		t.Fatalf("group targets were crossed: %+v", current)
 	}
+	if !current.CheckedAt.Equal(current.International.CheckedAt) || !current.CheckedAt.Equal(current.Domestic.CheckedAt) {
+		t.Fatalf("groups in one probe cycle have different timestamps: %+v", current)
+	}
 }
 
 func TestDomesticConfigurationErrorDoesNotHideInternationalResult(t *testing.T) {

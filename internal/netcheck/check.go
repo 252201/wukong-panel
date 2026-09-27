@@ -35,7 +35,9 @@ const (
 	domesticGroup      = "domestic"
 )
 
-const historyWindow = 30 * time.Minute
+// Keep an extra minute so the UI can show 30 complete probe intervals even
+// when the newest probe is nearly a minute old.
+const historyRetentionWindow = 31 * time.Minute
 
 type historyStore interface {
 	AddNetworkSample(string, model.NetworkSample) error
@@ -86,11 +88,11 @@ func NewService(rawTargets, rawDomesticTargets string, demo bool, repository his
 		service.history = demoHistory(time.Now().UTC(), labels, false)
 		service.domesticHistory = demoHistory(time.Now().UTC(), domesticLabels, true)
 	} else if repository != nil {
-		service.history, err = repository.RecentNetworkSamples(internationalGroup, time.Now().Add(-historyWindow), 60)
+		service.history, err = repository.RecentNetworkSamples(internationalGroup, time.Now().Add(-historyRetentionWindow), 60)
 		if err != nil {
 			log.Printf("international network history unavailable: %v", err)
 		}
-		service.domesticHistory, err = repository.RecentNetworkSamples(domesticGroup, time.Now().Add(-historyWindow), 60)
+		service.domesticHistory, err = repository.RecentNetworkSamples(domesticGroup, time.Now().Add(-historyRetentionWindow), 60)
 		if err != nil {
 			log.Printf("domestic network history unavailable: %v", err)
 		}
@@ -146,7 +148,7 @@ func (s *Service) Current() *model.NetworkHealth {
 
 func recentCopy(history []model.NetworkSample) []model.NetworkSample {
 	result := make([]model.NetworkSample, 0, len(history))
-	cutoff := time.Now().Add(-historyWindow)
+	cutoff := time.Now().Add(-historyRetentionWindow)
 	for _, sample := range history {
 		if sample.CheckedAt.Before(cutoff) {
 			continue
@@ -168,7 +170,10 @@ func groupHealth(health model.NetworkHealth, history []model.NetworkSample) *mod
 }
 
 func (s *Service) Run(ctx context.Context) {
+	ticker := time.NewTicker(refreshInterval)
+	defer ticker.Stop()
 	for ctx.Err() == nil {
+		probeStartedAt := time.Now().UTC()
 		type groupResult struct {
 			name   string
 			health model.NetworkHealth
@@ -185,6 +190,10 @@ func (s *Service) Run(ctx context.Context) {
 		if first.name == domesticGroup {
 			international, domestic = second.health, first.health
 		}
+		// The two groups belong to the same scheduled probe cycle. Timestamp
+		// them at its start, independent of ICMP completion time.
+		international.CheckedAt = probeStartedAt
+		domestic.CheckedAt = probeStartedAt
 		domesticGroupHealth := groupHealth(domestic, nil)
 		international.Domestic = domesticGroupHealth
 		international.Demo = s.demo
@@ -204,12 +213,10 @@ func (s *Service) Run(ctx context.Context) {
 		s.domesticHistory = appendRecent(s.domesticHistory, domesticSample)
 		s.mu.Unlock()
 
-		timer := time.NewTimer(refreshInterval)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }
@@ -229,7 +236,7 @@ func (s *Service) measureGroup(ctx context.Context, targets []net.IP, labels []s
 
 func appendRecent(history []model.NetworkSample, sample model.NetworkSample) []model.NetworkSample {
 	history = append(history, sample)
-	cutoff := sample.CheckedAt.Add(-historyWindow)
+	cutoff := sample.CheckedAt.Add(-historyRetentionWindow)
 	for len(history) > 0 && history[0].CheckedAt.Before(cutoff) {
 		history = history[1:]
 	}

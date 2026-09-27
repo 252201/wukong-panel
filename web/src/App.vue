@@ -5,6 +5,7 @@ import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type Fle
 import ThemePicker from './ThemePicker.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
+import { historySlotsFor } from './networkHistory'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -168,18 +169,6 @@ function networkHistoryLabel(group: NetworkGroupName) {
   if (networkState(group) === 'stale') return english ? 'Stale sample' : '采样已过期'
   if (networkState(group) === 'error') return english ? 'ICMP unavailable' : 'ICMP 不可用'
   return english ? 'Last 30 minutes' : '近 30 分钟'
-}
-function historySlotsFor(health: NetworkGroupHealth | undefined): (NetworkSample | null)[] {
-  const slots: (NetworkSample | null)[] = Array(30).fill(null)
-  if (!health) return slots
-  const samples = health.history?.length ? health.history : [health]
-  const now = Date.now()
-  for (const sample of samples) {
-    const age = now - Date.parse(sample.checkedAt)
-    if (!Number.isFinite(age) || age < 0 || age >= 30 * 60_000) continue
-    slots[29 - Math.floor(age / 60_000)] = sample
-  }
-  return slots
 }
 function networkHistorySlots(group: NetworkGroupName) { return historySlotsFor(networkGroup(group)) }
 function networkHistoryCount(group: NetworkGroupName) { return networkHistorySlots(group).filter(Boolean).length }

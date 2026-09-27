@@ -1,6 +1,6 @@
 .PHONY: web test build release clean
 
-VERSION ?= 1.5.2
+VERSION ?= 1.5.3
 export GOTOOLCHAIN := go1.26.5
 
 web:
@@ -9,6 +9,7 @@ web:
 test:
 	go test ./...
 	go vet ./...
+	cd web && npm test
 	cd web && npm run build
 	sh -n install.sh uninstall.sh bootstrap.sh compat/deploy-hy2.sh
 	sh scripts/test-install-actions.sh
