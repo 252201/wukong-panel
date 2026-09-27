@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.5.6-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.5.7-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 
 ## 特性
 
-- 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
+- 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。舰队主机卡片按各主机直连公网出口 IP 显示国家/地区和国旗，并注明运行时长单位。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
 - 出站安全通道：远端 Agent 仅通过证书可信的 HTTPS 主动连接中央，每 10 秒心跳并维持命令长轮询；不开放 Root Agent 公网端口、不使用 SSH。一次性接入令牌 10 分钟过期且只能成功使用一次，后续独立 Agent Token 只在中央保存 SHA-256。
 - 幂等远端任务：每台远端配置变更串行执行，命令使用幂等 ID；断线重投不会重复操作，过期命令不会在以后重连时补执行。配置暂存、`sing-box check`、快照和失败回滚仍由远端 Root Agent 完成。
 - 全局订阅：保留每台 VPS 的原订阅，同时提供可筛选主机和节点的中央订阅。远端生成的 Clash 片段以中央专用 AES-256-GCM 密钥加密缓存；离线时标记并使用最后成功缓存，从未生成缓存则明确返回 `503`。
@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
-- 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35,159.27.255.225`，通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
+- 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35`，通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
@@ -136,7 +136,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.5.6 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.5.7 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \

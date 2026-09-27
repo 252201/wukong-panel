@@ -192,7 +192,7 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
-export interface FleetSnapshot { overview: Overview; nodes: NodeItem[] }
+export interface FleetSnapshot { overview: Overview; nodes: NodeItem[]; location?: { publicIP: string; countryCode: string } }
 export interface FleetHost {
   id: string; name: string; hostname: string; os: string; arch: string; serviceManager: string
   panelVersion: string; singBoxVersion: string; protocolVersion: number; capabilities: string[]

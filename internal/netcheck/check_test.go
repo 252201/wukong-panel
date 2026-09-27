@@ -51,6 +51,13 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
+func TestDefaultDomesticTarget(t *testing.T) {
+	service := NewService("", "", false, nil)
+	if got := strings.Join(service.domesticLabels, ","); got != "194.138.202.35" {
+		t.Fatalf("domestic default targets = %q", got)
+	}
+}
+
 func TestMeasureAggregatesReplies(t *testing.T) {
 	targets, labels, _ := parseTargets("1.1.1.1,8.8.8.8")
 	probe := func(_ context.Context, ip net.IP) targetResult {

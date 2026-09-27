@@ -147,6 +147,9 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 		}
 	}
 	local.Snapshot = model.FleetSnapshot{Overview: model.Overview{Now: now, History: metrics, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: trafficUsed, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: singBoxVersion, PanelVersion: s.version}, Nodes: nodes, Jobs: jobs, Settings: settings}
+	if s.hostLocation != nil {
+		local.Snapshot.Location = s.hostLocation.Current()
+	}
 	if source, ok := s.agent.(networkHealthAgent); ok {
 		local.Snapshot.Overview.Network, _ = source.NetworkHealth(ctx)
 	}

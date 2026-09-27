@@ -356,9 +356,21 @@ function uptime(value?: number) {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor(seconds % 86400 / 3600)
   const minutes = Math.floor(seconds % 3600 / 60)
-  if (days) return `${days}天 ${hours}时`
-  if (hours) return `${hours}时 ${minutes}分`
+  if (days) return `${days}天 ${hours}小时`
+  if (hours) return `${hours}小时 ${minutes}分`
   return `${minutes}分`
+}
+function hostCountryFlag(code: string) {
+  const normalized = code.toUpperCase()
+  if (!/^[A-Z]{2}$/.test(normalized)) return ''
+  return String.fromCodePoint(...Array.from(normalized, char => char.charCodeAt(0) + 127397))
+}
+function hostCountryName(code: string) {
+  try {
+    return new Intl.DisplayNames([language.value], { type: 'region' }).of(code.toUpperCase()) || code
+  } catch {
+    return code.toUpperCase()
+  }
 }
 function modeLabel(mode: string) { return ({ prefer_v6: 'IPv6 优先', v4only: '纯 IPv4', v6only: '纯 IPv6' } as Record<string, string>)[mode] || mode }
 function jobLabel(kind: string) { return ({ 'node.create': '部署节点', 'node.create_batch': '部署设备节点', 'node.edit': '编辑节点', 'node.rename': '重命名节点', 'node.start': '启动节点', 'node.stop': '停止节点', 'node.restart': '重启节点', 'node.check': '校验配置', 'node.probe': '连通性检测', 'node.delete': '删除节点', 'nodes.import': '接管节点', 'candidate.delete': '彻底删除接管节点' } as Record<string, string>)[kind] || kind }
@@ -974,7 +986,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP">{{ hostCountryFlag(host.snapshot.location.countryCode) }} {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <em><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
             </header>
             <div class="fleet-host-body">
