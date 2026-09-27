@@ -17,9 +17,16 @@ export function networkGroupFrom(health: NetworkHealth | undefined, group: Netwo
 function hasNetworkAlert(health: NetworkGroupHealth, now: number): boolean {
   const checkedAt = Date.parse(health.checkedAt)
   if (!Number.isFinite(checkedAt) || now - checkedAt > staleAfterMs) return true
-  if (health.status === 'error' || health.packetLossPct >= alertLossPct) return true
-  return historySlotsFor(health, now).some(sample => sample !== null &&
-    (sample.status === 'error' || sample.packetLossPct >= alertLossPct))
+  const samples = historySlotsFor(health, now).filter(sample => sample !== null)
+  if (health.status === 'error' || samples.some(sample => sample.status === 'error')) return true
+  const totals = samples.reduce((total, sample) => {
+    if (sample.packetsSent > 0) {
+      total.sent += sample.packetsSent
+      total.received += sample.packetsReceived
+    }
+    return total
+  }, { sent: 0, received: 0 })
+  return totals.sent > 0 && (totals.sent - totals.received) * 100 >= alertLossPct * totals.sent
 }
 
 export function summarizeFleet(hosts: FleetHost[], now = Date.now()) {
