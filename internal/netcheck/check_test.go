@@ -70,6 +70,23 @@ func TestMeasureAggregatesReplies(t *testing.T) {
 	if health.Status != "ok" || health.PacketsSent != 10 || health.PacketsReceived != 9 || health.PacketLossPct != 10 || health.LatencyMS != 50 {
 		t.Fatalf("unexpected health: %+v", health)
 	}
+	if len(health.TargetResults) != 2 || health.TargetResults[0] != (model.NetworkTargetResult{Target: "1.1.1.1", PacketsSent: 5, PacketsReceived: 4}) || health.TargetResults[1] != (model.NetworkTargetResult{Target: "8.8.8.8", PacketsSent: 5, PacketsReceived: 5}) {
+		t.Fatalf("per-target loss was not preserved in target order: %+v", health.TargetResults)
+	}
+}
+
+func TestMeasureKeepsConfiguredTargetOrderWhenRepliesFinishOutOfOrder(t *testing.T) {
+	targets, labels, _ := parseTargets("1.1.1.1,8.8.8.8")
+	health := measure(context.Background(), targets, labels, func(_ context.Context, ip net.IP) targetResult {
+		if ip.String() == "1.1.1.1" {
+			time.Sleep(10 * time.Millisecond)
+			return targetResult{sent: 5, received: 5}
+		}
+		return targetResult{sent: 5, received: 3}
+	})
+	if health.TargetResults[0].Target != "1.1.1.1" || health.TargetResults[0].PacketsReceived != 5 || health.TargetResults[1].Target != "8.8.8.8" || health.TargetResults[1].PacketsReceived != 3 {
+		t.Fatalf("results did not follow configured target order: %+v", health.TargetResults)
+	}
 }
 
 func TestMeasureDoesNotCallSocketFailurePacketLoss(t *testing.T) {
@@ -109,6 +126,10 @@ func TestCurrentReturnsDefensiveCopy(t *testing.T) {
 	first.History[0].Targets[0] = "changed"
 	first.Domestic.Targets[0] = "changed"
 	first.Domestic.History[0].Targets[0] = "changed"
+	first.TargetResults[0].Target = "changed"
+	first.History[0].TargetResults[0].Target = "changed"
+	first.Domestic.TargetResults[0].Target = "changed"
+	first.Domestic.History[0].TargetResults[0].Target = "changed"
 	if service.Current().Targets[0] != "1.1.1.1" {
 		t.Fatal("Current shared mutable targets")
 	}
@@ -117,6 +138,9 @@ func TestCurrentReturnsDefensiveCopy(t *testing.T) {
 	}
 	if service.Current().Domestic.Targets[0] != "194.138.202.35" || service.Current().Domestic.History[0].Targets[0] != "194.138.202.35" {
 		t.Fatal("Current shared mutable domestic data")
+	}
+	if service.Current().TargetResults[0].Target != "1.1.1.1" || service.Current().History[0].TargetResults[0].Target != "1.1.1.1" || service.Current().Domestic.TargetResults[0].Target != "194.138.202.35" || service.Current().Domestic.History[0].TargetResults[0].Target != "194.138.202.35" {
+		t.Fatal("Current shared mutable per-target results")
 	}
 }
 

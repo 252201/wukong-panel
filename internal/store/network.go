@@ -14,10 +14,14 @@ func (s *Store) AddNetworkSample(group string, sample model.NetworkSample) error
 	if err != nil {
 		return err
 	}
+	targetResults, err := json.Marshal(sample.TargetResults)
+	if err != nil {
+		return err
+	}
 	if _, err = s.DB.Exec(`INSERT OR REPLACE INTO network_group_samples
-		(group_name,ts,status,latency_ms,packet_loss_pct,packets_sent,packets_received,targets_json)
-		VALUES(?,?,?,?,?,?,?,?)`, group, sample.CheckedAt.Unix(), sample.Status, sample.LatencyMS,
-		sample.PacketLossPct, sample.PacketsSent, sample.PacketsReceived, string(targets)); err != nil {
+		(group_name,ts,status,latency_ms,packet_loss_pct,packets_sent,packets_received,targets_json,target_results_json)
+		VALUES(?,?,?,?,?,?,?,?,?)`, group, sample.CheckedAt.Unix(), sample.Status, sample.LatencyMS,
+		sample.PacketLossPct, sample.PacketsSent, sample.PacketsReceived, string(targets), string(targetResults)); err != nil {
 		return err
 	}
 	_, err = s.DB.Exec(`DELETE FROM network_group_samples WHERE ts<?`, time.Now().Add(-24*time.Hour).Unix())
@@ -29,7 +33,7 @@ func (s *Store) RecentNetworkSamples(group string, since time.Time, limit int) (
 	if limit < 1 || limit > 120 {
 		limit = 120
 	}
-	rows, err := s.DB.Query(`SELECT ts,status,latency_ms,packet_loss_pct,packets_sent,packets_received,targets_json
+	rows, err := s.DB.Query(`SELECT ts,status,latency_ms,packet_loss_pct,packets_sent,packets_received,targets_json,target_results_json
 		FROM network_group_samples WHERE group_name=? AND ts>=? ORDER BY ts DESC LIMIT ?`, group, since.Unix(), limit)
 	if err != nil {
 		return nil, err
@@ -39,12 +43,15 @@ func (s *Store) RecentNetworkSamples(group string, since time.Time, limit int) (
 	for rows.Next() {
 		var sample model.NetworkSample
 		var timestamp int64
-		var targets string
+		var targets, targetResults string
 		if err := rows.Scan(&timestamp, &sample.Status, &sample.LatencyMS, &sample.PacketLossPct,
-			&sample.PacketsSent, &sample.PacketsReceived, &targets); err != nil {
+			&sample.PacketsSent, &sample.PacketsReceived, &targets, &targetResults); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(targets), &sample.Targets); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(targetResults), &sample.TargetResults); err != nil {
 			return nil, err
 		}
 		sample.CheckedAt = time.Unix(timestamp, 0).UTC()

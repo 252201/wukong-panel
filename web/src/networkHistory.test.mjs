@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { historySlotsFor } from './networkHistory.ts'
+import { historySlotsFor, targetLossState } from './networkHistory.ts'
 
 const base = Date.parse('2026-09-27T10:00:10Z')
 const sample = (time) => ({ checkedAt: new Date(time).toISOString(), status: 'ok' })
@@ -31,4 +31,17 @@ test('thirty regular samples fill thirty bars until the next probe is due', () =
   const samples = Array.from({ length: 30 }, (_, index) => sample(base - (29 - index) * 60_000))
   const slots = historySlotsFor(health(samples), base + 50_000)
   assert.deepEqual(slots, samples)
+})
+
+test('only the target that lost packets is marked red', () => {
+  const result = { ...sample(base), packetsSent: 10, packetsReceived: 8, packetLossPct: 20,
+    targets: ['194.138.202.35', '138.113.151.2'],
+    targetResults: [
+      { target: '194.138.202.35', packetsSent: 5, packetsReceived: 5 },
+      { target: '138.113.151.2', packetsSent: 5, packetsReceived: 3 },
+    ] }
+  assert.equal(targetLossState(result, '194.138.202.35'), 'ok')
+  assert.equal(targetLossState(result, '138.113.151.2'), 'loss')
+  assert.equal(targetLossState({ ...result, targetResults: undefined }, '138.113.151.2'), 'unknown')
+  assert.equal(targetLossState({ ...result, targetResults: [{ target: '138.113.151.2', packetsSent: 0, packetsReceived: 0 }] }, '138.113.151.2'), 'unknown')
 })
