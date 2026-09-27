@@ -14,19 +14,24 @@ export function networkGroupFrom(health: NetworkHealth | undefined, group: Netwo
   return health.targets?.length && health.targets.every(target => target === '1.1.1.1' || target === '8.8.8.8') ? health : undefined
 }
 
-function hasNetworkAlert(health: NetworkGroupHealth, now: number): boolean {
-  const checkedAt = Date.parse(health.checkedAt)
-  if (!Number.isFinite(checkedAt) || now - checkedAt > staleAfterMs) return true
-  const samples = historySlotsFor(health, now).filter(sample => sample !== null)
-  if (health.status === 'error' || samples.some(sample => sample.status === 'error')) return true
-  const totals = samples.reduce((total, sample) => {
-    if (sample.packetsSent > 0) {
+export function recentNetworkLossPct(health: NetworkGroupHealth | undefined, now = Date.now()): number | null {
+  if (!health) return null
+  const totals = historySlotsFor(health, now).reduce((total, sample) => {
+    if (sample && sample.packetsSent > 0) {
       total.sent += sample.packetsSent
       total.received += sample.packetsReceived
     }
     return total
   }, { sent: 0, received: 0 })
-  return totals.sent > 0 && (totals.sent - totals.received) * 100 >= alertLossPct * totals.sent
+  return totals.sent > 0 ? (totals.sent - totals.received) * 100 / totals.sent : null
+}
+
+function hasNetworkAlert(health: NetworkGroupHealth, now: number): boolean {
+  const checkedAt = Date.parse(health.checkedAt)
+  if (!Number.isFinite(checkedAt) || now - checkedAt > staleAfterMs) return true
+  const samples = historySlotsFor(health, now).filter(sample => sample !== null)
+  if (health.status === 'error' || samples.some(sample => sample.status === 'error')) return true
+  return (recentNetworkLossPct(health, now) ?? 0) >= alertLossPct
 }
 
 export function summarizeFleet(hosts: FleetHost[], now = Date.now()) {
