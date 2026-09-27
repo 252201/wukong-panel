@@ -75,7 +75,7 @@ func TestBuildFleetStatusIncludesLocalSingBoxVersion(t *testing.T) {
 
 func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	server, _ := fleetWebTestServer(t)
-	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC(), History: []model.NetworkSample{{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC()}}, International: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 42.5, Targets: []string{"1.1.1.1"}}, Domestic: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 160, Targets: []string{"194.138.202.35"}, History: []model.NetworkSample{{Status: "ok", LatencyMS: 160, CheckedAt: time.Now().UTC()}}}}
+	want := model.NetworkHealth{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, Targets: []string{"1.1.1.1"}, CheckedAt: time.Now().UTC(), History: []model.NetworkSample{{Status: "ok", LatencyMS: 42.5, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, TargetResults: []model.NetworkTargetResult{{Target: "1.1.1.1", PacketsSent: 10, PacketsReceived: 9}}, CheckedAt: time.Now().UTC()}}, International: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 42.5, Targets: []string{"1.1.1.1"}}, Domestic: &model.NetworkGroupHealth{Status: "ok", LatencyMS: 160, Targets: []string{"194.138.202.35"}, History: []model.NetworkSample{{Status: "ok", LatencyMS: 160, TargetResults: []model.NetworkTargetResult{{Target: "194.138.202.35", PacketsSent: 5, PacketsReceived: 4}}, CheckedAt: time.Now().UTC()}}}}
 	server.agent = networkTestAgent{health: want}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
@@ -88,7 +88,7 @@ func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &overview); err != nil {
 		t.Fatal(err)
 	}
-	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct || len(overview.Network.History) != 1 || overview.Network.Domestic == nil || overview.Network.Domestic.LatencyMS != 160 || len(overview.Network.Domestic.History) != 1 {
+	if overview.Network == nil || overview.Network.LatencyMS != want.LatencyMS || overview.Network.PacketLossPct != want.PacketLossPct || len(overview.Network.History) != 1 || overview.Network.History[0].TargetResults[0].PacketsReceived != 9 || overview.Network.Domestic == nil || overview.Network.Domestic.LatencyMS != 160 || len(overview.Network.Domestic.History) != 1 || overview.Network.Domestic.History[0].TargetResults[0].PacketsReceived != 4 {
 		t.Fatalf("overview network=%+v", overview.Network)
 	}
 
@@ -96,7 +96,7 @@ func TestOverviewAndFleetLocalExposeAgentNetworkHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived || len(status.Hosts[0].Snapshot.Overview.Network.History) != 1 || status.Hosts[0].Snapshot.Overview.Network.Domestic == nil || status.Hosts[0].Snapshot.Overview.Network.Domestic.LatencyMS != 160 {
+	if len(status.Hosts) == 0 || status.Hosts[0].Snapshot.Overview.Network == nil || status.Hosts[0].Snapshot.Overview.Network.PacketsReceived != want.PacketsReceived || len(status.Hosts[0].Snapshot.Overview.Network.History) != 1 || status.Hosts[0].Snapshot.Overview.Network.History[0].TargetResults[0].PacketsReceived != 9 || status.Hosts[0].Snapshot.Overview.Network.Domestic == nil || status.Hosts[0].Snapshot.Overview.Network.Domestic.LatencyMS != 160 || status.Hosts[0].Snapshot.Overview.Network.Domestic.History[0].TargetResults[0].PacketsReceived != 4 {
 		t.Fatalf("fleet local network=%+v", status.Hosts)
 	}
 }

@@ -135,11 +135,13 @@ func (s *Service) Current() *model.NetworkHealth {
 	}
 	copy := *s.current
 	copy.Targets = append([]string(nil), s.current.Targets...)
+	copy.TargetResults = append([]model.NetworkTargetResult(nil), s.current.TargetResults...)
 	copy.History = recentCopy(s.history)
 	copy.International = groupHealth(copy, copy.History)
 	if s.current.Domestic != nil {
 		domestic := *s.current.Domestic
 		domestic.Targets = append([]string(nil), domestic.Targets...)
+		domestic.TargetResults = append([]model.NetworkTargetResult(nil), domestic.TargetResults...)
 		domestic.History = recentCopy(s.domesticHistory)
 		copy.Domestic = &domestic
 	}
@@ -155,6 +157,7 @@ func recentCopy(history []model.NetworkSample) []model.NetworkSample {
 		}
 		item := sample
 		item.Targets = append([]string(nil), sample.Targets...)
+		item.TargetResults = append([]model.NetworkTargetResult(nil), sample.TargetResults...)
 		result = append(result, item)
 	}
 	return result
@@ -165,7 +168,8 @@ func groupHealth(health model.NetworkHealth, history []model.NetworkSample) *mod
 		Status: health.Status, LatencyMS: health.LatencyMS,
 		PacketLossPct: health.PacketLossPct, PacketsSent: health.PacketsSent,
 		PacketsReceived: health.PacketsReceived, Targets: append([]string(nil), health.Targets...),
-		CheckedAt: health.CheckedAt, Error: health.Error, History: history,
+		TargetResults: append([]model.NetworkTargetResult(nil), health.TargetResults...),
+		CheckedAt:     health.CheckedAt, Error: health.Error, History: history,
 	}
 }
 
@@ -226,10 +230,12 @@ func (s *Service) measureGroup(ctx context.Context, targets []net.IP, labels []s
 		return model.NetworkHealth{Status: "error", Error: setupErr.Error(), CheckedAt: time.Now().UTC()}
 	}
 	if s.demo {
+		packetCount := samplesPerTarget * len(labels)
 		if domestic {
-			return model.NetworkHealth{Status: "ok", LatencyMS: 162.4, PacketLossPct: 0, PacketsSent: 10, PacketsReceived: 10, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...)}
+			return model.NetworkHealth{Status: "ok", LatencyMS: 162.4, PacketsSent: packetCount, PacketsReceived: packetCount, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...), TargetResults: demoTargetResults(labels, 0)}
 		}
-		return model.NetworkHealth{Status: "ok", LatencyMS: 41.8, PacketLossPct: 10, PacketsSent: 10, PacketsReceived: 9, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...)}
+		lost := min(1, packetCount)
+		return model.NetworkHealth{Status: "ok", LatencyMS: 41.8, PacketLossPct: float64(lost) * 100 / float64(packetCount), PacketsSent: packetCount, PacketsReceived: packetCount - lost, CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...), TargetResults: demoTargetResults(labels, lost)}
 	}
 	return measure(ctx, targets, labels, s.probe)
 }
@@ -251,11 +257,15 @@ func sampleOf(health model.NetworkHealth) model.NetworkSample {
 		Status: health.Status, LatencyMS: health.LatencyMS,
 		PacketLossPct: health.PacketLossPct, PacketsSent: health.PacketsSent,
 		PacketsReceived: health.PacketsReceived,
-		Targets:         append([]string(nil), health.Targets...), CheckedAt: health.CheckedAt,
+		Targets:         append([]string(nil), health.Targets...),
+		TargetResults:   append([]model.NetworkTargetResult(nil), health.TargetResults...), CheckedAt: health.CheckedAt,
 	}
 }
 
 func demoHistory(now time.Time, targets []string, domestic bool) []model.NetworkSample {
+	if len(targets) == 0 {
+		return nil
+	}
 	result := make([]model.NetworkSample, 0, 29)
 	for minute := 29; minute >= 1; minute-- {
 		loss := 0.0
@@ -270,13 +280,26 @@ func demoHistory(now time.Time, targets []string, domestic bool) []model.Network
 		if domestic {
 			latency = float64(150 + (minute*7)%31)
 		}
+		sent := samplesPerTarget * len(targets)
+		lost := int(math.Round(loss * float64(sent) / 100))
+		actualLoss := float64(lost) * 100 / float64(sent)
 		result = append(result, model.NetworkSample{
-			Status: "ok", LatencyMS: latency, PacketLossPct: loss,
-			PacketsSent: 10, PacketsReceived: 10 - int(loss/10),
-			Targets: append([]string(nil), targets...), CheckedAt: now.Add(-time.Duration(minute) * time.Minute),
+			Status: "ok", LatencyMS: latency, PacketLossPct: actualLoss,
+			PacketsSent: sent, PacketsReceived: sent - lost,
+			Targets: append([]string(nil), targets...), TargetResults: demoTargetResults(targets, lost), CheckedAt: now.Add(-time.Duration(minute) * time.Minute),
 		})
 	}
 	return result
+}
+
+func demoTargetResults(targets []string, lost int) []model.NetworkTargetResult {
+	results := make([]model.NetworkTargetResult, len(targets))
+	for index, target := range targets {
+		dropped := min(samplesPerTarget, lost)
+		results[index] = model.NetworkTargetResult{Target: target, PacketsSent: samplesPerTarget, PacketsReceived: samplesPerTarget - dropped}
+		lost -= dropped
+	}
+	return results
 }
 
 func measure(ctx context.Context, targets []net.IP, labels []string, probe targetProbe) (health model.NetworkHealth) {
@@ -286,14 +309,23 @@ func measure(ctx context.Context, targets []net.IP, labels []string, probe targe
 		health.Error = "没有可用的探测目标"
 		return health
 	}
-	results := make(chan targetResult, len(targets))
-	for _, target := range targets {
-		go func(ip net.IP) { results <- probe(ctx, ip) }(target)
+	type indexedResult struct {
+		index int
+		value targetResult
+	}
+	results := make(chan indexedResult, len(targets))
+	health.TargetResults = make([]model.NetworkTargetResult, len(targets))
+	for index, target := range targets {
+		go func(index int, ip net.IP) { results <- indexedResult{index, probe(ctx, ip)} }(index, target)
 	}
 	var roundTrips []time.Duration
 	var failures []string
 	for range targets {
-		result := <-results
+		entry := <-results
+		result := entry.value
+		health.TargetResults[entry.index] = model.NetworkTargetResult{
+			Target: labels[entry.index], PacketsSent: result.sent, PacketsReceived: result.received,
+		}
 		health.PacketsSent += result.sent
 		health.PacketsReceived += result.received
 		roundTrips = append(roundTrips, result.roundTrips...)

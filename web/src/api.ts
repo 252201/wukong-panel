@@ -71,6 +71,7 @@ export interface NetworkGroupHealth {
   packetsSent: number
   packetsReceived: number
   targets?: string[]
+  targetResults?: NetworkTargetResult[]
   checkedAt: string
   error?: string
   history?: NetworkSample[]
@@ -89,7 +90,14 @@ export interface NetworkSample {
   packetsSent: number
   packetsReceived: number
   targets?: string[]
+  targetResults?: NetworkTargetResult[]
   checkedAt: string
+}
+
+export interface NetworkTargetResult {
+  target: string
+  packetsSent: number
+  packetsReceived: number
 }
 
 export interface ProcessStat { pid: number; name: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }

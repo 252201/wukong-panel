@@ -281,42 +281,53 @@ type Overview struct {
 // NetworkHealth is measured by the selected VPS, never by the browser or the
 // fleet controller. Loss is based only on ICMP requests that were actually sent.
 type NetworkHealth struct {
-	Status          string              `json:"status"`
-	LatencyMS       float64             `json:"latencyMs"`
-	PacketLossPct   float64             `json:"packetLossPct"`
-	PacketsSent     int                 `json:"packetsSent"`
-	PacketsReceived int                 `json:"packetsReceived"`
-	Targets         []string            `json:"targets,omitempty"`
-	CheckedAt       time.Time           `json:"checkedAt"`
-	Error           string              `json:"error,omitempty"`
-	Demo            bool                `json:"demo,omitempty"`
-	History         []NetworkSample     `json:"history,omitempty"`
-	International   *NetworkGroupHealth `json:"international,omitempty"`
-	Domestic        *NetworkGroupHealth `json:"domestic,omitempty"`
+	Status          string                `json:"status"`
+	LatencyMS       float64               `json:"latencyMs"`
+	PacketLossPct   float64               `json:"packetLossPct"`
+	PacketsSent     int                   `json:"packetsSent"`
+	PacketsReceived int                   `json:"packetsReceived"`
+	Targets         []string              `json:"targets,omitempty"`
+	TargetResults   []NetworkTargetResult `json:"targetResults,omitempty"`
+	CheckedAt       time.Time             `json:"checkedAt"`
+	Error           string                `json:"error,omitempty"`
+	Demo            bool                  `json:"demo,omitempty"`
+	History         []NetworkSample       `json:"history,omitempty"`
+	International   *NetworkGroupHealth   `json:"international,omitempty"`
+	Domestic        *NetworkGroupHealth   `json:"domestic,omitempty"`
 }
 
 // NetworkGroupHealth keeps each destination group's result and timeline independent.
 type NetworkGroupHealth struct {
-	Status          string          `json:"status"`
-	LatencyMS       float64         `json:"latencyMs"`
-	PacketLossPct   float64         `json:"packetLossPct"`
-	PacketsSent     int             `json:"packetsSent"`
-	PacketsReceived int             `json:"packetsReceived"`
-	Targets         []string        `json:"targets,omitempty"`
-	CheckedAt       time.Time       `json:"checkedAt"`
-	Error           string          `json:"error,omitempty"`
-	History         []NetworkSample `json:"history,omitempty"`
+	Status          string                `json:"status"`
+	LatencyMS       float64               `json:"latencyMs"`
+	PacketLossPct   float64               `json:"packetLossPct"`
+	PacketsSent     int                   `json:"packetsSent"`
+	PacketsReceived int                   `json:"packetsReceived"`
+	Targets         []string              `json:"targets,omitempty"`
+	TargetResults   []NetworkTargetResult `json:"targetResults,omitempty"`
+	CheckedAt       time.Time             `json:"checkedAt"`
+	Error           string                `json:"error,omitempty"`
+	History         []NetworkSample       `json:"history,omitempty"`
 }
 
 // NetworkSample is one completed VPS-local measurement in the recent timeline.
 type NetworkSample struct {
-	Status          string    `json:"status"`
-	LatencyMS       float64   `json:"latencyMs"`
-	PacketLossPct   float64   `json:"packetLossPct"`
-	PacketsSent     int       `json:"packetsSent"`
-	PacketsReceived int       `json:"packetsReceived"`
-	Targets         []string  `json:"targets,omitempty"`
-	CheckedAt       time.Time `json:"checkedAt"`
+	Status          string                `json:"status"`
+	LatencyMS       float64               `json:"latencyMs"`
+	PacketLossPct   float64               `json:"packetLossPct"`
+	PacketsSent     int                   `json:"packetsSent"`
+	PacketsReceived int                   `json:"packetsReceived"`
+	Targets         []string              `json:"targets,omitempty"`
+	TargetResults   []NetworkTargetResult `json:"targetResults,omitempty"`
+	CheckedAt       time.Time             `json:"checkedAt"`
+}
+
+// NetworkTargetResult records the packets actually sent to and received from
+// one destination, so group loss cannot be misattributed to every target.
+type NetworkTargetResult struct {
+	Target          string `json:"target"`
+	PacketsSent     int    `json:"packetsSent"`
+	PacketsReceived int    `json:"packetsReceived"`
 }
 
 type Job struct {

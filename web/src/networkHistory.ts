@@ -24,3 +24,9 @@ export function historySlotsFor(health: NetworkGroupHealth | undefined, now = Da
   }
   return slots
 }
+
+export function targetLossState(sample: NetworkSample | null, target: string): 'loss' | 'ok' | 'unknown' {
+  const result = sample?.targetResults?.find(item => item.target === target)
+  if (!result?.packetsSent) return 'unknown'
+  return result.packetsReceived < result.packetsSent ? 'loss' : 'ok'
+}

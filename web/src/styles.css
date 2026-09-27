@@ -278,6 +278,13 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .network-history-bars i.good { background: var(--jade); }.network-history-bars i.warn { background: var(--gold); }.network-history-bars i.bad { background: var(--cinnabar); }
 .network-history-bars i.partial { background: repeating-linear-gradient(135deg, var(--gold) 0 3px, var(--muted-2) 3px 5px); }
 .network-history-bars i.unavailable { background: var(--muted-2); opacity: .72; }.network-history-bars i.network-history-empty { background: rgba(var(--wash-rgb), .09); }
+.network-history-bars i:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.network-history-tooltip { position: fixed; z-index: 1000; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-sidebar); box-shadow: 0 8px 20px rgba(var(--shadow-rgb), .3); color: var(--paper); font: 500 11px "IBM Plex Mono", monospace; line-height: 1.5; pointer-events: none; }
+.network-history-tooltip-targets { display: flex; flex-wrap: wrap; gap: 0 5px; margin-top: 3px; }
+.network-history-tooltip-targets .loss { color: var(--danger-text); font-weight: 700; }
+.network-history-tooltip-targets small { font-size: 9px; }
+.network-history-tooltip-separator, .network-history-tooltip-legacy { color: var(--muted-2); }
+.network-history-tooltip-legacy { display: block; margin-top: 3px; font-size: 9px; }
 @media (max-width: 560px) {
   .stat-column .network-card { grid-column: 1 / -1; min-height: 162px; }
   .network-card-value strong { font-size: clamp(22px, 6vw, 30px); }
@@ -642,8 +649,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-host-card > header > div b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-host-card > header > div > span > .fleet-host-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .fleet-host-card > header .fleet-host-title b { min-width: 0; }
-.fleet-host-card > header .fleet-host-country { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 12em; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid rgba(211,169,77,.22); color: var(--muted); font-size: 10px; line-height: 1.4; font-style: normal; font-weight: 600; }
-.fleet-host-card > header .fleet-host-flag { display: inline-block; width: 15px; height: 11px; margin-right: 1px; vertical-align: -1px; box-shadow: 0 0 0 1px rgba(var(--wash-rgb),.12); }
+.fleet-host-card > header .fleet-host-country { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 12em; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid rgba(211,169,77,.22); color: var(--muted); font-size: 11px; line-height: 1.4; font-style: normal; font-weight: 600; }
+.fleet-host-card > header .fleet-host-flag { display: inline-block; width: 15px; height: 11px; margin-right: 2px; vertical-align: -1px; box-shadow: 0 0 0 1px rgba(var(--wash-rgb),.12); }
 .fleet-host-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS network_group_samples (
   group_name TEXT NOT NULL, ts INTEGER NOT NULL, status TEXT NOT NULL,
   latency_ms REAL NOT NULL, packet_loss_pct REAL NOT NULL,
   packets_sent INTEGER NOT NULL, packets_received INTEGER NOT NULL,
-  targets_json TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(group_name, ts)
+  targets_json TEXT NOT NULL DEFAULT '[]', target_results_json TEXT NOT NULL DEFAULT '[]',
+  PRIMARY KEY(group_name, ts)
 );
 CREATE TABLE IF NOT EXISTS process_recent (
   pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
@@ -183,6 +184,9 @@ CREATE TABLE IF NOT EXISTS fleet_subscription_cache (
 		}
 	}
 	if err := s.ensureColumn("process_recent", "node_names", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("network_group_samples", "target_results_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("fleet_commands", "actor", "TEXT NOT NULL DEFAULT 'admin'"); err != nil {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func TestNetworkSamplesPersistAcrossReopenAndKeepOrder(t *testing.T) {
 		group  string
 		sample model.NetworkSample
 	}{
-		{"international", model.NetworkSample{Status: "partial", LatencyMS: 120, PacketLossPct: 20, PacketsSent: 10, PacketsReceived: 8, Targets: []string{"8.8.8.8"}, CheckedAt: now}},
+		{"international", model.NetworkSample{Status: "partial", LatencyMS: 120, PacketLossPct: 20, PacketsSent: 10, PacketsReceived: 8, Targets: []string{"1.1.1.1", "8.8.8.8"}, TargetResults: []model.NetworkTargetResult{{Target: "1.1.1.1", PacketsSent: 5, PacketsReceived: 5}, {Target: "8.8.8.8", PacketsSent: 5, PacketsReceived: 3}}, CheckedAt: now}},
 		{"international", model.NetworkSample{Status: "ok", LatencyMS: 42, PacketsSent: 10, PacketsReceived: 10, Targets: []string{"1.1.1.1"}, CheckedAt: now.Add(-time.Minute)}},
 		{"domestic", model.NetworkSample{Status: "ok", LatencyMS: 160, PacketsSent: 10, PacketsReceived: 10, Targets: []string{"194.138.202.35"}, CheckedAt: now}},
 	} {
@@ -43,7 +44,7 @@ func TestNetworkSamplesPersistAcrossReopenAndKeepOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(samples) != 2 || samples[0].LatencyMS != 42 || samples[1].PacketLossPct != 20 || samples[1].Targets[0] != "8.8.8.8" {
+	if len(samples) != 2 || samples[0].LatencyMS != 42 || samples[1].PacketLossPct != 20 || samples[1].Targets[1] != "8.8.8.8" || len(samples[1].TargetResults) != 2 || samples[1].TargetResults[1].PacketsReceived != 3 {
 		t.Fatalf("unexpected persisted samples: %+v", samples)
 	}
 	samples, err = database.RecentNetworkSamples("international", now.Add(-30*time.Second), 30)
@@ -57,5 +58,43 @@ func TestNetworkSamplesPersistAcrossReopenAndKeepOrder(t *testing.T) {
 	var legacyCount int
 	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM network_samples`).Scan(&legacyCount); err != nil || legacyCount != 1 {
 		t.Fatalf("legacy samples were changed: count=%d err=%v", legacyCount, err)
+	}
+}
+
+func TestNetworkSamplesUpgradeOldSchemaWithoutGuessingTargetLoss(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old-network.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE network_group_samples (
+		group_name TEXT NOT NULL, ts INTEGER NOT NULL, status TEXT NOT NULL,
+		latency_ms REAL NOT NULL, packet_loss_pct REAL NOT NULL,
+		packets_sent INTEGER NOT NULL, packets_received INTEGER NOT NULL,
+		targets_json TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(group_name, ts));
+		INSERT INTO network_group_samples VALUES ('domestic', 100, 'ok', 160, 20, 10, 8, '["194.138.202.35","138.113.151.2"]');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	samples, err := database.RecentNetworkSamples("domestic", time.Unix(0, 0), 10)
+	if err != nil || len(samples) != 1 || len(samples[0].TargetResults) != 0 {
+		t.Fatalf("legacy sample should remain unattributed: samples=%+v err=%v", samples, err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	newSample := model.NetworkSample{Status: "ok", PacketsSent: 10, PacketsReceived: 9, Targets: []string{"194.138.202.35", "138.113.151.2"}, TargetResults: []model.NetworkTargetResult{{Target: "194.138.202.35", PacketsSent: 5, PacketsReceived: 5}, {Target: "138.113.151.2", PacketsSent: 5, PacketsReceived: 4}}, CheckedAt: now}
+	if err := database.AddNetworkSample("domestic", newSample); err != nil {
+		t.Fatal(err)
+	}
+	samples, err = database.RecentNetworkSamples("domestic", now.Add(-time.Second), 10)
+	if err != nil || len(samples) != 1 || len(samples[0].TargetResults) != 2 || samples[0].TargetResults[1].PacketsReceived != 4 {
+		t.Fatalf("upgraded schema did not persist per-target loss: samples=%+v err=%v", samples, err)
 	}
 }
