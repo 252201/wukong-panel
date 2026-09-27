@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "5.2.10",
     "@fontsource/ibm-plex-mono": "5.2.7",
+    "flag-icons": "7.5.0",
     "qrcode": "1.5.4",
     "vue": "3.5.39"
   },

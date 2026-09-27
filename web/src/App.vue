@@ -6,6 +6,7 @@ import ThemePicker from './ThemePicker.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
 import { historySlotsFor } from './networkHistory'
+import { countryFlagURL } from './countryFlags'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -359,11 +360,6 @@ function uptime(value?: number) {
   if (days) return `${days}天 ${hours}小时`
   if (hours) return `${hours}小时 ${minutes}分`
   return `${minutes}分`
-}
-function hostCountryFlag(code: string) {
-  const normalized = code.toUpperCase()
-  if (!/^[A-Z]{2}$/.test(normalized)) return ''
-  return String.fromCodePoint(...Array.from(normalized, char => char.charCodeAt(0) + 127397))
 }
 function hostCountryName(code: string) {
   try {
@@ -986,7 +982,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><span class="fleet-host-flag" aria-hidden="true">{{ hostCountryFlag(host.snapshot.location.countryCode) }}</span> {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <em><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
             </header>
             <div class="fleet-host-body">
