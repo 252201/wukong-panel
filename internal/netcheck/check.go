@@ -28,7 +28,7 @@ const (
 )
 
 const defaultTargets = "1.1.1.1,8.8.8.8"
-const defaultDomesticTargets = "194.138.202.35"
+const defaultDomesticTargets = "194.138.202.35,138.113.151.2"
 
 const (
 	internationalGroup = "international"

@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
-- 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35`，通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
+- 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35,138.113.151.2`（第二个目标位于香港），通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
 - 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
 - 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。

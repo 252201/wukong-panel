@@ -53,7 +53,7 @@ func TestParseTargets(t *testing.T) {
 
 func TestDefaultDomesticTarget(t *testing.T) {
 	service := NewService("", "", false, nil)
-	if got := strings.Join(service.domesticLabels, ","); got != "194.138.202.35" {
+	if got := strings.Join(service.domesticLabels, ","); got != "194.138.202.35,138.113.151.2" {
 		t.Fatalf("domestic default targets = %q", got)
 	}
 }
