@@ -78,7 +78,7 @@ function hide() {
       <div v-if="activeSample?.targets?.length" class="network-history-tooltip-targets">
         <template v-for="(target, index) in activeSample.targets" :key="target">
           <span v-if="index" class="network-history-tooltip-separator">/</span>
-          <span :class="{ loss: targetLossState(activeSample, target) === 'loss' }">{{ target }}<small v-if="targetResult(activeSample, target)"> {{ targetResult(activeSample, target)?.packetsReceived }}/{{ targetResult(activeSample, target)?.packetsSent }}</small></span>
+          <span :class="{ loss: targetLossState(activeSample, target) === 'loss' }">{{ target }}<small v-if="targetResult(activeSample, target)"> · {{ targetResult(activeSample, target)?.packetsReceived }}/{{ targetResult(activeSample, target)?.packetsSent }}</small></span>
         </template>
       </div>
       <small v-if="activeSample && activeSample.packetLossPct > 0 && !activeSample.targetResults?.length" class="network-history-tooltip-legacy">{{ english ? 'Per-target loss unavailable for this older sample' : '旧样本无单 IP 丢包明细' }}</small>

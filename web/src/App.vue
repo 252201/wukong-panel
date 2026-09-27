@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NetworkHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
+import { networkGroupFrom, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -106,22 +107,7 @@ const remoteHost = computed(() => selectedHostId.value !== 'local')
 const mutationsDisabled = computed(() => remoteHost.value && (!currentFleetHost.value?.online || !currentFleetHost.value?.compatible))
 const fleetHosts = computed(() => fleetStatus.value?.hosts || [])
 const remoteFleetHosts = computed(() => fleetHosts.value.filter(host => host.id !== 'local'))
-const fleetAggregate = computed(() => {
-  const online = fleetHosts.value.filter(host => host.online)
-  const totals = online.reduce((result, host) => {
-    const metric = host.snapshot?.overview?.now
-    result.cpu += metric?.cpu || 0
-    result.memoryUsed += metric?.memoryUsedBytes || 0
-    result.memoryTotal += metric?.memoryTotalBytes || 0
-    result.diskUsed += metric?.diskUsedBytes || 0
-    result.diskTotal += metric?.diskTotalBytes || 0
-    result.rx += metric?.rxBps || 0
-    result.tx += metric?.txBps || 0
-    result.nodes += host.snapshot?.overview?.nodeCount || 0
-    return result
-  }, { cpu: 0, memoryUsed: 0, memoryTotal: 0, diskUsed: 0, diskTotal: 0, rx: 0, tx: 0, nodes: 0 })
-  return { ...totals, cpu: online.length ? totals.cpu / online.length : 0, online: online.length, total: fleetHosts.value.length }
-})
+const fleetAggregate = computed(() => summarizeFleet(fleetHosts.value))
 
 const trafficPercent = computed(() => {
   const data = overview.value
@@ -130,16 +116,8 @@ const trafficPercent = computed(() => {
 })
 const quotaRing = computed(() => ({ '--progress': `${trafficPercent.value * 3.6}deg` }))
 const networkHealth = computed(() => overview.value?.network)
-type NetworkGroupName = 'international' | 'domestic'
 const networkGroups: NetworkGroupName[] = ['international', 'domestic']
 const networkMetrics = ['latency', 'loss'] as const
-function networkGroupFrom(health: NetworkHealth | undefined, group: NetworkGroupName): NetworkGroupHealth | undefined {
-  if (!health) return undefined
-  if (group === 'domestic') return health.domestic
-  if (health.international) return health.international
-  // Only label a legacy flat result as international when its targets are known.
-  return health.targets?.length && health.targets.every(target => target === '1.1.1.1' || target === '8.8.8.8') ? health : undefined
-}
 function networkGroup(group: NetworkGroupName): NetworkGroupHealth | undefined {
   return networkGroupFrom(networkHealth.value, group)
 }
@@ -954,7 +932,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <div v-if="page === 'fleet'" class="page-content fleet-page">
         <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><button class="primary" @click="createFleetEnrollment">＋ 接入 VPS</button></div>
-        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>平均 CPU</small><strong>{{ fleetAggregate.cpu.toFixed(1) }}<span>%</span></strong><em>仅统计在线主机</em></article><article><small>聚合内存</small><strong>{{ bytes(fleetAggregate.memoryUsed) }}</strong><em>/ {{ bytes(fleetAggregate.memoryTotal) }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }} · {{ fleetAggregate.nodes }} 节点</em></article></section>
+        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `Loss ≥5% or probe outage in 30 min${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟丢包 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }}</em></article></section>
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
