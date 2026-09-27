@@ -282,7 +282,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .network-history-tooltip { position: fixed; z-index: 1000; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-sidebar); box-shadow: 0 8px 20px rgba(var(--shadow-rgb), .3); color: var(--paper); font: 500 11px "IBM Plex Mono", monospace; line-height: 1.5; pointer-events: none; }
 .network-history-tooltip-targets { display: flex; flex-wrap: wrap; gap: 0 5px; margin-top: 3px; }
 .network-history-tooltip-targets .loss { color: var(--danger-text); font-weight: 700; }
-.network-history-tooltip-targets small { font-size: 9px; }
+.network-history-tooltip-targets small { font-size: inherit; }
 .network-history-tooltip-separator, .network-history-tooltip-legacy { color: var(--muted-2); }
 .network-history-tooltip-legacy { display: block; margin-top: 3px; font-size: 9px; }
 @media (max-width: 560px) {
