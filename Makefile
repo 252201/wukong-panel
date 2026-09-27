@@ -21,6 +21,7 @@ test:
 	sh scripts/test-install-cert-renewal.sh
 	sh scripts/test-install-subscription-domain.sh
 	sh scripts/test-install-tls-backfill.sh
+	sh scripts/test-install-update-backup-retention.sh
 	sh scripts/test-singbox-lifecycle.sh
 
 build: web
