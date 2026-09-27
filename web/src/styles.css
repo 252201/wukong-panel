@@ -642,17 +642,16 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-host-card > header > div b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-host-body {
   display: grid;
-  grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
   flex: 1;
   min-width: 0;
   padding: 16px 22px 18px;
 }
 .fleet-resource-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   min-width: 0;
-  padding-right: 18px;
 }
 .fleet-resource {
   display: flex;
@@ -660,15 +659,15 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   justify-content: center;
   gap: 5px;
   min-width: 0;
-  padding: 6px 9px 9px 0;
+  min-height: 64px;
+  padding: 6px 9px 6px 0;
 }
-.fleet-resource:nth-child(even) { padding-left: 13px; border-left: 1px solid var(--line); }
-.fleet-resource:nth-child(n+3) { border-top: 1px solid var(--line); }
+.fleet-resource + .fleet-resource { padding-left: 13px; border-left: 1px solid var(--line); }
 .fleet-resource small { color: var(--muted); font-size: 10px; }
 .fleet-resource b {
   overflow: hidden;
   color: var(--paper);
-  font: 600 12px/1.3 "IBM Plex Mono", monospace;
+  font: 600 clamp(10px, 1.4cqw, 12px)/1.3 "IBM Plex Mono", monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -688,8 +687,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   column-gap: 0;
   row-gap: 9px;
   min-width: 0;
-  padding-left: 18px;
-  border-left: 1px solid var(--line);
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 .fleet-network-heading { grid-column: 1 / -1; }
 .fleet-network-heading, .fleet-network-region {
@@ -721,11 +720,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-network-track > span { color: var(--muted-2); font-size: 9px; }
 .fleet-host-network .network-history-bars { height: 8px; }
 .fleet-host-card footer { margin-top: auto; }
-@container (max-width: 800px) {
-  .fleet-host-body { grid-template-columns: 1fr; gap: 16px; }
-  .fleet-resource-grid { padding-right: 0; }
-  .fleet-resource { min-height: 57px; }
-  .fleet-host-network { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+@container (max-width: 640px) {
+  .fleet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fleet-resource:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .fleet-resource:nth-child(n+3) { border-top: 1px solid var(--line); }
 }
 @container (max-width: 560px) {
   .fleet-host-network { grid-template-columns: minmax(0, 1fr); }
