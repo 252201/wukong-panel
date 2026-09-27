@@ -58,6 +58,9 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 			var existing model.FleetSnapshot
 			if json.Unmarshal([]byte(existingRaw), &existing) == nil {
 				existing.Overview = heartbeat.Snapshot.Overview
+				if heartbeat.Snapshot.Location != nil {
+					existing.Location = heartbeat.Snapshot.Location
+				}
 				states := make(map[string]model.Node, len(heartbeat.Snapshot.Nodes))
 				for _, node := range heartbeat.Snapshot.Nodes {
 					states[node.ID] = node

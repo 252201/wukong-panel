@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/hostlocation"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/netcheck"
 	"github.com/252201/wukong-panel/internal/security"
@@ -48,6 +49,7 @@ type FleetConnector struct {
 	http       *http.Client
 	mutate     sync.Mutex
 	heartbeats atomic.Uint64
+	location   *hostlocation.Detector
 }
 
 func LoadFleetClientConfig(cfg config.Config) (FleetClientConfig, string, error) {
@@ -78,7 +80,7 @@ func NewFleetConnector(cfg config.Config, s *store.Store, manager *Manager, vers
 	if err != nil {
 		return nil, err
 	}
-	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, network: network, version: version, http: NewTrustedFleetHTTPClient(40 * time.Second)}, nil
+	return &FleetConnector{cfg: cfg, client: client, token: token, store: s, manager: manager, network: network, version: version, http: NewTrustedFleetHTTPClient(40 * time.Second), location: hostlocation.New()}, nil
 }
 
 func NewTrustedFleetHTTPClient(timeout time.Duration) *http.Client {
@@ -94,6 +96,9 @@ func NewTrustedFleetHTTPClient(timeout time.Duration) *http.Client {
 }
 
 func (c *FleetConnector) Run(ctx context.Context) {
+	if c.location != nil {
+		go c.location.Run(ctx)
+	}
 	go c.heartbeatLoop(ctx)
 	c.commandLoop(ctx)
 }
@@ -256,6 +261,9 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 		}
 	}
 	snapshot := model.FleetSnapshot{Full: full, Overview: model.Overview{Now: now, Devices: devices, Processes: processes, ProcessCount: count, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: usedRX + usedTX, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: c.manager.Version(ctx), PanelVersion: c.version}, Nodes: nodes}
+	if c.location != nil {
+		snapshot.Location = c.location.Current()
+	}
 	if c.network != nil {
 		snapshot.Overview.Network = c.network.Current()
 	}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/agent"
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/hostlocation"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/monitor"
 	"github.com/252201/wukong-panel/internal/netcheck"
@@ -176,6 +177,9 @@ func main() {
 	case "web":
 		client := agent.NewClient(cfg.AgentSocket, cfg.AgentToken)
 		server := webserver.New(cfg, s, client, version)
+		location := hostlocation.New()
+		server.SetHostLocation(location)
+		go location.Run(ctx)
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	case "serve":
@@ -202,6 +206,9 @@ func main() {
 		go network.Run(ctx)
 		go func() { <-ctx.Done() }()
 		server := webserver.New(cfg, s, directAgent{manager: manager, network: network}, version)
+		location := hostlocation.New()
+		server.SetHostLocation(location)
+		go location.Run(ctx)
 		fatalServe(server.ListenAndServe(ctx))
 		return
 	default:

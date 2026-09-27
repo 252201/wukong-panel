@@ -363,6 +363,7 @@ type FleetHost struct {
 
 type FleetSnapshot struct {
 	Full               bool                       `json:"full"`
+	Location           *HostLocation              `json:"location,omitempty"`
 	Overview           Overview                   `json:"overview"`
 	Nodes              []Node                     `json:"nodes"`
 	NodeDetails        map[string]NodeEditDetails `json:"nodeDetails,omitempty"`
@@ -373,6 +374,12 @@ type FleetSnapshot struct {
 	SOCKSExit          *SOCKSExit                 `json:"socksExit,omitempty"`
 	Timeline           TrafficTimeline            `json:"timeline"`
 	Endpoints          []EndpointStat             `json:"endpoints"`
+}
+
+// HostLocation describes the country of this host's directly observed public IP.
+type HostLocation struct {
+	PublicIP    string `json:"publicIP"`
+	CountryCode string `json:"countryCode"`
 }
 
 type FleetEnrollmentRequest struct {

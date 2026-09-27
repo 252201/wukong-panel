@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/hostlocation"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
@@ -67,9 +68,14 @@ type Server struct {
 	fleetVault       *security.Vault
 	fleetVaultErr    error
 	fleetProbeClient *http.Client
+	hostLocation     *hostlocation.Detector
 	limiterMu        sync.Mutex
 	loginAttempts    map[string][]time.Time
 	fleetRequests    map[string][]time.Time
+}
+
+func (s *Server) SetHostLocation(detector *hostlocation.Detector) {
+	s.hostLocation = detector
 }
 
 func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Server {

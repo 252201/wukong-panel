@@ -61,7 +61,7 @@ func TestFleetHeartbeatMergeMetricsAndProtocolCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Unix()
-	full := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: now, CPU: 12}}, Nodes: []model.Node{{ID: "n1", Name: "Node", Protocol: "vless", Status: "active"}}}}
+	full := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: "0.9.0", Snapshot: model.FleetSnapshot{Full: true, Location: &model.HostLocation{PublicIP: "1.1.1.1", CountryCode: "US"}, Overview: model.Overview{Now: model.Metric{Timestamp: now, CPU: 12}}, Nodes: []model.Node{{ID: "n1", Name: "Node", Protocol: "vless", Status: "active"}}}}
 	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, full); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +75,9 @@ func TestFleetHeartbeatMergeMetricsAndProtocolCompatibility(t *testing.T) {
 	}
 	if !stored.Compatible || stored.Snapshot.Nodes[0].Protocol != "vless" || stored.Snapshot.Nodes[0].Status != "inactive" {
 		t.Fatalf("fast heartbeat did not merge with slow snapshot: %+v", stored)
+	}
+	if stored.Snapshot.Location == nil || stored.Snapshot.Location.CountryCode != "US" {
+		t.Fatalf("fast heartbeat lost host location: %+v", stored.Snapshot.Location)
 	}
 	metrics, err := database.FleetMetrics(host.ID, 10)
 	if err != nil {
