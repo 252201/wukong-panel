@@ -65,7 +65,7 @@ func Parse(version string) Config {
 	flag.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
 	flag.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
 	flag.StringVar(&cfg.NetworkProbeTargets, "network-probe-targets", env("WUKONG_NETWORK_PROBE_TARGETS", "1.1.1.1,8.8.8.8"), "comma-separated IPv4 addresses for local ICMP network checks")
-	flag.StringVar(&cfg.NetworkProbeDomesticTargets, "network-probe-domestic-targets", env("WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS", "194.138.202.35,159.27.255.225"), "comma-separated IPv4 addresses for domestic ICMP checks")
+	flag.StringVar(&cfg.NetworkProbeDomesticTargets, "network-probe-domestic-targets", env("WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS", "194.138.202.35"), "comma-separated IPv4 addresses for domestic ICMP checks")
 	flag.Parse()
 	if cfg.AgentTokenFile == "" {
 		cfg.AgentTokenFile = filepath.Join(cfg.DataDir, "agent.token")
