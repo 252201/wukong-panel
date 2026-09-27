@@ -732,6 +732,23 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-network-track > span { color: var(--muted-2); font-size: 9px; }
 .fleet-host-network .network-history-bars { height: 8px; }
 .fleet-host-card footer { margin-top: auto; }
+.fleet-host-card footer button:not(:disabled) {
+  cursor: pointer;
+  transition: border-color .18s ease, background-color .18s ease, color .18s ease, transform .18s ease;
+}
+.fleet-host-card footer button:not(:disabled):hover,
+.fleet-host-card footer button:not(:disabled):focus-visible {
+  border-color: var(--gold);
+  background: rgba(211,169,77,.1);
+  color: var(--gold-bright);
+  transform: translateY(-1px);
+}
+.fleet-host-card footer button.danger:not(:disabled):hover,
+.fleet-host-card footer button.danger:not(:disabled):focus-visible {
+  border-color: var(--cinnabar);
+  background: rgba(202,93,70,.12);
+  color: var(--danger-text);
+}
 @container (max-width: 700px) {
   .fleet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fleet-resource:nth-child(odd) { padding-left: 0; border-left: 0; }
