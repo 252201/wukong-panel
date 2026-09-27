@@ -44,6 +44,8 @@ const english: Record<string, string> = {
   '实时采样': 'live sampling',
   '网络延迟': 'Network latency',
   '丢包率': 'Packet loss',
+  '近 30 分钟总丢包率': '30-minute total packet loss',
+  '总丢包': 'Total loss',
   '单机自治': 'standalone control',
   '悟空面板': 'Wukong Panel',
   '进入控制台': 'Enter the console',

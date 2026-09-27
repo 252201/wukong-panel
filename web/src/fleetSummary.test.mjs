@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { summarizeFleet } from './fleetSummary.ts'
+import { recentNetworkLossPct, summarizeFleet } from './fleetSummary.ts'
 
 const now = Date.parse('2026-09-27T10:00:00Z')
 const sample = (checkedAt, packetsSent = 10, packetsReceived = packetsSent, status = 'ok') => ({
@@ -27,6 +27,14 @@ test('one lost packet among 30 full probe minutes does not alert', () => {
   const history = Array.from({ length: 30 }, (_, index) => sample(now - (29 - index) * 60_000, 10, index === 0 ? 9 : 10))
   const network = { international: fresh, domestic: { ...fresh, history } }
   assert.equal(summarizeFleet([host('local', true, 3, 3, network)], now).networkAlerts, 0)
+})
+
+test('card loss uses the 30-minute packet total instead of the latest sample', () => {
+  const history = Array.from({ length: 30 }, (_, index) => sample(now - (29 - index) * 60_000, 10, index >= 22 ? 9 : 10))
+  const health = { ...history.at(-1), history }
+  assert.equal(health.packetLossPct, 10)
+  assert.equal(recentNetworkLossPct(health, now)?.toFixed(1), '2.7')
+  assert.equal(recentNetworkLossPct(sample(now, 0, 0), now), null)
 })
 
 test('a 30-minute total loss of at least 5% in either region alerts once per host', () => {

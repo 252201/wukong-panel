@@ -8,7 +8,7 @@ import { applyThemePreference, observeSystemTheme, readThemePreference, type The
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { networkGroupFrom, summarizeFleet, type NetworkGroupName } from './fleetSummary'
+import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -139,8 +139,8 @@ function networkLatency(group: NetworkGroupName) {
   return health.packetsReceived ? health.latencyMs.toFixed(1) : (language.value === 'en-US' ? 'No reply' : '无响应')
 }
 function networkLoss(group: NetworkGroupName) {
-  const health = networkGroup(group)
-  return networkReadable(group) && health ? health.packetLossPct.toFixed(1) : '—'
+  const loss = networkReadable(group) ? recentNetworkLossPct(networkGroup(group)) : null
+  return loss === null ? '—' : loss.toFixed(1)
 }
 function networkHistoryLabel(group: NetworkGroupName) {
   const english = language.value === 'en-US'
@@ -159,9 +159,9 @@ function networkLatencyTone(group: NetworkGroupName) {
   return health.latencyMs >= 200 ? 'bad' : health.latencyMs >= 100 ? 'warn' : 'good'
 }
 function networkLossTone(group: NetworkGroupName) {
-  const health = networkGroup(group)
-  if (!networkReadable(group) || !health) return 'muted'
-  return health.packetLossPct >= 5 ? 'bad' : health.packetLossPct > 0 ? 'warn' : 'good'
+  const loss = networkReadable(group) ? recentNetworkLossPct(networkGroup(group)) : null
+  if (loss === null) return 'muted'
+  return loss >= 5 ? 'bad' : loss > 0 ? 'warn' : 'good'
 }
 function fleetNetworkGroup(host: FleetHost, group: NetworkGroupName) {
   return networkGroupFrom(host.snapshot?.overview?.network, group)
@@ -181,13 +181,19 @@ function fleetNetworkReadable(host: FleetHost, group: NetworkGroupName) {
 function fleetNetworkValue(host: FleetHost, group: NetworkGroupName, metric: 'latency' | 'loss') {
   const health = fleetNetworkGroup(host, group)
   if (!fleetNetworkReadable(host, group) || !health) return '—'
-  if (metric === 'loss') return `${health.packetLossPct.toFixed(1)}%`
+  if (metric === 'loss') {
+    const loss = recentNetworkLossPct(health)
+    return loss === null ? '—' : `${loss.toFixed(1)}%`
+  }
   return health.packetsReceived ? `${health.latencyMs.toFixed(1)} ms` : (language.value === 'en-US' ? 'No reply' : '无响应')
 }
 function fleetNetworkTone(host: FleetHost, group: NetworkGroupName, metric: 'latency' | 'loss') {
   const health = fleetNetworkGroup(host, group)
   if (!fleetNetworkReadable(host, group) || !health) return 'muted'
-  if (metric === 'loss') return health.packetLossPct >= 5 ? 'bad' : health.packetLossPct > 0 ? 'warn' : 'good'
+  if (metric === 'loss') {
+    const loss = recentNetworkLossPct(health)
+    return loss === null ? 'muted' : loss >= 5 ? 'bad' : loss > 0 ? 'warn' : 'good'
+  }
   if (!health.packetsReceived || health.latencyMs >= 200) return 'bad'
   return health.latencyMs >= 100 ? 'warn' : 'good'
 }
@@ -951,7 +957,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <div v-for="group in networkGroups" :key="group" class="fleet-network-group">
                   <div class="fleet-network-summary" :title="fleetNetworkHint(host, group)">
                     <div class="fleet-network-region"><strong>{{ networkGroupLabel(group) }}</strong><small>{{ fleetNetworkStateLabel(host, group) }}</small></div>
-                    <dl><div v-for="metric in networkMetrics" :key="metric"><dt>{{ metric === 'latency' ? '延迟' : '丢包' }}</dt><dd :class="fleetNetworkTone(host, group, metric)">{{ fleetNetworkValue(host, group, metric) }}</dd></div></dl>
+                    <dl><div v-for="metric in networkMetrics" :key="metric"><dt>{{ metric === 'latency' ? '延迟' : '总丢包' }}</dt><dd :class="fleetNetworkTone(host, group, metric)">{{ fleetNetworkValue(host, group, metric) }}</dd></div></dl>
                   </div>
                   <div v-for="metric in networkMetrics" :key="metric" class="fleet-network-track"><span>{{ metric === 'latency' ? '延迟' : '丢包' }}</span><NetworkHistoryBars :samples="fleetNetworkHistorySlots(host, group)" :metric="metric" :group-label="networkGroupLabel(group)" :language="language" :history-label="`${networkGroupLabel(group)}${metric === 'latency' ? '延迟' : '丢包'}近 30 分钟历史`" /></div>
                 </div>
@@ -985,8 +991,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <div class="network-card-history"><div class="network-history-head"><span>{{ language === 'en-US' ? 'Last 30 minutes' : '近 30 分钟' }}</span></div><div v-for="group in networkGroups" :key="group" class="network-history-row"><span class="network-history-label">{{ networkGroupLabel(group) }}</span><NetworkHistoryBars :samples="networkHistorySlots(group)" metric="latency" :group-label="networkGroupLabel(group)" :language="language" :history-label="`${networkGroupLabel(group)}${language === 'en-US' ? ' latency history for the last 30 minutes' : '近 30 分钟延迟历史'}`" /><small :title="networkHistoryLabel(group)">{{ networkHistoryCount(group) }}/30</small></div></div>
             </article>
             <article class="panel-card overview-slot network-card">
-              <div class="network-card-head"><span>丢包率</span><small>{{ networkHealth?.demo ? 'DEMO · ' : '' }}ICMP</small></div>
-              <div class="network-card-values"><div v-for="group in networkGroups" :key="group" class="network-card-metric" :title="networkGroup(group)?.error || networkGroup(group)?.targets?.join(' / ') || networkHistoryLabel(group)"><small>{{ networkGroupLabel(group) }}</small><div class="network-card-value" :class="networkLossTone(group)"><strong>{{ networkLoss(group) }}</strong><em v-if="networkReadable(group)">%</em></div></div></div>
+              <div class="network-card-head"><span>近 30 分钟总丢包率</span><small>{{ networkHealth?.demo ? 'DEMO · ' : '' }}ICMP</small></div>
+              <div class="network-card-values"><div v-for="group in networkGroups" :key="group" class="network-card-metric" :title="networkGroup(group)?.error || networkGroup(group)?.targets?.join(' / ') || networkHistoryLabel(group)"><small>{{ networkGroupLabel(group) }}</small><div class="network-card-value" :class="networkLossTone(group)"><strong>{{ networkLoss(group) }}</strong><em v-if="networkLoss(group) !== '—'">%</em></div></div></div>
               <div class="network-card-history"><div class="network-history-head"><span>{{ language === 'en-US' ? 'Last 30 minutes' : '近 30 分钟' }}</span></div><div v-for="group in networkGroups" :key="group" class="network-history-row"><span class="network-history-label">{{ networkGroupLabel(group) }}</span><NetworkHistoryBars :samples="networkHistorySlots(group)" metric="loss" :group-label="networkGroupLabel(group)" :language="language" :history-label="`${networkGroupLabel(group)}${language === 'en-US' ? ' packet loss history for the last 30 minutes' : '近 30 分钟丢包历史'}`" /><small :title="networkHistoryLabel(group)">{{ networkHistoryCount(group) }}/30</small></div></div>
             </article>
           </div>
