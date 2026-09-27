@@ -37,6 +37,7 @@ RESIDENTIAL_ENDPOINT=""
 RESIDENTIAL_PUBLIC_KEY=""
 SINGBOX_TRANSACTION_ROOT="${WUKONG_SINGBOX_TRANSACTION_ROOT:-/var/lib/wukong-panel/backups/sing-box/transaction}"
 SINGBOX_BACKUP_ROOT="${WUKONG_SINGBOX_BACKUP_ROOT:-/var/lib/wukong-panel/backups/sing-box}"
+UPDATE_BACKUP_RETENTION=3
 SINGBOX_TRANSACTION_ACTIVE=false
 SINGBOX_RUNTIME_BIN=""
 SINGBOX_RUNTIME_CONFIG_DIR=""
@@ -1349,6 +1350,30 @@ disable_certificate_renewal() {
   rm -f /usr/local/sbin/wukong-cert-renew /usr/local/sbin/wukong-cert-reload
 }
 
+prune_update_backups() {
+  update_backup_root="${WUKONG_UPDATE_BACKUP_ROOT:-/var/lib/wukong-panel/backups}"
+  [ -d "$update_backup_root" ] || return 0
+
+  find "$update_backup_root" -mindepth 1 -maxdepth 1 -type d \
+    -name 'update-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -print \
+    | while IFS= read -r update_backup; do
+        [ -e "$update_backup/.rollback-required" ] || printf '%s\n' "$update_backup"
+      done \
+    | LC_ALL=C sort -r \
+    | awk -v keep="$UPDATE_BACKUP_RETENTION" 'NR > keep' \
+    | while IFS= read -r old_update_backup; do
+        case "$old_update_backup" in
+          "$update_backup_root"/update-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9])
+            if rm -rf "$old_update_backup"; then
+              info "已清理超出保留数量的更新备份：$old_update_backup"
+            else
+              warn "无法清理旧更新备份：$old_update_backup"
+            fi
+            ;;
+        esac
+      done
+}
+
 update_panel() {
   backfill_panel_domain
   backfill_panel_tls
@@ -1357,6 +1382,7 @@ update_panel() {
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_dir="/var/lib/wukong-panel/backups/update-$timestamp"
   install -d -m 0700 "$backup_dir"
+  : > "$backup_dir/.rollback-required"
   cp -a /usr/local/bin/wukong-panel "$backup_dir/wukong-panel"
   [ ! -r /etc/wukong-panel/env ] || cp -a /etc/wukong-panel/env "$backup_dir/env"
   stop_panel_services
@@ -1373,6 +1399,10 @@ update_panel() {
     die "替换二进制失败，已恢复更新前版本"
   fi
   if start_panel_services && health=$(wait_for_web); then
+    if ! rm -f "$backup_dir/.rollback-required"; then
+      warn "无法更新备份状态标记，保留本次更新备份：$backup_dir"
+    fi
+    prune_update_backups
     info "悟空面板更新完成：$health"
     info "更新前备份：$backup_dir"
     return 0
