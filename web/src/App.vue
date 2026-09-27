@@ -317,20 +317,20 @@ function protocolInfo(protocol: string) { return protocolCatalog[protocol as key
 const selectedProtocolInfo = computed(() => protocolInfo(createForm.protocol))
 const isTunnelProtocol = computed(() => createForm.protocol === 'vless-ws-tunnel')
 
-function bytes(value = 0) {
+function bytes(value = 0, fractionDigits?: number) {
   if (!Number.isFinite(value)) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let size = Math.max(0, value); let index = 0
   while (size >= 1000 && index < units.length - 1) { size /= 1000; index++ }
-  return `${size.toFixed(index < 2 ? 0 : 2)} ${units[index]}`
+  return `${size.toFixed(fractionDigits ?? (index < 2 ? 0 : 2))} ${units[index]}`
 }
-function resourceUsage(used = 0, total = 0) {
+function resourceUsage(used = 0, total = 0, fractionDigits?: number) {
   if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return '— / —'
-  return `${bytes(used)} / ${bytes(total)}`
+  return `${bytes(used, fractionDigits)} / ${bytes(total, fractionDigits)}`
 }
-function resourcePercent(used = 0, total = 0, fallback = 0) {
+function resourcePercent(used = 0, total = 0, fallback = 0, fractionDigits = 1) {
   const percent = total > 0 ? used / total * 100 : fallback
-  return `${Math.max(0, percent).toFixed(1)}% 已用`
+  return `${Math.max(0, percent).toFixed(fractionDigits)}% 已用`
 }
 function fleetBillingUsage(data?: Overview) {
   if (!data) return '—'
@@ -980,7 +980,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <div class="fleet-host-body">
               <section class="fleet-resource-grid" aria-label="主机资源">
                 <div class="fleet-resource"><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b><em>负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</em></div>
-                <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0) }}</em></div>
+                <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0, 0) }}</em></div>
                 <div class="fleet-resource"><small>磁盘</small><b :title="resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</em></div>
                 <div class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
               </section>

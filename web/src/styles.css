@@ -660,10 +660,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   gap: 5px;
   min-width: 0;
   min-height: 64px;
-  padding: 6px 9px 6px 0;
+  padding: 6px 7px 6px 0;
 }
-.fleet-resource + .fleet-resource { padding-left: 13px; border-left: 1px solid var(--line); }
-.fleet-resource small { color: var(--muted); font-size: 10px; }
+.fleet-resource + .fleet-resource { padding-left: 10px; border-left: 1px solid var(--line); }
+.fleet-resource small { color: var(--muted); font-size: 12px; }
 .fleet-resource b {
   overflow: hidden;
   color: var(--paper);
@@ -672,10 +672,11 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   white-space: nowrap;
 }
 .fleet-resource:first-child b { font-size: 17px; }
+.fleet-resource:not(:first-child) b { font-size: clamp(13px, calc(1.4cqw + 3px), 15px); letter-spacing: -.25px; }
 .fleet-resource em {
   overflow: hidden;
   color: var(--gold-muted-text);
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -720,7 +721,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-network-track > span { color: var(--muted-2); font-size: 9px; }
 .fleet-host-network .network-history-bars { height: 8px; }
 .fleet-host-card footer { margin-top: auto; }
-@container (max-width: 640px) {
+@container (max-width: 700px) {
   .fleet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fleet-resource:nth-child(odd) { padding-left: 0; border-left: 0; }
   .fleet-resource:nth-child(n+3) { border-top: 1px solid var(--line); }
