@@ -766,3 +766,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .fleet-host-body { padding-inline: 15px; }
   .fleet-host-card footer { padding-inline: 15px; }
 }
+
+.fleet-enroll-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+@media (max-width: 700px) { .fleet-page > .page-intro { flex-direction: column; } .fleet-enroll-actions { width: 100%; } .fleet-enroll-actions button { flex: 1 1 150px; } }

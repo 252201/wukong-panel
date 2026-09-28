@@ -11,7 +11,7 @@ test:
 	go vet ./...
 	cd web && npm test
 	cd web && npm run build
-	sh -n install.sh uninstall.sh bootstrap.sh compat/deploy-hy2.sh
+	sh -n install.sh uninstall.sh bootstrap.sh probe-install.sh compat/deploy-hy2.sh
 	sh scripts/test-install-actions.sh
 	sh scripts/test-install-hardening.sh
 	sh scripts/test-install-residential-dependencies.sh
@@ -27,6 +27,7 @@ test:
 build: web
 	mkdir -p build
 	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o build/wukong-panel ./cmd/wukong-panel
+	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o build/wukong-probe ./cmd/wukong-probe
 
 release: web
 	./scripts/build-release.sh $(VERSION)

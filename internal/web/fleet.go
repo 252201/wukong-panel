@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -367,7 +368,19 @@ func (s *Server) createFleetEnrollment(w http.ResponseWriter, r *http.Request, s
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	enrollmentType := r.URL.Query().Get("type")
+	if enrollmentType != "" && enrollmentType != "panel" && enrollmentType != "probe" {
+		writeError(w, http.StatusBadRequest, "未知接入类型")
+		return
+	}
+	if enrollmentType == "" {
+		enrollmentType = "panel"
+	}
+	probe := enrollmentType == "probe"
 	token, err := security.RandomToken(24)
+	if err == nil && probe {
+		token = "probe_" + token
+	}
 	if err == nil {
 		err = s.store.CreateFleetEnrollmentToken(token, time.Now().Add(10*time.Minute))
 	}
@@ -376,7 +389,10 @@ func (s *Server) createFleetEnrollment(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	command := fmt.Sprintf("curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --join-controller %s --enrollment-token %s", shellQuote(publicURL), shellQuote(token))
-	_ = s.store.Audit(session.Username, "fleet.enrollment.create", "fleet", "expires in 10 minutes")
+	if probe {
+		command = fmt.Sprintf("curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/probe-install.sh | sudo sh -s -- --controller %s --enrollment-token %s", shellQuote(publicURL), shellQuote(token))
+	}
+	_ = s.store.Audit(session.Username, "fleet.enrollment.create", "fleet", fmt.Sprintf("type=%s expires in 10 minutes", enrollmentType))
 	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "expiresAt": time.Now().Add(10 * time.Minute), "command": command})
 }
 
@@ -406,6 +422,14 @@ func (s *Server) fleetAgentEnroll(w http.ResponseWriter, r *http.Request) {
 	if len(request.Name) > 80 || len(request.Hostname) > 255 || request.Token == "" {
 		writeError(w, http.StatusBadRequest, "接入信息无效")
 		return
+	}
+	if strings.HasPrefix(request.Token, "probe_") {
+		if !slices.Contains(request.Capabilities, "probe") {
+			writeError(w, http.StatusBadRequest, "探针接入令牌只能用于轻量探针")
+			return
+		}
+		request.Capabilities = []string{"overview", "probe"}
+		request.PanelVersion = ""
 	}
 	hosts, err := s.store.FleetHosts(false)
 	if err != nil || len(hosts) >= 10 {
@@ -510,7 +534,7 @@ func (s *Server) fleetAgentNextCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, err := s.store.FleetHost(hostID)
-	if err != nil || !host.Compatible {
+	if err != nil || !host.Compatible || fleetHasCapability(host, "probe") {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -681,6 +705,10 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		return
 	}
 	resource := strings.Trim(r.PathValue("resource"), "/")
+	if fleetHasCapability(host, "probe") {
+		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
+		return
+	}
 	if r.Method == http.MethodGet {
 		if s.writeFleetSnapshotResource(w, host, resource) {
 			return
@@ -840,6 +868,9 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 }
 
 func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload json.RawMessage, actor string, createJob bool) (model.FleetCommand, model.Job, error) {
+	if fleetHasCapability(host, "probe") {
+		return model.FleetCommand{}, model.Job{}, errors.New("轻量探针不接受远程命令")
+	}
 	if s.fleetVaultErr != nil {
 		return model.FleetCommand{}, model.Job{}, s.fleetVaultErr
 	}
@@ -867,6 +898,15 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 	}
 	_ = s.store.Audit(actor, "fleet.command.queue", host.ID, kind+" "+command.ID)
 	return command, job, nil
+}
+
+func fleetHasCapability(host model.FleetHost, capability string) bool {
+	for _, item := range host.Capabilities {
+		if item == capability {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) waitFleetCommand(ctx context.Context, id string, timeout time.Duration) (json.RawMessage, error) {
@@ -945,6 +985,9 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 		}
 		host, err := s.store.FleetHost(hostID)
 		if err != nil || host.Archived {
+			continue
+		}
+		if fleetHasCapability(host, "probe") {
 			continue
 		}
 		var cached []fleetSubscriptionEntry

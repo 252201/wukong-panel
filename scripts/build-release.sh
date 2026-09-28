@@ -10,11 +10,13 @@ mkdir -p "$OUT"
 
 for arch in amd64 arm64; do
   echo "building linux/$arch"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-    -ldflags "-s -w -X main.version=$VERSION" \
-    -o "$OUT/wukong-panel-linux-$arch" ./cmd/wukong-panel
+  for application in panel probe; do
+    CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+      -ldflags "-s -w -X main.version=$VERSION" \
+      -o "$OUT/wukong-$application-linux-$arch" "./cmd/wukong-$application"
+  done
 done
-cp "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/bootstrap.sh" "$OUT/"
+cp "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/bootstrap.sh" "$ROOT/probe-install.sh" "$OUT/"
 chmod 0755 "$OUT"/*
-(cd "$OUT" && sha256sum wukong-panel-linux-* > SHA256SUMS)
+(cd "$OUT" && sha256sum wukong-panel-linux-* wukong-probe-linux-* > SHA256SUMS)
 echo "release artifacts: $OUT"

@@ -46,7 +46,7 @@ jobs:
           SING_BOX_TEST_BIN="/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box" \
             go test -run '^(TestGeneratedConfigsPassRealSingBoxCheck|TestGeneratedVLESSRealityCompletesFullRoundTrip|TestGeneratedAnyTLSCompletesFullRoundTrip|TestGeneratedProbesPassRealSingBoxCheck)$' -v ./internal/agent ./internal/singboxconfig
       - run: go vet ./...
-      - run: sh -n install.sh uninstall.sh bootstrap.sh compat/deploy-hy2.sh
+      - run: sh -n install.sh uninstall.sh bootstrap.sh probe-install.sh compat/deploy-hy2.sh
       - run: sh scripts/test-install-acme-status.sh
       - run: sh scripts/test-install-actions.sh
       - run: sh scripts/test-install-hardening.sh
@@ -57,6 +57,7 @@ jobs:
       - run: |
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-$arch ./cmd/wukong-panel
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-probe-$arch ./cmd/wukong-probe
           done
 
   installer-matrix:
@@ -70,7 +71,7 @@ jobs:
       - name: Validate installer syntax in target image
         run: |
           docker run --rm -v "$PWD:/src:ro" "${{ matrix.image }}" sh -c '
-            sh -n /src/install.sh /src/uninstall.sh /src/bootstrap.sh
+            sh -n /src/install.sh /src/uninstall.sh /src/bootstrap.sh /src/probe-install.sh
             if sh /src/install.sh --action invalid >/tmp/invalid.log 2>&1; then exit 1; fi
             grep -q -- "--action 必须是" /tmp/invalid.log
             if sh /src/install.sh --update --unattended >/tmp/update.log 2>&1; then exit 1; fi

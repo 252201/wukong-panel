@@ -83,13 +83,26 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 	if err != nil {
 		return err
 	}
-	capabilities, _ := json.Marshal(heartbeat.Capabilities)
 	now := time.Now().Unix()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	var enrolledCapabilitiesJSON string
+	if err = tx.QueryRowContext(ctx, `SELECT capabilities_json FROM fleet_hosts WHERE id=? AND archived_at=0`, hostID).Scan(&enrolledCapabilitiesJSON); err != nil {
+		return err
+	}
+	var enrolledCapabilities []string
+	_ = json.Unmarshal([]byte(enrolledCapabilitiesJSON), &enrolledCapabilities)
+	for _, capability := range enrolledCapabilities {
+		if capability == "probe" {
+			// Probe enrollment is immutable: heartbeats cannot turn a read-only probe into a command agent.
+			heartbeat.Capabilities = []string{"overview", "probe"}
+			break
+		}
+	}
+	capabilities, _ := json.Marshal(heartbeat.Capabilities)
 	result, err := tx.ExecContext(ctx, `UPDATE fleet_hosts SET panel_version=?,sing_box_version=?,protocol_version=?,capabilities_json=?,snapshot_json=?,last_seen_at=?,updated_at=? WHERE id=? AND archived_at=0`, heartbeat.PanelVersion, heartbeat.SingBoxVersion, heartbeat.ProtocolVersion, string(capabilities), string(snapshot), now, now, hostID)
 	if err != nil {
 		return err
