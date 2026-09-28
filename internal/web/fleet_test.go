@@ -14,6 +14,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/model"
+	"github.com/252201/wukong-panel/internal/probe"
 	"github.com/252201/wukong-panel/internal/store"
 )
 
@@ -459,5 +460,95 @@ func TestFleetAgentPayloadLimitAndControllerDisable(t *testing.T) {
 	server.Handler().ServeHTTP(disabled, poll)
 	if disabled.Code != http.StatusNotFound {
 		t.Fatalf("disabled controller accepted agent: %d", disabled.Code)
+	}
+}
+
+func TestProbeEnrollmentCannotGainFleetCommands(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	const token = "probe_once"
+	if err := database.CreateFleetEnrollmentToken(token, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	fullRequest := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/enroll", strings.NewReader(`{"token":"probe_once","name":"Full","capabilities":["nodes.write"]}`))
+	fullRequest.RemoteAddr = "192.0.2.13:1234"
+	fullRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(fullRecorder, fullRequest)
+	if fullRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("probe token accepted full panel: %d", fullRecorder.Code)
+	}
+	enrollment, _ := json.Marshal(model.FleetEnrollmentRequest{Token: token, Name: "Probe", Hostname: "probe", OS: "linux", Arch: "amd64", ProtocolVersion: 1, Capabilities: []string{"overview", "probe"}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/enroll", bytes.NewReader(enrollment))
+	request.RemoteAddr = "192.0.2.12:1234"
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("enroll: %d %s", recorder.Code, recorder.Body.String())
+	}
+	var enrolled model.FleetEnrollmentResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &enrolled); err != nil {
+		t.Fatal(err)
+	}
+	spoofed := model.FleetHeartbeat{ProtocolVersion: 1, Capabilities: []string{"overview", "nodes.write", "subscription-render"}, Snapshot: model.FleetSnapshot{Full: true, Overview: model.Overview{Now: model.Metric{Timestamp: time.Now().Unix(), CPU: 19}}}}
+	if err := database.SaveFleetHeartbeat(context.Background(), enrolled.HostID, spoofed); err != nil {
+		t.Fatal(err)
+	}
+	host, err := database.FleetHost(enrolled.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fleetHasCapability(host, "probe") || fleetHasCapability(host, "nodes.write") {
+		t.Fatalf("capabilities=%v", host.Capabilities)
+	}
+	if _, _, err = server.queueFleetCommand(host, "node.rename", json.RawMessage(`{}`), "admin", false); err == nil {
+		t.Fatal("probe accepted command")
+	}
+	next := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/agent/commands/next?wait=1", nil)
+	next.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
+	next.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
+	nextRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(nextRecorder, next)
+	if nextRecorder.Code != http.StatusNoContent {
+		t.Fatalf("probe command poll status=%d", nextRecorder.Code)
+	}
+}
+
+func TestProbeEnrollmentCommandUsesSeparateInstaller(t *testing.T) {
+	server, _ := fleetWebTestServer(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/enrollments?type=probe", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+	server.createFleetEnrollment(recorder, request, store.Session{Username: "admin"})
+	if recorder.Code != http.StatusCreated || !strings.Contains(recorder.Body.String(), "probe-install.sh") || !strings.Contains(recorder.Body.String(), "probe_") || strings.Contains(recorder.Body.String(), "--join-controller") {
+		t.Fatalf("probe command=%d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestLightweightProbeAppearsInControllerFleet(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	origin := httptest.NewTLSServer(server.Handler())
+	defer origin.Close()
+	const token = "probe_integration"
+	if err := database.CreateFleetEnrollmentToken(token, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	joined, err := probe.Join(context.Background(), directory, origin.URL+"/", token, "Light VPS", origin.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := probe.Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.HTTP = origin.Client()
+	client.Version = "1.7.0"
+	if err = client.Heartbeat(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Hosts) != 2 || status.Hosts[1].ID != joined.HostID || !status.Hosts[1].Online || !fleetHasCapability(status.Hosts[1], "probe") || status.Hosts[1].Snapshot.Overview.Now.Timestamp == 0 || status.Hosts[1].Snapshot.Overview.NodeCount != 0 {
+		t.Fatalf("probe fleet status=%+v", status.Hosts)
 	}
 }

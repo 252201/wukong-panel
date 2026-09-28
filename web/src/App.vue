@@ -30,8 +30,9 @@ const fleetSubscriptionProbe = ref<FleetSubscriptionProbe | null>(null)
 const fleetSubscriptionProbeError = ref('')
 const fleetSubscriptionProbeBusy = ref(false)
 const enrollmentCommand = ref('')
+const enrollmentMode = ref<'panel' | 'probe'>('panel')
 const enrollmentExpiresAt = ref('')
-const fleetLeaveCommand = 'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --leave-controller'
+const fleetLeaveCommand = computed(() => enrollmentMode.value === 'probe' ? 'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/probe-install.sh | sudo sh -s -- --uninstall' : 'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --leave-controller')
 const fleetSelectedHosts = ref<string[]>([])
 const fleetSelectedNodes = ref<Record<string, string[]>>({})
 const fleetDraftDirty = ref(false)
@@ -107,6 +108,7 @@ const remoteHost = computed(() => selectedHostId.value !== 'local')
 const mutationsDisabled = computed(() => remoteHost.value && (!currentFleetHost.value?.online || !currentFleetHost.value?.compatible))
 const fleetHosts = computed(() => fleetStatus.value?.hosts || [])
 const remoteFleetHosts = computed(() => fleetHosts.value.filter(host => host.id !== 'local'))
+const isProbeHost = (host: FleetHost) => host.capabilities?.includes('probe') || false
 const fleetAggregate = computed(() => summarizeFleet(fleetHosts.value))
 
 const trafficPercent = computed(() => {
@@ -385,12 +387,13 @@ function applyFleetDraft(status: FleetStatus) {
     fleetEnabledDraft.value = status.enabled
     fleetPublicURL.value = status.publicUrl || `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
     fleetSubscriptionPublicURL.value = status.subscriptionPublicUrl || ''
-    fleetSelectedHosts.value = status.selectedHostIds?.length ? [...status.selectedHostIds] : status.hosts.map(host => host.id)
+    fleetSelectedHosts.value = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => !status.hosts.some(host => host.id === id && isProbeHost(host))) : status.hosts.filter(host => !isProbeHost(host)).map(host => host.id)
     fleetSelectedNodes.value = selectedNodes
   } finally { syncingFleetDraft = false }
 }
 
 async function switchFleetHost(hostId: string) {
+  if (fleetHosts.value.some(host => host.id === hostId && isProbeHost(host))) return
   selectedHostId.value = hostId
   setFleetHost(hostId)
   if (page.value === 'settings') settingsDraftDirty.value = false
@@ -439,12 +442,16 @@ function toggleFleetNode(hostId: string, nodeId: string, enabled: boolean) {
 	fleetSelectedNodes.value = { ...fleetSelectedNodes.value, [hostId]: [...selected] }
 }
 
-async function createFleetEnrollment() {
+async function createFleetEnrollment(mode: 'panel' | 'probe' = 'panel') {
   busy.value = true
   try {
-    const result = await api.createFleetEnrollment()
+    const result = await api.createFleetEnrollment(mode)
+    enrollmentMode.value = mode
     enrollmentCommand.value = result.command
     enrollmentExpiresAt.value = result.expiresAt
+    navigateTo('fleet')
+    await nextTick()
+    document.getElementById('fleet-enrollment')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     notify('已生成 10 分钟一次性接入命令')
   } catch (error) { notify(error instanceof Error ? error.message : '接入令牌生成失败') }
   finally { busy.value = false }
@@ -931,26 +938,26 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     <section class="workspace">
       <header class="topbar">
         <div><p class="breadcrumb">天宫 / {{ navItems.find(item => item.id === page)?.label }}</p><h1>{{ navItems.find(item => item.id === page)?.label }}</h1></div>
-        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
+        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
       </header>
 
       <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
 
       <div v-if="page === 'fleet'" class="page-content fleet-page">
-        <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><button class="primary" @click="createFleetEnrollment">＋ 接入 VPS</button></div>
+        <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><div class="fleet-enroll-actions"><button class="primary" @click="createFleetEnrollment('panel')">＋ 接入面板</button><button class="secondary" @click="createFleetEnrollment('probe')">＋ 接入轻量探针</button></div></div>
         <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }}</em></article></section>
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
               <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
-              <em><span class="fleet-host-status"><span class="fleet-node-summary">节点 {{ host.snapshot?.overview?.onlineNodes || 0 }}/{{ host.snapshot?.overview?.nodeCount || 0 }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+              <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? '轻量探针' : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
             </header>
             <div class="fleet-host-body">
               <section class="fleet-resource-grid" aria-label="主机资源">
                 <div class="fleet-resource"><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b><em>负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</em></div>
                 <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0, 0) }}</em></div>
                 <div class="fleet-resource"><small>磁盘</small><b :title="resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</em></div>
-                <div class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
+                <div v-if="isProbeHost(host)" class="fleet-resource"><small>网卡累计流量</small><b>{{ bytes((host.snapshot?.overview?.now?.rxBytes || 0) + (host.snapshot?.overview?.now?.txBytes || 0)) }}</b><em>{{ language === 'en-US' ? 'Since boot' : '自系统启动' }} · {{ host.snapshot?.overview?.now?.interface || '—' }}</em></div><div v-else class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
               </section>
               <section class="fleet-host-network" aria-label="网络质量">
                 <div class="fleet-network-heading"><strong>网络质量</strong><small>ICMP · 近 30 分钟</small></div>
@@ -963,13 +970,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </section>
             </div>
-            <footer><span>Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }} · sing-box {{ host.singBoxVersion || '—' }}</span><div><button @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer>
+            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '仅监控'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
         </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
-        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
-        <section v-if="enrollmentCommand" class="panel-card enrollment-card"><div><span class="section-mark">令</span><div><h3>一次性接入命令</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div><button @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>在远端 VPS 以 root 执行。Agent 只会主动连接上方可信 HTTPS 主控，不开放公网管理端口。</small><div class="enrollment-leave"><div class="enrollment-leave-head"><div class="enrollment-leave-title"><span class="section-mark red">撤</span><div><h4>取消中央接入</h4><p>仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
+        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
+        <section v-if="enrollmentCommand" id="fleet-enrollment" class="panel-card enrollment-card"><div><span class="section-mark">令</span><div><h3>{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div><button @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>{{ enrollmentMode === 'probe' ? '在远端 VPS 以 root 执行；仅安装探针，不安装面板、Nginx 或 sing-box。探针只主动连接可信 HTTPS 主控。' : '在远端 VPS 以 root 执行；将安装完整面板、Nginx 与 sing-box，Agent 主动连接可信 HTTPS 主控。' }}</small><div class="enrollment-leave"><div class="enrollment-leave-head"><div class="enrollment-leave-title"><span class="section-mark red">撤</span><div><h4>{{ enrollmentMode === 'probe' ? '卸载轻量探针' : '取消中央接入' }}</h4><p>{{ enrollmentMode === 'probe' ? '停止服务并删除探针文件；中央记录需在舰队卡片中另行移除。' : '仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。' }}</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
       </div>
 
       <div v-else-if="page === 'overview'" class="page-content overview-page">
@@ -1117,7 +1124,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
           <div class="fleet-setting-actions">
             <button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button>
-            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment">生成接入命令</button>
+            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment('panel')">生成面板接入命令</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment('probe')">生成探针接入命令</button>
             <button v-if="fleetStatus?.enabled" class="secondary probe" :disabled="fleetSubscriptionProbeBusy" @click="probeFleetSubscription">{{ fleetSubscriptionProbeBusy ? '正在检测…' : '检测订阅入口' }}</button>
             <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="saveFleetController(true)">轮换全局订阅 Token</button>
           </div>

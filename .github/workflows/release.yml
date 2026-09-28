@@ -98,7 +98,9 @@ jobs:
           )
           file release/wukong-panel-linux-amd64 | grep -Eq 'x86-64|x86_64'
           file release/wukong-panel-linux-arm64 | grep -Eq 'ARM aarch64|aarch64'
-          for binary in release/wukong-panel-linux-amd64 release/wukong-panel-linux-arm64
+          file release/wukong-probe-linux-amd64 | grep -Eq 'x86-64|x86_64'
+          file release/wukong-probe-linux-arm64 | grep -Eq 'ARM aarch64|aarch64'
+          for binary in release/wukong-panel-linux-amd64 release/wukong-panel-linux-arm64 release/wukong-probe-linux-amd64 release/wukong-probe-linux-arm64
           do
             strings "$binary" | grep -Fx "$plain_version" >/dev/null
             go version -m "$binary" | grep -F "vcs.revision=$GITHUB_SHA" >/dev/null
@@ -133,10 +135,13 @@ jobs:
             --notes-file release/RELEASE_NOTES.md \
             release/wukong-panel-linux-amd64 \
             release/wukong-panel-linux-arm64 \
+            release/wukong-probe-linux-amd64 \
+            release/wukong-probe-linux-arm64 \
             release/SHA256SUMS \
             release/install.sh \
             release/uninstall.sh \
-            release/bootstrap.sh
+            release/bootstrap.sh \
+            release/probe-install.sh
 
       - name: Verify published release assets
         shell: bash
@@ -165,10 +170,13 @@ jobs:
           for asset in \
             wukong-panel-linux-amd64 \
             wukong-panel-linux-arm64 \
+            wukong-probe-linux-amd64 \
+            wukong-probe-linux-arm64 \
             SHA256SUMS \
             install.sh \
             uninstall.sh \
-            bootstrap.sh
+            bootstrap.sh \
+            probe-install.sh
           do
             cmp "release/$asset" "$download_dir/$asset"
           done

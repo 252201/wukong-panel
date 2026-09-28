@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.6.3-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.6.4-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 ## 特性
 
 - 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。舰队主机卡片按各主机直连公网出口 IP 显示国家/地区和国旗，并注明运行时长单位。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
+- 轻量探针：无面板的 VPS 可以单独安装 `wukong-probe`，只向中央上报 CPU、内存、磁盘、网卡流量、运行时间、出口地区及国际/国内 ICMP 网络质量。它不安装 Web、Nginx、SQLite 或 sing-box，不开放入站端口，也不接受节点管理命令。舰队卡片标为“轻量探针”，不计入运行节点或全局订阅。
 - 出站安全通道：远端 Agent 仅通过证书可信的 HTTPS 主动连接中央，每 10 秒心跳并维持命令长轮询；不开放 Root Agent 公网端口、不使用 SSH。一次性接入令牌 10 分钟过期且只能成功使用一次，后续独立 Agent Token 只在中央保存 SHA-256。
 - 幂等远端任务：每台远端配置变更串行执行，命令使用幂等 ID；断线重投不会重复操作，过期命令不会在以后重连时补执行。配置暂存、`sing-box check`、快照和失败回滚仍由远端 Root Agent 完成。
 - 全局订阅：保留每台 VPS 的原订阅，同时提供可筛选主机和节点的中央订阅。远端生成的 Clash 片段以中央专用 AES-256-GCM 密钥加密缓存；离线时标记并使用最后成功缓存，从未生成缓存则明确返回 `503`。
@@ -32,6 +33,14 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
 - 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
 - 东方科幻界面：桌面、平板和移动端响应式布局。
+
+## 轻量探针接入
+
+先在中央面板启用“中央多机控制”，打开舰队页并点击“接入轻量探针”，复制页面生成的 10 分钟一次性命令，在目标 VPS 以 root 执行。命令下载独立的 `probe-install.sh`、对应架构的 `wukong-probe`，校验 Release SHA-256 后注册 systemd 或 OpenRC 服务；不会安装完整面板、Nginx 或 sing-box。需要 Linux `amd64`/`arm64`、`curl`、`sha256sum` 和系统 CA 证书。探针以 root 运行以发送 ICMP Echo，仅向中央可信 HTTPS 地址发起连接。
+
+轻量探针只提供舰队主机卡片，不提供“进入主机”、节点操作或全局订阅。卡片的“网卡累计流量”是当前默认网卡自系统启动以来的计数器，重启或网卡更换后会重置；它不是账期用量。网络质量的近 30 分钟历史保存在探针内存中，探针服务重启后重新积累。
+
+升级探针使用 `sudo sh probe-install.sh --update`，卸载使用 `sudo sh probe-install.sh --uninstall`；通过 Release 地址执行也可以。卸载后还需在中央舰队页移除离线主机记录。现有完整面板安装与接入方式不变。
 
 ## 一键安装
 
@@ -136,7 +145,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.6.3 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.6.4 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \

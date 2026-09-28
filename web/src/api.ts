@@ -277,7 +277,7 @@ export const api = {
   fleetStatus: () => request<FleetStatus>('fleet/status', {}, false),
   saveFleetStatus: (data: {enabled: boolean; publicUrl: string; subscriptionPublicUrl?: string; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>; rotateGlobalToken?: boolean}) => request<FleetStatus>('fleet/status', { method: 'PUT', body: JSON.stringify(data) }, false),
   probeFleetSubscription: (subscriptionPublicUrl: string) => request<FleetSubscriptionProbe>('fleet/subscription-probe', { method: 'POST', body: JSON.stringify({ subscriptionPublicUrl }) }, false),
-  createFleetEnrollment: () => request<{token: string; expiresAt: string; command: string}>('fleet/enrollments', { method: 'POST', body: '{}' }, false),
+  createFleetEnrollment: (mode: 'panel' | 'probe' = 'panel') => request<{token: string; expiresAt: string; command: string}>(`fleet/enrollments?type=${mode}`, { method: 'POST', body: '{}' }, false),
   renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
