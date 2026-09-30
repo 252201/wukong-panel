@@ -33,6 +33,6 @@ Fail2ban 是重复失败来源的事后封禁。公钥认证、关闭密码登�
 F2B_SOURCE_DIR=/absolute/path/to/fail2ban go test ./internal/fail2ban -run TestRealClientIsolatedLifecycle -v
 ```
 
-测试使用独立临时配置、日志、socket、PID 和不修改防火墙的 dummy action，验证真实客户端启用、保留封禁的重载、解封、SSH 日志触发自动封禁、白名单排除、停用及其他 jail 隔离。常规测试未设置该变量时跳过此项。本地已对官方 1.1.0 客户端完成该验证；实际 Linux 防火墙 action 仍需在隔离 Linux 环境验证。
+测试使用独立临时配置、日志、socket、PID 和不修改防火墙的 dummy action，验证真实客户端启用、保留封禁的重载、解封、SSH 日志触发自动封禁、白名单排除、停用及其他 jail 隔离。常规测试未设置该变量时跳过此项。本地已对官方 1.1.0 客户端完成该验证。另在隔离 Debian 12 arm64 Linux 网络命名空间中，在真实 nftables 内核上验证了悟空防火墙模块新增、持久化和删除端口规则，并用官方 Fail2ban 1.1.0 的 nftables action 验证日志自动封禁、客户端封禁/解封及停机清理。此验证覆盖上述隔离环境和 action；其他发行版、内核或管理员自定义 action 仍需按目标环境复核。
 
 参考：[Fail2ban 官方配置](https://github.com/fail2ban/fail2ban/blob/master/config/jail.conf)、[客户端命令](https://github.com/fail2ban/fail2ban/blob/master/man/fail2ban-client.1)、[SSH 过滤器](https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/sshd.conf)。
