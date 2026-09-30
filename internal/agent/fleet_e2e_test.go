@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,53 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 	remoteSettings, err := remoteStore.Settings()
 	if err != nil || remoteSettings.BillingResetDay != 9 || remoteSettings.TrafficQuotaBytes != 987654321 || remoteSettings.CollectEndpoints {
 		t.Fatalf("remote settings=%+v err=%v", remoteSettings, err)
+	}
+	// Verify the authenticated controller -> encrypted command -> remote Agent
+	// path with isolated demo rules, and prove the local controller is untouched.
+	firewallCall := func(method, suffix, body string) model.FirewallStatus {
+		t.Helper()
+		req, _ := http.NewRequest(method, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/system/firewall"+suffix, strings.NewReader(body))
+		req.AddCookie(cookie)
+		if method != http.MethodGet {
+			req.Header.Set("X-CSRF-Token", csrf)
+		}
+		res, err := tlsServer.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("firewall %s status=%d body=%s", method, res.StatusCode, data)
+		}
+		var result model.FirewallStatus
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	firewallCall(http.MethodGet, "", "")
+	added := firewallCall(http.MethodPost, "/ports", `{"port":8443,"protocol":"tcp"}`)
+	var ruleID string
+	for _, r := range added.Rules {
+		if r.Port == 8443 && r.Managed {
+			ruleID = r.ID
+		}
+	}
+	if ruleID == "" {
+		t.Fatal("remote firewall rule missing")
+	}
+	localRules, err := controllerManager.Firewall(ctx, "")
+	if err != nil || len(localRules.Rules) != 2 {
+		t.Fatalf("controller firewall changed: %+v %v", localRules, err)
+	}
+	fresh := firewallCall(http.MethodGet, "", "")
+	if len(fresh.Rules) != 3 {
+		t.Fatalf("online status was stale: %+v", fresh)
+	}
+	removed := firewallCall(http.MethodDelete, "/ports/"+ruleID, "")
+	if len(removed.Rules) != 2 {
+		t.Fatalf("remote delete result=%+v", removed)
 	}
 	for label, database := range map[string]*store.Store{"controller": controllerStore, "remote": remoteStore} {
 		var count int

@@ -225,6 +225,13 @@ function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPla
   }
 }
 
+export interface FirewallPort { port: number; protocol: 'tcp' | 'udp'; reason: string }
+export interface FirewallRule { id?: string; port: number; protocol: 'tcp' | 'udp'; zone?: string; managed: boolean; protected: boolean; runtime: boolean; permanent: boolean }
+export interface FirewallStatus { backend: string; active: boolean; writable: boolean; reason?: string; zone?: string; zones: string[]; rules: FirewallRule[]; protectedPorts: FirewallPort[]; raw?: string; checkedAt: string; demo?: boolean }
+function firewallPath(host: string) {
+  return host === 'local' ? 'system/firewall' : `fleet/hosts/${encodeURIComponent(host)}/system/firewall`
+}
+
 let csrf = ''
 let fleetHostID = ''
 export const latestSingBoxVersion = '1.14.1'
@@ -251,6 +258,9 @@ export const api = {
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
   singBoxMigration: async (target = latestSingBoxVersion) => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
+  firewall: (host: string, zone = '') => request<FirewallStatus>(`${firewallPath(host)}?zone=${encodeURIComponent(zone)}`, {}, false),
+  addFirewallPort: (host: string, data: { port: number; protocol: 'tcp' | 'udp'; zone?: string }) => request<FirewallStatus>(`${firewallPath(host)}/ports`, { method: 'POST', body: JSON.stringify(data) }, false),
+  removeFirewallPort: (host: string, id: string) => request<FirewallStatus>(`${firewallPath(host)}/ports/${encodeURIComponent(id)}`, { method: 'DELETE' }, false),
   residentialExit: () => request<ResidentialExit>('system/residential-exit'),
   configureResidentialExit: (data: {endpoint: string; listenPort: number; peerPublicKey?: string; expectedExitIp?: string}) => request<ResidentialExit>('system/residential-exit', { method: 'PUT', body: JSON.stringify(data) }),
   removeResidentialExit: (confirm: string) => request<{ok: boolean}>('system/residential-exit', { method: 'DELETE', body: JSON.stringify({ confirm }) }),

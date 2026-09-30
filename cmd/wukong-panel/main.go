@@ -38,6 +38,16 @@ type directAgent struct {
 	network *netcheck.Service
 }
 
+func (d directAgent) Firewall(ctx context.Context, zone string) (model.FirewallStatus, error) {
+	return d.manager.Firewall(ctx, zone)
+}
+func (d directAgent) AddFirewallPort(ctx context.Context, r model.FirewallPortRequest) (model.FirewallStatus, error) {
+	return d.manager.AddFirewallPort(ctx, r)
+}
+func (d directAgent) RemoveFirewallPort(ctx context.Context, r model.FirewallDeleteRequest) (model.FirewallStatus, error) {
+	return d.manager.RemoveFirewallPort(ctx, r)
+}
+
 func (d directAgent) Health(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"ok": true, "version": d.manager.Version(ctx)}, nil
 }

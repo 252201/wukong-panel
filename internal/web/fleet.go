@@ -709,8 +709,12 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
 		return
 	}
+	if strings.HasPrefix(resource, "system/firewall") && !fleetHasCapability(host, "firewall-ports") {
+		writeError(w, http.StatusNotImplemented, "此远端 Agent 尚不支持防火墙端口管理")
+		return
+	}
 	if r.Method == http.MethodGet {
-		if s.writeFleetSnapshotResource(w, host, resource) {
+		if (resource != "system/firewall" || !host.Online) && s.writeFleetSnapshotResource(w, host, resource) {
 			return
 		}
 	}
@@ -805,6 +809,15 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 		writeJSON(w, http.StatusOK, snapshot.ResidentialExit)
 	case resource == "system/socks-exit":
 		writeJSON(w, http.StatusOK, snapshot.SOCKSExit)
+	case resource == "system/firewall":
+		if snapshot.Firewall == nil {
+			writeError(w, http.StatusServiceUnavailable, "远端防火墙快照尚不可用")
+		} else {
+			result := *snapshot.Firewall
+			result.Writable = false
+			result.Reason = "主机离线，显示最后一次防火墙快照。"
+			writeJSON(w, http.StatusOK, result)
+		}
 	default:
 		return false
 	}
@@ -824,6 +837,14 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 	}
 	parts := strings.Split(resource, "/")
 	switch {
+	case r.Method == http.MethodGet && resource == "system/firewall":
+		payload, _ := json.Marshal(map[string]string{"zone": r.URL.Query().Get("zone")})
+		return "firewall.status", payload, false, nil
+	case r.Method == http.MethodPost && resource == "system/firewall/ports":
+		return "firewall.add", body, false, nil
+	case r.Method == http.MethodDelete && len(parts) == 4 && parts[0] == "system" && parts[1] == "firewall" && parts[2] == "ports":
+		payload, _ := json.Marshal(model.FirewallDeleteRequest{ID: parts[3]})
+		return "firewall.remove", payload, false, nil
 	case r.Method == http.MethodGet && resource == "imports/scan":
 		return "imports.scan", body, false, nil
 	case r.Method == http.MethodGet && resource == "system/sing-box/migration":

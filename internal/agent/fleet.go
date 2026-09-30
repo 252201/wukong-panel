@@ -30,6 +30,7 @@ import (
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
 	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"firewall-ports",
 }
 
 type FleetClientConfig struct {
@@ -291,6 +292,9 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	snapshot.DeploymentDefaults = defaults
 	snapshot.ResidentialExit = &residential
 	snapshot.SOCKSExit = &socks
+	if firewall, err := c.manager.Firewall(ctx, ""); err == nil {
+		snapshot.Firewall = &firewall
+	}
 	snapshot.Endpoints = endpoints
 	snapshot.Timeline = timeline
 	return snapshot, nil
@@ -442,6 +446,26 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 
 func (c *FleetConnector) executeOnce(ctx context.Context, command model.FleetCommand) (any, error) {
 	switch command.Kind {
+	case "firewall.status":
+		var r struct {
+			Zone string `json:"zone"`
+		}
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		return c.manager.Firewall(ctx, r.Zone)
+	case "firewall.add":
+		var r model.FirewallPortRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		return c.manager.AddFirewallPort(ctx, r)
+	case "firewall.remove":
+		var r model.FirewallDeleteRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		return c.manager.RemoveFirewallPort(ctx, r)
 	case "imports.scan":
 		items, err := c.manager.Scan(ctx)
 		for i := range items {

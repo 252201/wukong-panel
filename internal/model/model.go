@@ -383,6 +383,7 @@ type FleetSnapshot struct {
 	DeploymentDefaults NodeDeploymentDefaults     `json:"deploymentDefaults"`
 	ResidentialExit    *ResidentialExit           `json:"residentialExit,omitempty"`
 	SOCKSExit          *SOCKSExit                 `json:"socksExit,omitempty"`
+	Firewall           *FirewallStatus            `json:"firewall,omitempty"`
 	Timeline           TrafficTimeline            `json:"timeline"`
 	Endpoints          []EndpointStat             `json:"endpoints"`
 }
