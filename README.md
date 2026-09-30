@@ -26,6 +26,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
+- SSH 防护：系统页管理独立的 Fail2ban 规则，支持封禁参数、可信 IP/CIDR、封禁列表和解封；完整远端 Agent 同样支持。目标 VPS 需先安装并启动 Fail2ban，见 [Fail2ban SSH 防护](docs/FAIL2BAN.md)。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；新采样保存逐 IP 回包数，悬浮历史色块时只将实际丢包的 IP 标红，旧采样没有逐 IP 明细时不猜测归属；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35,138.113.151.2`（第二个目标位于香港），通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。

@@ -31,6 +31,7 @@ var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
 	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 	"firewall-ports",
+	"fail2ban-ssh",
 }
 
 type FleetClientConfig struct {
@@ -292,6 +293,11 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	snapshot.DeploymentDefaults = defaults
 	snapshot.ResidentialExit = &residential
 	snapshot.SOCKSExit = &socks
+	f2bCtx, cancelF2B := context.WithTimeout(ctx, 3*time.Second)
+	if f2b, err := c.manager.Fail2ban(f2bCtx); err == nil {
+		snapshot.Fail2ban = &f2b
+	}
+	cancelF2B()
 	if firewall, err := c.manager.Firewall(ctx, ""); err == nil {
 		snapshot.Firewall = &firewall
 	}
@@ -446,6 +452,20 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 
 func (c *FleetConnector) executeOnce(ctx context.Context, command model.FleetCommand) (any, error) {
 	switch command.Kind {
+	case "fail2ban.status":
+		return c.manager.Fail2ban(ctx)
+	case "fail2ban.configure":
+		var r model.Fail2banConfig
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		return c.manager.ConfigureFail2ban(ctx, r)
+	case "fail2ban.unban":
+		var r model.Fail2banUnbanRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		return c.manager.UnbanFail2ban(ctx, r)
 	case "firewall.status":
 		var r struct {
 			Zone string `json:"zone"`

@@ -709,12 +709,16 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
 		return
 	}
+	if strings.HasPrefix(resource, "system/fail2ban") && !fleetHasCapability(host, "fail2ban-ssh") {
+		writeError(w, http.StatusNotImplemented, "此远端 Agent 尚不支持 Fail2ban 管理")
+		return
+	}
 	if strings.HasPrefix(resource, "system/firewall") && !fleetHasCapability(host, "firewall-ports") {
 		writeError(w, http.StatusNotImplemented, "此远端 Agent 尚不支持防火墙端口管理")
 		return
 	}
 	if r.Method == http.MethodGet {
-		if (resource != "system/firewall" || !host.Online) && s.writeFleetSnapshotResource(w, host, resource) {
+		if ((resource != "system/firewall" && resource != "system/fail2ban") || !host.Online) && s.writeFleetSnapshotResource(w, host, resource) {
 			return
 		}
 	}
@@ -809,6 +813,15 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 		writeJSON(w, http.StatusOK, snapshot.ResidentialExit)
 	case resource == "system/socks-exit":
 		writeJSON(w, http.StatusOK, snapshot.SOCKSExit)
+	case resource == "system/fail2ban":
+		if snapshot.Fail2ban == nil {
+			writeError(w, http.StatusServiceUnavailable, "远端 Fail2ban 快照尚不可用")
+		} else {
+			result := *snapshot.Fail2ban
+			result.Writable = false
+			result.Reason = "主机离线，显示最后一次 Fail2ban 快照。"
+			writeJSON(w, http.StatusOK, result)
+		}
 	case resource == "system/firewall":
 		if snapshot.Firewall == nil {
 			writeError(w, http.StatusServiceUnavailable, "远端防火墙快照尚不可用")
@@ -837,6 +850,12 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 	}
 	parts := strings.Split(resource, "/")
 	switch {
+	case r.Method == http.MethodGet && resource == "system/fail2ban":
+		return "fail2ban.status", body, false, nil
+	case r.Method == http.MethodPost && resource == "system/fail2ban":
+		return "fail2ban.configure", body, false, nil
+	case r.Method == http.MethodPost && resource == "system/fail2ban/unban":
+		return "fail2ban.unban", body, false, nil
 	case r.Method == http.MethodGet && resource == "system/firewall":
 		payload, _ := json.Marshal(map[string]string{"zone": r.URL.Query().Get("zone")})
 		return "firewall.status", payload, false, nil

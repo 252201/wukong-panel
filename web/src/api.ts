@@ -225,6 +225,9 @@ function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPla
   }
 }
 
+export interface Fail2banConfig { enabled: boolean; maxRetry: number; findTime: number; banTime: number; mode: string; ignoreIPs: string[] }
+export interface Fail2banStatus { installed: boolean; running: boolean; active: boolean; writable: boolean; reason?: string; version?: string; backend?: string; sshPorts: number[]; config: Fail2banConfig; bannedIPs: string[]; totalFailed: number; totalBanned: number; otherJails: string[]; installCommand: string; startCommand: string; checkedAt: string; demo?: boolean }
+function fail2banPath(host: string) { return host === 'local' ? 'system/fail2ban' : `fleet/hosts/${encodeURIComponent(host)}/system/fail2ban` }
 export interface FirewallPort { port: number; protocol: 'tcp' | 'udp'; reason: string }
 export interface FirewallRule { id?: string; port: number; protocol: 'tcp' | 'udp'; zone?: string; managed: boolean; protected: boolean; runtime: boolean; permanent: boolean }
 export interface FirewallStatus { backend: string; active: boolean; writable: boolean; reason?: string; zone?: string; zones: string[]; rules: FirewallRule[]; protectedPorts: FirewallPort[]; raw?: string; checkedAt: string; demo?: boolean }
@@ -258,6 +261,9 @@ export const api = {
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
   singBoxMigration: async (target = latestSingBoxVersion) => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
+  fail2ban: (host: string) => request<Fail2banStatus>(fail2banPath(host), {}, false),
+  configureFail2ban: (host: string, data: Fail2banConfig) => request<Fail2banStatus>(fail2banPath(host), { method: 'POST', body: JSON.stringify(data) }, false),
+  unbanFail2ban: (host: string, ip: string) => request<Fail2banStatus>(`${fail2banPath(host)}/unban`, { method: 'POST', body: JSON.stringify({ ip }) }, false),
   firewall: (host: string, zone = '') => request<FirewallStatus>(`${firewallPath(host)}?zone=${encodeURIComponent(zone)}`, {}, false),
   addFirewallPort: (host: string, data: { port: number; protocol: 'tcp' | 'udp'; zone?: string }) => request<FirewallStatus>(`${firewallPath(host)}/ports`, { method: 'POST', body: JSON.stringify(data) }, false),
   removeFirewallPort: (host: string, id: string) => request<FirewallStatus>(`${firewallPath(host)}/ports/${encodeURIComponent(id)}`, { method: 'DELETE' }, false),

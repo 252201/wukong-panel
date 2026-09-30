@@ -38,6 +38,15 @@ type directAgent struct {
 	network *netcheck.Service
 }
 
+func (d directAgent) Fail2ban(ctx context.Context) (model.Fail2banStatus, error) {
+	return d.manager.Fail2ban(ctx)
+}
+func (d directAgent) ConfigureFail2ban(ctx context.Context, r model.Fail2banConfig) (model.Fail2banStatus, error) {
+	return d.manager.ConfigureFail2ban(ctx, r)
+}
+func (d directAgent) UnbanFail2ban(ctx context.Context, r model.Fail2banUnbanRequest) (model.Fail2banStatus, error) {
+	return d.manager.UnbanFail2ban(ctx, r)
+}
 func (d directAgent) Firewall(ctx context.Context, zone string) (model.FirewallStatus, error) {
 	return d.manager.Firewall(ctx, zone)
 }

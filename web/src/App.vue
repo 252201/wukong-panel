@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import FirewallPanel from './FirewallPanel.vue'
+import Fail2banPanel from './Fail2banPanel.vue'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
@@ -1066,6 +1067,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="vital-grid"><article v-for="item in vitalItems" :key="item.name"><div class="vital-dial" :style="{ '--vital': `${item.value * 3.6}deg` }"><b>{{ item.value.toFixed(1) }}<small>%</small></b></div><h3>{{ item.name }}</h3><p>{{ item.meta }}</p><strong v-if="item.usage" class="vital-usage">{{ item.usage }}</strong></article></section>
         <section class="panel-card host-table"><div class="card-head"><div><span class="section-mark jade">机</span><div><h3>系统信息</h3><p>不展示进程完整命令行</p></div></div></div><dl><div><dt>操作系统</dt><dd>{{ currentFleetHost?.os || '—' }}</dd></div><div><dt>架构</dt><dd>{{ currentFleetHost?.arch || '—' }}</dd></div><div><dt>出口网卡</dt><dd>{{ overview?.now.interface || '—' }}</dd></div><div><dt>运行时间</dt><dd>{{ uptime(overview?.now.uptime) }}</dd></div><div><dt>sing-box</dt><dd>{{ overview?.singBoxVersion }}</dd></div><div><dt>悟空面板</dt><dd>{{ overview?.panelVersion }}</dd></div><div><dt>服务模式</dt><dd>Web / Root Agent 分权</dd></div><div><dt>指标保留</dt><dd>90 天</dd></div></dl></section>
         <FirewallPanel :key="selectedHostId" :host-key="selectedHostId" :nodes="currentFleetHost?.snapshot?.nodes || []" :writable="!mutationsDisabled" />
+        <Fail2banPanel :key="`fail2ban-${selectedHostId}`" :host-key="selectedHostId" :writable="!mutationsDisabled" />
         <section class="panel-card residential-panel">
           <div class="card-head"><div><span class="section-mark jade">落</span><div><h3>落地 IP 出口</h3><p>A 机接入 · WireGuard 到 B 机 NAT · 断线拒绝回退</p></div></div><span class="live-badge" :class="{ muted: !residentialExit?.active }"><i></i>{{ residentialExit?.active ? '隧道在线' : residentialExit?.configured ? '等待 B 机握手' : '未配置' }}</span></div>
           <div class="residential-grid">
