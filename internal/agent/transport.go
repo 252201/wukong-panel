@@ -67,6 +67,12 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("PUT /residential-exit", s.authorize(s.configureResidentialExit))
 	mux.HandleFunc("DELETE /residential-exit", s.authorize(s.removeResidentialExit))
 	mux.HandleFunc("GET /socks-exit", s.authorize(s.socksExit))
+	mux.HandleFunc("GET /fail2ban", s.authorize(s.fail2ban))
+	mux.HandleFunc("POST /fail2ban", s.authorize(s.configureFail2ban))
+	mux.HandleFunc("POST /fail2ban/unban", s.authorize(s.unbanFail2ban))
+	mux.HandleFunc("GET /firewall", s.authorize(s.firewall))
+	mux.HandleFunc("POST /firewall/ports", s.authorize(s.addFirewallPort))
+	mux.HandleFunc("DELETE /firewall/ports/{id}", s.authorize(s.removeFirewallPort))
 	mux.HandleFunc("PUT /socks-exit", s.authorize(s.configureSOCKSExit))
 	mux.HandleFunc("DELETE /socks-exit", s.authorize(s.removeSOCKSExit))
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}

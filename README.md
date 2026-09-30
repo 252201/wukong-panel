@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.6.4-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.6.5-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -26,6 +26,7 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 - 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
 - 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
 - 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
+- SSH 防护：系统页管理独立的 Fail2ban 规则，支持封禁参数、可信 IP/CIDR、封禁列表和解封；完整远端 Agent 同样支持。目标 VPS 需先安装并启动 Fail2ban，见 [Fail2ban SSH 防护](docs/FAIL2BAN.md)。
 - 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
 - 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
 - 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；新采样保存逐 IP 回包数，悬浮历史色块时只将实际丢包的 IP 标红，旧采样没有逐 IP 明细时不猜测归属；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35,138.113.151.2`（第二个目标位于香港），通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
@@ -145,7 +146,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.6.4 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.6.5 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -242,9 +243,22 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --leave-controller
 ```
 
-中央模式首版不提供跨主机批量部署、面板升级、防火墙、RBAC、多主复制或自动故障切换。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
+中央模式不提供跨主机批量部署、面板升级、RBAC、多主复制或自动故障切换。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
 
-### AnyTLS
+### 防火墙端口管理
+
+在“系统 → 防火墙端口管理”中查看主机防火墙、添加 TCP/UDP 单端口放行规则，或按节点实际监听协议放行。支持本机和具备 `firewall-ports` 能力的在线远端完整 Agent；旧版 Agent 需升级，轻量探针仅上报状态，不接受防火墙操作。
+
+- **UFW**：显示状态和规则，可保存运行/持久规则。UFW 未启用时只保存规则，并明确提示尚未生效。
+- **firewalld**：选择实际绑定网卡的区域；同时修改运行配置和永久配置，不重载其他规则。服务未运行时只读。
+- **nftables**：仅修改安装器创建、默认拒绝的 `inet wukong_panel/input` 链，且必须已有开机加载配置。新增规则追加到链末尾；自定义表保留为只读，不会重置整个 ruleset。
+- 只删除面板创建且本地记录匹配的放行规则。通过 `ss` 检测 SSH、面板及常见反代监听端口并保护；无法读取监听端口时拒绝删除。未发现 SSH 监听时默认保护 TCP 22。系统创建的规则、服务、范围及复杂规则均保留，可在“完整规则”中查看。
+- Hysteria2/TUIC 放行 UDP；VLESS REALITY、Trojan/AnyTLS 放行 TCP；Shadowsocks 分别放行 TCP 和 UDP。Cloudflare Tunnel 本机 Origin 不添加公网规则。多协议操作按端口分别执行，部分失败时保留已成功端口并提示检查。
+- 规则变更由 Root Agent 执行，Web 写操作需要登录及 CSRF 校验；中央远端操作走现有加密命令通道并记录审计。变更前保存恢复记录，写入失败恢复原配置；Agent 重启、读取状态或再次操作时恢复未完成变更。
+
+本功能不启用/关闭防火墙，不修改默认策略，节点部署也不会自动放行。云厂商安全组仍需单独配置；已有的优先拒绝、其他 nftables 基础链和区域绑定仍会影响端口是否实际可达。修改规则后应从实际客户端验证连通性。
+
+## AnyTLS
 
 AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书覆盖的域名。面板会优先复用安装时配置的可信证书，自动生成独立密码，并在部署完成前通过本机 AnyTLS 客户端闭环验证 TLS、认证与代理出站。客户端分享采用标准 `anytls://` URI；Clash/Mihomo 订阅会启用 UDP 隧道能力、Chrome 客户端指纹和保守的空闲会话参数。自签名环境会在分享与订阅中明确启用跳过证书校验，生产环境建议使用自动续期的 Let’s Encrypt 证书。
 

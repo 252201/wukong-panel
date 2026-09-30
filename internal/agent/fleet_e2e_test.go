@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,95 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 	remoteSettings, err := remoteStore.Settings()
 	if err != nil || remoteSettings.BillingResetDay != 9 || remoteSettings.TrafficQuotaBytes != 987654321 || remoteSettings.CollectEndpoints {
 		t.Fatalf("remote settings=%+v err=%v", remoteSettings, err)
+	}
+	// Verify the authenticated controller -> encrypted command -> remote Agent
+	// path with isolated demo rules, and prove the local controller is untouched.
+
+	fail2banCall := func(method, suffix, body string) model.Fail2banStatus {
+		t.Helper()
+		req, _ := http.NewRequest(method, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/system/fail2ban"+suffix, strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("X-CSRF-Token", csrf)
+		res, err := tlsServer.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		if res.StatusCode != 200 {
+			t.Fatalf("fail2ban %s=%d %s", method, res.StatusCode, data)
+		}
+		var result model.Fail2banStatus
+		if err = json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	fail2banCall("GET", "", "")
+	f2b := fail2banCall("POST", "", `{"enabled":true,"maxRetry":5,"findTime":600,"banTime":3600,"mode":"normal","ignoreIPs":["203.0.113.7"]}`)
+	if !f2b.Active || len(f2b.BannedIPs) != 2 {
+		t.Fatalf("remote fail2ban enable %+v", f2b)
+	}
+	localF2B, err := controllerManager.Fail2ban(context.Background())
+	if err != nil || localF2B.Active {
+		t.Fatalf("controller changed: %+v %v", localF2B, err)
+	}
+	f2b = fail2banCall("POST", "/unban", `{"ip":"192.0.2.47"}`)
+	if len(f2b.BannedIPs) != 1 {
+		t.Fatalf("unban %+v", f2b)
+	}
+	f2b = fail2banCall("GET", "", "")
+	if !f2b.Active || len(f2b.BannedIPs) != 1 {
+		t.Fatal("stale remote snapshot")
+	}
+	f2b = fail2banCall("POST", "", `{"enabled":false,"maxRetry":5,"findTime":600,"banTime":3600,"mode":"normal","ignoreIPs":["203.0.113.7"]}`)
+	if f2b.Active {
+		t.Fatal("remote jail still active")
+	}
+	firewallCall := func(method, suffix, body string) model.FirewallStatus {
+		t.Helper()
+		req, _ := http.NewRequest(method, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/system/firewall"+suffix, strings.NewReader(body))
+		req.AddCookie(cookie)
+		if method != http.MethodGet {
+			req.Header.Set("X-CSRF-Token", csrf)
+		}
+		res, err := tlsServer.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("firewall %s status=%d body=%s", method, res.StatusCode, data)
+		}
+		var result model.FirewallStatus
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	firewallCall(http.MethodGet, "", "")
+	added := firewallCall(http.MethodPost, "/ports", `{"port":8443,"protocol":"tcp"}`)
+	var ruleID string
+	for _, r := range added.Rules {
+		if r.Port == 8443 && r.Managed {
+			ruleID = r.ID
+		}
+	}
+	if ruleID == "" {
+		t.Fatal("remote firewall rule missing")
+	}
+	localRules, err := controllerManager.Firewall(ctx, "")
+	if err != nil || len(localRules.Rules) != 2 {
+		t.Fatalf("controller firewall changed: %+v %v", localRules, err)
+	}
+	fresh := firewallCall(http.MethodGet, "", "")
+	if len(fresh.Rules) != 3 {
+		t.Fatalf("online status was stale: %+v", fresh)
+	}
+	removed := firewallCall(http.MethodDelete, "/ports/"+ruleID, "")
+	if len(removed.Rules) != 2 {
+		t.Fatalf("remote delete result=%+v", removed)
 	}
 	for label, database := range map[string]*store.Store{"controller": controllerStore, "remote": remoteStore} {
 		var count int
