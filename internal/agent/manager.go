@@ -64,12 +64,6 @@ type bindingAddressState struct {
 }
 
 func (m *Manager) RunReconciler(ctx context.Context) {
-	if err := m.fail2banController().Recover(ctx); err != nil {
-		_ = m.store.Audit("agent", "fail2ban.recovery.failed", "wukong-sshd", err.Error())
-	}
-	if err := m.RecoverFirewall(ctx); err != nil {
-		_ = m.store.Audit("agent", "firewall.recovery.failed", "firewall", err.Error())
-	}
 	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileBindings(ctx)
 	_ = m.ReconcileInboundListeners(ctx)
