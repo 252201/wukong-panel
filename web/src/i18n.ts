@@ -247,7 +247,6 @@ const english: Record<string, string> = {
   '中央多机控制': 'Central fleet control',
   '控制流与订阅流可使用各自独立的可信 HTTPS 入口': 'Control and subscription traffic can use separate trusted HTTPS endpoints',
   '启用中央控制': 'Enable central control',
-  '未启用时界面与 v0.8.2 单机模式保持一致': 'When disabled, the interface remains compatible with v0.8.2 standalone mode',
   '01 · 主控通信地址': '01 · Controller URL',
   '供远端 Agent 接入和心跳使用，必须包含面板随机路径。': 'Used for remote Agent enrollment and heartbeats; must include the panel random base path.',
   '02 · 订阅公开地址': '02 · Public subscription URL',
