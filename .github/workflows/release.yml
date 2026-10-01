@@ -63,7 +63,21 @@ jobs:
             exit 1
           fi
           if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
-            echo "Tag already exists: $RELEASE_VERSION" >&2
+            echo "Tag already exists locally: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          remote_tag="$(git ls-remote --tags origin "refs/tags/$RELEASE_VERSION" "refs/tags/$RELEASE_VERSION^{}")"
+          if [[ -n "$remote_tag" ]]; then
+            echo "Tag already exists on origin: $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          release_lookup="$(gh release view "$RELEASE_VERSION" --json tagName 2>&1)" && {
+            echo "GitHub Release already exists: $RELEASE_VERSION" >&2
+            exit 1
+          }
+          if [[ "$release_lookup" != *"release not found"* ]]; then
+            printf '%s\n' "$release_lookup" >&2
+            echo "Unable to verify GitHub Release state for $RELEASE_VERSION" >&2
             exit 1
           fi
           plain_version="${RELEASE_VERSION#v}"
