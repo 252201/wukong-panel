@@ -36,7 +36,9 @@ https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 
 ## 轻量探针接入
 
-先在中央面板启用“中央多机控制”，打开舰队页并点击“接入轻量探针”，复制页面生成的 10 分钟一次性命令，在目标 VPS 以 root 执行。命令下载独立的 `probe-install.sh`、对应架构的 `wukong-probe`，校验 Release SHA-256 后注册 systemd 或 OpenRC 服务；不会安装完整面板、Nginx 或 sing-box。需要 Linux `amd64`/`arm64`、`curl`、`sha256sum` 和系统 CA 证书。探针以 root 运行以发送 ICMP Echo，仅向中央可信 HTTPS 地址发起连接。
+先在中央面板启用“中央多机控制”，打开舰队页并点击“接入轻量探针”，复制页面生成的 10 分钟一次性命令，在目标 VPS 以 root 执行。命令下载独立的 `probe-install.sh`、对应架构的 `wukong-probe`，校验 Release SHA-256 后注册 systemd 或 OpenRC 服务；不会安装完整面板、Nginx 或 sing-box。需要 Linux `amd64`/`arm64`、`curl`、`sha256sum` 和系统 CA 证书。探针默认以 root 运行，仅向中央可信 HTTPS 地址发起连接。
+
+ICMP 探测在原始 socket 无法打开时自动尝试非特权 ICMP Echo socket，兼容缺少 `CAP_NET_RAW` 的 Podman 等容器，无需安装或调用系统 `ping`。Linux 的 `net.ipv4.ping_group_range` 必须允许探针进程所在的组创建 Echo socket；若两种 socket 均被禁止，则显示“不可用”，不会把权限错误计为 100% 丢包。完整面板的网络质量采样也使用同一兼容逻辑。
 
 轻量探针只提供舰队主机卡片，不提供“进入主机”、节点操作或全局订阅。卡片的“网卡累计流量”是当前默认网卡自系统启动以来的计数器，重启或网卡更换后会重置；它不是账期用量。网络质量的近 30 分钟历史保存在探针内存中，探针服务重启后重新积累。
 

@@ -53,8 +53,18 @@ type targetResult struct {
 
 type targetProbe func(context.Context, net.IP) targetResult
 
+type icmpSocket interface {
+	Close() error
+	LocalAddr() net.Addr
+	WriteTo([]byte, net.Addr) (int, error)
+	ReadFrom([]byte) (int, net.Addr, error)
+	SetReadDeadline(time.Time) error
+}
+
+type socketListener func(string, string) (icmpSocket, error)
+
 // Service keeps one recent outbound ICMP measurement for this VPS. Probes run
-// in the local root agent; the web process only reads the resulting snapshot.
+// in the root agent or lightweight probe; the web process only reads snapshots.
 type Service struct {
 	targets          []net.IP
 	labels           []string
@@ -364,11 +374,23 @@ func medianMS(samples []time.Duration) float64 {
 }
 
 func probeTarget(ctx context.Context, target net.IP) targetResult {
+	return probeTargetWithListener(ctx, target, func(network, address string) (icmpSocket, error) {
+		return icmp.ListenPacket(network, address)
+	})
+}
+
+func probeTargetWithListener(ctx context.Context, target net.IP, listen socketListener) targetResult {
 	var result targetResult
-	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	conn, err := listen("ip4:icmp", "0.0.0.0")
+	datagram := false
 	if err != nil {
-		result.err = fmt.Errorf("%s: 无法打开 ICMP socket: %w", target, err)
-		return result
+		rawErr := err
+		conn, err = listen("udp4", "0.0.0.0")
+		if err != nil {
+			result.err = fmt.Errorf("%s: 无法打开 ICMP socket（原始: %v；非特权: %w）", target, rawErr, err)
+			return result
+		}
+		datagram = true
 	}
 	defer conn.Close()
 	var token [8]byte
@@ -377,6 +399,19 @@ func probeTarget(ctx context.Context, target net.IP) targetResult {
 		return result
 	}
 	id := int(binary.BigEndian.Uint16(token[:2]))
+	var destination net.Addr = &net.IPAddr{IP: target}
+	if datagram {
+		// Linux assigns the bound ping socket's port as the Echo ID and
+		// rewrites outgoing IDs. Match that ID as well as our random payload
+		// and sequence, otherwise valid non-privileged replies look lost.
+		local, ok := conn.LocalAddr().(*net.UDPAddr)
+		if !ok || local == nil || local.Port <= 0 || local.Port > 65535 {
+			result.err = fmt.Errorf("%s: 无法确定非特权 ICMP socket 标识", target)
+			return result
+		}
+		id = local.Port
+		destination = &net.UDPAddr{IP: target}
+	}
 	buffer := make([]byte, 1500)
 	for sequence := 0; sequence < samplesPerTarget; sequence++ {
 		if err := ctx.Err(); err != nil {
@@ -390,7 +425,7 @@ func probeTarget(ctx context.Context, target net.IP) targetResult {
 			return result
 		}
 		started := time.Now()
-		if _, err = conn.WriteTo(packet, &net.IPAddr{IP: target}); err != nil {
+		if _, err = conn.WriteTo(packet, destination); err != nil {
 			result.err = fmt.Errorf("%s: 发送 ICMP 失败: %w", target, err)
 			return result
 		}
@@ -411,8 +446,14 @@ func probeTarget(ctx context.Context, target net.IP) targetResult {
 				result.sent--
 				return result
 			}
-			address, ok := sender.(*net.IPAddr)
-			if !ok || !address.IP.Equal(target) {
+			var senderIP net.IP
+			switch address := sender.(type) {
+			case *net.IPAddr:
+				senderIP = address.IP
+			case *net.UDPAddr:
+				senderIP = address.IP
+			}
+			if !senderIP.Equal(target) {
 				continue
 			}
 			reply, parseErr := icmp.ParseMessage(1, buffer[:n])
