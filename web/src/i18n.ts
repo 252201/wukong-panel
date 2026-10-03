@@ -3,6 +3,9 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  '此为 TCP/UDP 合并规则；删除会同时移除此端口的 TCP 和 UDP 放行或拒绝，仅操作当前已有的地址族': 'This is a combined TCP/UDP rule. Deleting it removes both protocols for this port, only in its existing address families',
+  '已有 TCP/UDP 合并规则，请先预览删除整条规则，再分别添加需要的协议': 'A combined TCP/UDP rule already exists. Preview deleting the whole rule before adding separate protocols',
+
   '。': '.',
   '悟': 'W',
   '舰': 'F',

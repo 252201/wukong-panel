@@ -301,6 +301,7 @@ func normalizeRule(r model.SecurityRule) (model.SecurityRule, error) {
 		return r, errors.New("区域无效")
 	}
 	r.Description = ""
+	r.AddressFamilies = nil
 	return r, nil
 }
 func portSpec(r model.SecurityRule, sep string) string {

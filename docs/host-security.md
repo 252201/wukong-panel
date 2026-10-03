@@ -56,6 +56,12 @@ UFW 使用发行版 `iptables-multiport`（官方 UFW action 默认会封锁所�
 
 UFW 原先已启用时，恢复磁盘配置后必须再执行 `reload` 才完成内核恢复，不能只调用 `enable`。这也适用于 v1.7.0 写出的旧事务；重载失败会保留 pending journal，恢复服务继续重试，并在完成重载和封禁同步后才记录已回滚。原先未启用时仍恢复为停用状态。
 
+## UFW 旧端口规则
+
+兼容 `ufw allow 20100` / `ufw deny 20100` 这种省略协议的单端口规则。它们作为一条 TCP/UDP 合并规则展示和接管，不拆成可独立删除的两条规则。识别前核对 `/etc/ufw/user.rules` 与 `user6.rules` 的完整 tuple 和 TCP/UDP 原生条目，显示实际 IPv4/IPv6 覆盖；缺失、重复或多出复杂匹配时仍只读，不假设旧规则均为双栈。接口、转发、应用名称及未完整识别的规则保持原有保护。
+
+接管不改写原始防火墙文件。删除经过预览、备份及连接确认窗口，用原始合并语义同时移除 TCP 和 UDP，失败恢复原文件、所有权与内核规则。合并规则覆盖 SSH/面板端口时同样受保护；不允许把合并规则直接替换成单个协议，以免隐式删除另一协议。需要调整时先预览删除整条规则，再分别添加所需协议。新增规则仍只接受显式 TCP 或 UDP。
+
 ## 验证
 
 `go test ./...`、`go test -race ./...`、`go vet ./...`；`cd web && npm test && npm run build`；Linux amd64/arm64 编译。双实例舰队测试实际通过 HTTPS、CSRF、任务、回执与持久化 journal，原生命令使用隔离 fixture，验证所选目标和并发重复写只执行一次。
@@ -69,6 +75,7 @@ sh scripts/test-host-security-native.sh ubuntu:24.04
 sh scripts/test-host-security-native.sh rockylinux:9
 sh scripts/test-host-security-native.sh almalinux:9
 sh scripts/test-host-security-native.sh alpine:3.21
+WUKONG_SECURITY_BACKEND=ufw sh scripts/test-host-security-native.sh alpine:3.21
 # ARM 主机可使用 WUKONG_SECURITY_ARCH=arm64
 ```
 

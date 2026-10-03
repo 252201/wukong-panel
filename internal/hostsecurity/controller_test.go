@@ -64,7 +64,7 @@ func TestRuleValidation(t *testing.T) {
 }
 func TestUFWParsesOnlyCompleteRules(t *testing.T) {
 	v := parseUFW("ufw allow 123/tcp\nufw deny from 192.0.2.0/24 to any port 200:205 proto udp\nufw allow in on eth0 to any port 22\nufw allow 443\nufw route allow 100/tcp")
-	if len(v) != 5 || !v[0].Adoptable || !v[1].Adoptable || v[2].Adoptable || v[3].Adoptable || v[4].Adoptable {
+	if len(v) != 5 || !v[0].Adoptable || !v[1].Adoptable || v[2].Adoptable || !v[3].Adoptable || v[3].Protocol != "tcp/udp" || v[4].Adoptable {
 		t.Fatalf("%+v", v)
 	}
 	if v[1].PortTo != 205 || v[1].Source != "192.0.2.0/24" {

@@ -1,5 +1,10 @@
 import type { SecurityPort, SecurityRule } from './api'
 
+export function securityRuleMatchesProtocol(rule: SecurityRule, protocol: string): boolean {
+ return rule.protocol === protocol || (rule.protocol === 'tcp/udp' && (protocol === 'tcp' || protocol === 'udp'))
+}
+
+
 export function securityRuleServices(rule: SecurityRule, ports: SecurityPort[], language: string): string[] {
  if (!rule.adoptable) return []
  const last = rule.portTo || rule.portFrom
@@ -9,7 +14,7 @@ export function securityRuleServices(rule: SecurityRule, ports: SecurityPort[], 
   if (reason === 'HTTP / 证书验证') return 'HTTP / certificate validation'
   return reason.replace(/^节点 /, 'Node ')
  }
- return [...new Set(ports.filter(port => port.protocol === rule.protocol && port.port >= rule.portFrom && port.port <= last).map(port => translate(port.reason)))]
+ return [...new Set(ports.filter(port => securityRuleMatchesProtocol(rule, port.protocol) && port.port >= rule.portFrom && port.port <= last).map(port => translate(port.reason)))]
 }
 
 export function parseSecurityPorts(value: string): number[] {
