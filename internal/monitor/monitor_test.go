@@ -153,7 +153,7 @@ func TestProcessSnapshotLabelsPythonSecurityService(t *testing.T) {
 	defer func() { _ = command.Process.Kill(); _ = command.Wait() }()
 	collector := &Collector{}
 	for attempt := 0; attempt < 20; attempt++ {
-		items, _ := collector.processSnapshot(1, nil)
+		items, _ := collector.processSnapshot(1, nil, nil)
 		for _, item := range items {
 			if item.PID == command.Process.Pid && item.Service == "firewalld" {
 				if !pythonProcess(item.Name) {
@@ -194,7 +194,7 @@ func TestProcessSnapshotMapsSingBoxNodeNames(t *testing.T) {
 	want := []string{"Apple-TV", "iPhone"}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		items, _ := collector.processSnapshot(1_000_000_000, map[string][]string{configPath: want})
+		items, _ := collector.processSnapshot(1_000_000_000, map[string][]string{configPath: want}, nil)
 		for _, item := range items {
 			if item.PID != command.Process.Pid {
 				continue
@@ -214,7 +214,7 @@ func TestProcessSnapshotOnLinux(t *testing.T) {
 		t.Skip("requires Linux procfs")
 	}
 	collector := &Collector{lastProcessCPU: map[int]uint64{}}
-	items, count := collector.processSnapshot(1_000_000_000, nil)
+	items, count := collector.processSnapshot(1_000_000_000, nil, nil)
 	if count == 0 || len(items) == 0 {
 		t.Fatalf("empty Linux process snapshot: count=%d items=%d", count, len(items))
 	}
