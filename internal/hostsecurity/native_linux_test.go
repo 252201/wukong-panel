@@ -4,6 +4,7 @@ package hostsecurity
 
 import (
 	"context"
+	"errors"
 	"github.com/252201/wukong-panel/internal/model"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/icmp"
@@ -361,6 +362,7 @@ func TestNativeSecurity(t *testing.T) {
 			t.Fatal("third-party table lost", e)
 		}
 	}
+	nativeConfiguredSSHActivation(t, c, f.Zone)
 	// Test SSH protection using real failed authentications and actual network blocks.
 	if e = c.service(ctx, "start", "fail2ban"); e != nil {
 		t.Fatal(e)
@@ -421,6 +423,12 @@ func TestNativeSecurity(t *testing.T) {
 	nativeConnect(t, "udp", "10.203.0.1:23456", "10.203.0.4")
 	nativeConnect(t, "udp", "[fd42:203::1]:23456", "")
 	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
+	if backend == "ufw" {
+		nativeUFWRegressions(t, c, f.Zone)
+		// The recovery reload must preserve the active SSH-only ban too.
+		nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
+		nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.2")
+	}
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.2")
 	// IPv6 addresses are parsed, listed and enforced independently of IPv4.
@@ -567,6 +575,173 @@ func TestNativeSecurity(t *testing.T) {
 	t.Logf("PASS %s: IPv4/IPv6 allow/deny, protected ports, existing rules, persistence, SSH-only bans, whitelist, unban, independent 90s recovery", backend)
 }
 
+// Reproduce the v1.7.0 production failures using real UFW and packets. These
+// tests keep UFW active during recovery; disable/enable alone misses the bug.
+func nativeUFWRegressions(t *testing.T, c *Controller, zone string) {
+	t.Helper()
+	ctx := context.Background()
+	listener, e := net.Listen("tcp", ":33333")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, e := listener.Accept()
+			if e != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	for _, port := range []string{"33334", "33335"} {
+		udp, e := net.ListenPacket("udp", ":"+port)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer udp.Close()
+		go func() {
+			buf := make([]byte, 100)
+			for {
+				n, addr, e := udp.ReadFrom(buf)
+				if e != nil {
+					return
+				}
+				_, _ = udp.WriteTo(buf[:n], addr)
+			}
+		}()
+	}
+	add := func(action, protocol, source string, from, to int) {
+		t.Helper()
+		nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "add", Zone: zone, Rule: model.SecurityRule{Action: action, Protocol: protocol, PortFrom: from, PortTo: to, Source: source}})
+	}
+	find := func(action, protocol, source string, from int) model.SecurityRule {
+		t.Helper()
+		f, e := c.Firewall(ctx, zone)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, r := range f.Rules {
+			if r.Action == action && r.Protocol == protocol && r.Source == source && r.PortFrom == from {
+				return r
+			}
+		}
+		t.Fatal("rule not found", action, protocol, source, from)
+		return model.SecurityRule{}
+	}
+	// Replacing an external rule requires explicit adoption, even if simple.
+	if _, e := c.Preview(ctx, "firewall", model.SecurityRequest{Operation: "add", Rule: model.SecurityRule{Action: "deny", Protocol: "tcp", PortFrom: 5566, Source: "any"}}); e == nil || !strings.Contains(e.Error(), "接管") {
+		t.Fatal("implicitly replaced third-party allow", e)
+	}
+	for _, source := range []string{"10.203.0.4/32", "fd42:203::2/128"} {
+		add("allow", "tcp", source, 33333, 33333)
+	}
+	nativeConnect(t, "tcp", "10.203.0.1:33333", "10.203.0.4")
+	nativeConnect(t, "tcp", "[fd42:203::1]:33333", "")
+	for _, source := range []string{"10.203.0.4/32", "fd42:203::2/128"} {
+		add("deny", "tcp", source, 33333, 33333)
+		if strings.Contains(source, ":") {
+			nativeConnect(t, "blocked", "[fd42:203::1]:33333", "")
+			nativeConnect(t, "tcp", "10.203.0.1:33333", "10.203.0.4")
+		} else {
+			nativeConnect(t, "blocked", "10.203.0.1:33333", "10.203.0.4")
+			nativeConnect(t, "tcp", "[fd42:203::1]:33333", "")
+		}
+		add("allow", "tcp", source, 33333, 33333)
+		nativeConnect(t, "tcp", "10.203.0.1:33333", "10.203.0.4")
+		nativeConnect(t, "tcp", "[fd42:203::1]:33333", "")
+	}
+	add("allow", "udp", "10.203.0.0/24", 33334, 33335)
+	add("allow", "udp", "fd42:203::/64", 33334, 33335)
+	add("deny", "udp", "fd42:203::/64", 33334, 33335)
+	for _, port := range []string{"33334", "33335"} {
+		nativeConnect(t, "udp-blocked", "[fd42:203::1]:"+port, "")
+		nativeConnect(t, "udp", "10.203.0.1:"+port, "10.203.0.4")
+	}
+	add("allow", "udp", "fd42:203::/64", 33334, 33335)
+	// A new IPv6-only deny must precede the broader IPv6 range allow.
+	add("deny", "udp", "fd42:203::2/128", 33334, 33334)
+	nativeConnect(t, "udp-blocked", "[fd42:203::1]:33334", "")
+	nativeConnect(t, "udp", "[fd42:203::1]:33335", "")
+	nativeConnect(t, "udp", "10.203.0.1:33334", "10.203.0.4")
+	block := find("deny", "udp", "fd42:203::2", 33334)
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "delete", RuleID: block.ID})
+	nativeConnect(t, "udp", "[fd42:203::1]:33334", "")
+	// Inject a failure after deleting the conflicting allow. Both kernel rules
+	// and original ownership/IDs must recover, with the firewall still active.
+	before, e := c.state()
+	if e != nil {
+		t.Fatal(e)
+	}
+	old := find("allow", "tcp", "10.203.0.4", 33333)
+	base := c.Run
+	c.Run = func(ctx context.Context, name string, args []string, input string) (string, error) {
+		if name == "ufw" && len(args) > 0 && args[0] == "prepend" {
+			return "", errors.New("injected replacement failure")
+		}
+		return base(ctx, name, args, input)
+	}
+	r := model.SecurityRequest{Operation: "add", Rule: model.SecurityRule{Action: "deny", Protocol: "tcp", PortFrom: 33333, Source: "10.203.0.4"}}
+	p, e := c.Preview(ctx, "firewall", r)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Revision = p.Revision
+	_, e = c.Apply(ctx, "firewall", r)
+	c.Run = base
+	if e == nil || !strings.Contains(e.Error(), "injected replacement failure") || c.pending() != nil {
+		t.Fatal("failed replacement did not recover", e)
+	}
+	if got := find("allow", "tcp", "10.203.0.4", 33333); got.ID != old.ID || !got.Managed {
+		t.Fatal("ownership lost after failed replacement", got)
+	}
+	nativeConnect(t, "tcp", "10.203.0.1:33333", "10.203.0.4")
+	// Wait the complete 90-second window without Confirm or in-process Recover.
+	// The independent recovery daemon must restore the active kernel rules.
+	r = model.SecurityRequest{Operation: "delete", RuleID: old.ID}
+	p, e = c.Preview(ctx, "firewall", r)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Revision = p.Revision
+	v, e := c.Apply(ctx, "firewall", r)
+	if e != nil || v.Transaction == nil || v.Transaction.Status != "awaiting-confirmation" {
+		t.Fatal("delete confirmation", v, e)
+	}
+	if d := time.Until(v.Transaction.Deadline); d < 85*time.Second || d > 91*time.Second {
+		t.Fatal("wrong confirmation window", d)
+	}
+	nativeConnect(t, "blocked", "10.203.0.1:33333", "10.203.0.4")
+	nativeConnect(t, "tcp", "[fd42:203::1]:33333", "")
+	deadline := v.Transaction.Deadline.Add(15 * time.Second)
+	for {
+		x, e := c.Transaction(v.Transaction.ID)
+		if e == nil && x.Status == "rolled-back" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("independent active-firewall recovery did not finish", x, e)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	nativeConnect(t, "tcp", "10.203.0.1:33333", "10.203.0.4")
+	nativeConnect(t, "tcp", "[fd42:203::1]:33333", "")
+	for _, port := range []string{"33334", "33335"} {
+		nativeConnect(t, "udp", "[fd42:203::1]:"+port, "")
+	}
+	after, e := c.state()
+	if e != nil || c.revision(before) != c.revision(after) {
+		t.Fatal("original ownership/state not restored", e)
+	}
+	if got := find("allow", "tcp", "10.203.0.4", 33333); got.ID != old.ID {
+		t.Fatal("original ID lost on timeout", got)
+	}
+	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "")
+	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
+	t.Log("UFW regressions: managed allow/deny replacements, IPv6 prepend, CIDR/UDP ranges, failed replacement and full 90s active-kernel recovery passed")
+}
+
 type sshLogWriter struct {
 	mu   sync.Mutex
 	path string
@@ -647,4 +822,93 @@ func TestNativeAfterReboot(t *testing.T) {
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
 	t.Log("PID 1 restart recovered pending transaction and management connectivity")
+}
+
+// Exercise the package-default configured-but-stopped SSH protection without
+// requiring a beginner to start a daemon from a shell before panel adoption.
+func nativeConfiguredSSHActivation(t *testing.T, c *Controller, zone string) {
+	t.Helper()
+	ctx := context.Background()
+	// Use a separate peer: the next fresh jail can legitimately replay recent
+	// authentication failures, so this scenario must not pre-ban its test IP.
+	if _, e := c.exec(ctx, "ip", "netns", "exec", "security-client", "ip", "addr", "add", "10.203.0.5/24", "dev", "test-client"); e != nil {
+		t.Fatal(e)
+	}
+	defer c.exec(ctx, "ip", "netns", "exec", "security-client", "ip", "addr", "del", "10.203.0.5/24", "dev", "test-client")
+	if e := c.service(ctx, "stop", "fail2ban"); e != nil {
+		t.Fatal(e)
+	}
+	backend, path, e := c.logSource(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	originalPath := "/etc/fail2ban/jail.d/zzz-native-configured.local"
+	original := renderJail("sshd", defaults(), true, backend, path, "nftables-multiport[name=sshd,port=22,protocol=tcp]", []int{22})
+	if e = os.WriteFile(originalPath, original, 0600); e != nil {
+		t.Fatal(e)
+	}
+	defer os.Remove(originalPath)
+	beforeBoot := c.bootEnabled(ctx, "fail2ban")
+	fb, e := c.Fail2ban(ctx)
+	if e != nil || fb.Active || !fb.CanActivate || !fb.Writable || len(fb.Jails) != 1 || !fb.Jails[0].ConfiguredOnly {
+		t.Fatalf("configured stopped SSH %+v %v", fb, e)
+	}
+	cfg := defaults()
+	cfg.MaxRetry = 3
+	cfg.IgnoreIPs = []string{"10.203.0.3"}
+	req := model.SecurityRequest{Operation: "adopt", Jail: "sshd", Config: cfg, Zone: zone}
+	preview, e := c.Preview(ctx, "fail2ban", req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	req.Revision = preview.Revision
+	base := c.Run
+	injected := false
+	c.Run = func(ctx context.Context, n string, a []string, in string) (string, error) {
+		out, err := base(ctx, n, a, in)
+		args := strings.Join(a, " ")
+		if !injected && err == nil && (n == "systemctl" && args == "start fail2ban.service" || n == "rc-service" && args == "fail2ban start") {
+			injected = true
+			return out, errors.New("injected failure after actual Fail2ban startup")
+		}
+		return out, err
+	}
+	_, failure := c.Apply(ctx, "fail2ban", req)
+	c.Run = base
+	if !injected || failure == nil || c.pending() != nil || !c.fail2banStopped(ctx) || c.bootEnabled(ctx, "fail2ban") != beforeBoot {
+		t.Fatalf("failed activation did not restore stopped service: injected=%v failure=%v", injected, failure)
+	}
+	if _, e = os.Stat(jailPath); !errors.Is(e, os.ErrNotExist) {
+		t.Fatalf("failed activation left override: %v", e)
+	}
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "adopt", Jail: "sshd", Config: cfg, Zone: zone})
+	fb, e = c.Fail2ban(ctx)
+	if e != nil || !fb.Active || fb.ManagedJail != "sshd" || len(fb.Jails) != 1 || !fb.Jails[0].Managed || fb.Jails[0].ConfiguredOnly {
+		t.Fatalf("activated SSH %+v %v", fb, e)
+	}
+	current, e := os.ReadFile(originalPath)
+	if e != nil || string(current) != string(original) {
+		t.Fatal("changed original SSH configuration", e)
+	}
+	for i := 0; i < 3; i++ {
+		nativeConnect(t, "ssh-fail", "10.203.0.1:46961", "10.203.0.5")
+	}
+	waitNative(t, "adopted stopped SSH ban", func() bool {
+		v, _ := c.Fail2ban(ctx)
+		return len(v.Jails) == 1 && contains(v.Jails[0].Banned, "10.203.0.5")
+	})
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.5")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.5")
+	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.3")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.5"})
+	nativeConnect(t, "tcp", "10.203.0.1:46961", "10.203.0.5")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "disable"})
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "detach"})
+	if e = c.service(ctx, "stop", "fail2ban"); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Remove(originalPath); e != nil {
+		t.Fatal(e)
+	}
+	t.Log("configured inactive SSH: preview/adopt/start, startup failure rollback, original config retained, actual port 46961 ban/whitelist/unban passed")
 }

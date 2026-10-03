@@ -1112,7 +1112,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <div class="page-intro"><div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div><button class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button></div>
         <section v-if="selectedHostId === 'local'" class="panel-card fleet-controller-settings">
           <div class="setting-title"><span>舰</span><div><h3>中央多机控制</h3><p>控制流与订阅流可使用各自独立的可信 HTTPS 入口</p></div></div>
-          <label class="toggle-row"><span><b>启用中央控制</b><small>未启用时界面与 v0.8.2 单机模式保持一致</small></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label>
+          <label class="toggle-row"><span><b>启用中央控制</b></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label>
           <div v-if="fleetEnabledDraft" class="fleet-url-grid">
             <label class="fleet-url-field">
               <span><b>01 · 主控通信地址</b><em>CONTROL PLANE</em></span>

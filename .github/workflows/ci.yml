@@ -108,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [debian:12, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
+        image: [debian:12, debian:13, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
