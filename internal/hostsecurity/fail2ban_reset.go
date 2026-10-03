@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -39,6 +40,17 @@ func (c *Controller) resetFiles(roots []string) ([]savedFile, error) {
 	files := []savedFile{}
 	total := int64(0)
 	for _, root := range roots {
+		if mounts, e := c.read("/proc/self/mountinfo"); e == nil {
+			for _, line := range strings.Split(string(mounts), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) > 4 {
+					point := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\134`, `\`).Replace(fields[4])
+					if point == root || strings.HasPrefix(point, root+"/") {
+						return nil, errors.New("Fail2ban 目录包含挂载点，禁止自动清理")
+					}
+				}
+			}
+		}
 		for parent := filepath.Dir(root); parent != "/" && parent != "."; parent = filepath.Dir(parent) {
 			info, err := os.Lstat(c.path(parent))
 			if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -115,6 +127,12 @@ func validateResetFiles(files []savedFile) error {
 	return nil
 }
 func (c *Controller) resetPackages(ctx context.Context) ([]string, error) {
+	if c.Root == "" {
+		path, e := exec.LookPath("fail2ban-client")
+		if e != nil || path != "/usr/bin/fail2ban-client" {
+			return nil, errors.New("Fail2ban 不是受支持的发行版软件包安装")
+		}
+	}
 	switch c.family() {
 	case "apt":
 		out, err := c.exec(ctx, "dpkg-query", "-S", "/usr/bin/fail2ban-client")
@@ -224,7 +242,7 @@ func (c *Controller) resetPlan(ctx context.Context) (model.SecurityPreview, erro
 			if len(parts) != 2 {
 				continue
 			}
-			key := strings.TrimSpace(parts[0])
+			key := strings.ToLower(strings.TrimSpace(parts[0]))
 			value := strings.TrimSpace(strings.SplitN(parts[1], " #", 2)[0])
 			if key == "dbfile" && value != "None" && value != ":memory:" && !(filepath.Clean(value) == value && strings.HasPrefix(value, "/var/lib/fail2ban/")) || key == "socket" && value != "/var/run/fail2ban/fail2ban.sock" && value != "/run/fail2ban/fail2ban.sock" || key == "pidfile" && value != "/var/run/fail2ban/fail2ban.pid" && value != "/run/fail2ban/fail2ban.pid" {
 				return p, errors.New("存在自定义数据库或运行路径，无法完全自动清理，请由管理员处理")

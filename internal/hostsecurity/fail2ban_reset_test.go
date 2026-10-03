@@ -254,7 +254,7 @@ func TestFail2banResetDurableRecoveryAfterProcessCrash(t *testing.T) {
 	}
 }
 func TestFail2banResetUnsafePathsAndBackupCorruption(t *testing.T) {
-	for _, scenario := range []string{"symlink-root", "symlink-child", "outside-db", "custom-launch", "no-cap", "bad-owner"} {
+	for _, scenario := range []string{"symlink-root", "symlink-child", "outside-db", "custom-launch", "no-cap", "bad-owner", "mounted-root", "traversal-db"} {
 		t.Run(scenario, func(t *testing.T) {
 			c, _, _ := resetFixture(t)
 			switch scenario {
@@ -267,6 +267,10 @@ func TestFail2banResetUnsafePathsAndBackupCorruption(t *testing.T) {
 				writeTestFile(t, c, "/etc/fail2ban/fail2ban.local", "[Definition]\ndbfile=/srv/custom.sqlite3")
 			case "custom-launch":
 				writeTestFile(t, c, "/etc/systemd/system/fail2ban.service.d/custom.conf", "custom")
+			case "mounted-root":
+				writeTestFile(t, c, "/proc/self/mountinfo", "123 100 0:23 / /etc/fail2ban rw - ext4 /dev/test rw")
+			case "traversal-db":
+				writeTestFile(t, c, "/etc/fail2ban/fail2ban.local", "[Definition]\nDBFILE=/var/lib/fail2ban/../../srv/custom.sqlite3")
 			case "no-cap":
 				writeTestFile(t, c, "/proc/self/status", "CapEff: 0000000000000000")
 			case "bad-owner":
