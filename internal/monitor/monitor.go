@@ -293,7 +293,9 @@ func (c *Collector) sample() {
 		diskValue = 27.4
 	}
 	nodeNamesByConfig := map[string][]string{}
+	tunnelServices := map[string]tunnelProcessService{}
 	if nodes, nodeErr := c.store.Nodes(context.Background()); nodeErr == nil {
+		tunnelServices = cloudflaredNodeServices(nodes)
 		for _, node := range nodes {
 			if node.ConfigPath == "" {
 				continue
@@ -304,7 +306,7 @@ func (c *Collector) sample() {
 			sort.Strings(nodeNamesByConfig[path])
 		}
 	}
-	processes, processCount := c.processSnapshot(memoryTotal, nodeNamesByConfig)
+	processes, processCount := c.processSnapshot(memoryTotal, nodeNamesByConfig, tunnelServices)
 	if c.demo && len(processes) == 0 {
 		processes = []model.ProcessStat{
 			{PID: 1421, Name: "sing-box", CPU: 6.9, RSSBytes: 84_230_000, MemoryPercent: 4.2},
@@ -555,7 +557,7 @@ func processConfigPath(cmdline []byte) string {
 	return ""
 }
 
-func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[string][]string) ([]model.ProcessStat, int) {
+func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[string][]string, tunnelServices map[string]tunnelProcessService) ([]model.ProcessStat, int) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, 0
@@ -588,7 +590,7 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 			name = statusName
 		}
 		var cmdline []byte
-		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") || securityProcessCandidate(name) {
+		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") || (name != "cloudflared" && securityProcessCandidate(name)) {
 			cmdline, _ = os.ReadFile("/proc/" + entry.Name() + "/cmdline")
 		}
 		service := securityProcessService(name, cmdline)
@@ -596,6 +598,9 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 		nodeNames := []string(nil)
 		if name == "sing-box" {
 			nodeNames = append(nodeNames, nodeNamesByConfig[processConfigPath(cmdline)]...)
+		} else if name == "cloudflared" {
+			cgroup, _ := os.ReadFile("/proc/" + entry.Name() + "/cgroup")
+			nodeNames = cloudflaredProcessNodes(pid, cgroup, tunnelServices, "/run")
 		}
 		cpu := 0.0
 		if previous, exists := c.lastProcessCPU[pid]; exists && ticks >= previous && totalDelta > 0 {

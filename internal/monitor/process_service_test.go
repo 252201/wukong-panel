@@ -4,6 +4,10 @@ import "testing"
 
 func TestSecurityProcessService(t *testing.T) {
 	tests := []struct{ name, command, want string }{
+		{"cloudflared", "", "cloudflared"},
+		{"cloudflared-helper", "cloudflared-helper\x00cloudflared\x00", ""},
+		{"sh", "/bin/sh\x00-c\x00cloudflared tunnel run\x00", ""},
+		{"python3", "/usr/bin/python3\x00other.py\x00cloudflared\x00", ""},
 		{"fail2ban-server", "", "fail2ban"},
 		{"fail2ban-client", "", "fail2ban-client"},
 		{"firewalld", "", "firewalld"},

@@ -17,6 +17,7 @@ type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' |
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
 
 const processServiceLabels: Record<string, string> = {
+  cloudflared: 'Cloudflare 隧道',
   fail2ban: '登录防护服务 · Fail2ban',
   'fail2ban-client': '登录防护管理工具 · Fail2ban',
   firewalld: '防火墙服务 · firewalld',

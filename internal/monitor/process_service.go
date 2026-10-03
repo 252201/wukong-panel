@@ -8,6 +8,8 @@ import (
 // Only the service identifier is retained. Command lines stay on the host.
 func securityToolService(name string) string {
 	switch name {
+	case "cloudflared":
+		return "cloudflared"
 	case "fail2ban-server":
 		return "fail2ban"
 	case "fail2ban-client":
