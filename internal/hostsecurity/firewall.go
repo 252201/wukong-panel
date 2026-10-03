@@ -767,7 +767,9 @@ func ufwArgs(r model.SecurityRule, remove bool) []string {
 		a = append(a, "--force", "delete")
 	}
 	if !remove && r.Action == "deny" {
-		a = append(a, "insert", "1")
+		// UFW numbers IPv6 after IPv4. prepend selects the beginning of the
+		// rule's own address family, including when its ruleset is empty.
+		a = append(a, "prepend")
 	}
 	a = append(a, r.Action)
 	if r.Source == "any" {
@@ -777,6 +779,29 @@ func ufwArgs(r model.SecurityRule, remove bool) []string {
 	}
 	return a
 }
+
+// UFW cannot keep two actions for the same match: inserting the opposite
+// action is skipped (and appending it may silently replace the old action).
+// Only explicitly managed, unprotected rules may be replaced in an add preview.
+func ufwReplacements(r model.SecurityRule, rules []model.SecurityRule) ([]model.SecurityRule, error) {
+	replaced := []model.SecurityRule{}
+	for _, old := range rules {
+		match := old
+		match.Action = r.Action
+		if old.Action == r.Action || !sameRule(match, r) {
+			continue
+		}
+		if old.Protected {
+			return nil, errors.New("SSH 和面板入口规则受保护")
+		}
+		if !old.Adoptable || !old.Managed {
+			return nil, errors.New("存在相同条件的外部规则，请先确认接管后再替换")
+		}
+		replaced = append(replaced, old)
+	}
+	return replaced, nil
+}
+
 func fireArgs(r model.SecurityRule, remove, permanent bool) []string {
 	a := []string{"--zone=" + r.Zone}
 	if permanent {
@@ -911,8 +936,18 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 				return p, errors.New("不能拒绝 SSH 或面板入口端口")
 			}
 		}
-		p.Changes = []string{ruleKey(rr)}
 		p.NeedsConfirmation = rr.Action == "deny"
+		if f.Backend == "ufw" {
+			replaced, e := ufwReplacements(rr, f.Rules)
+			if e != nil {
+				return p, e
+			}
+			for _, old := range replaced {
+				p.Changes = append(p.Changes, "delete "+ruleKey(old))
+				p.NeedsConfirmation = true
+			}
+		}
+		p.Changes = append(p.Changes, ruleKey(rr))
 	case "delete", "adopt":
 		var rr *model.SecurityRule
 		for _, v := range f.Rules {
@@ -1005,6 +1040,28 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 	if r.Operation == "add" {
 		rr, _ := normalizeRule(r.Rule)
 		rr.Zone = f.Zone
+		if f.Backend == "ufw" {
+			replaced, e := ufwReplacements(rr, f.Rules)
+			if e != nil {
+				return e
+			}
+			removed := map[string]bool{}
+			for _, old := range replaced {
+				if e := c.changeRule(ctx, f.Backend, old, true, j); e != nil {
+					return e
+				}
+				removed[old.ID] = true
+			}
+			// Do not reuse s.Rules' backing array: the rollback journal retains
+			// the original slice and must restore every original rule/ID.
+			kept := make([]model.SecurityRule, 0, len(s.Rules))
+			for _, old := range s.Rules {
+				if !removed[old.ID] {
+					kept = append(kept, old)
+				}
+			}
+			s.Rules = kept
+		}
 		rr.Managed = true
 		rr.Adoptable = true
 		rr.ID = token()

@@ -366,6 +366,14 @@ func (c *Controller) rollback(ctx context.Context, j *journal) error {
 			if _, e := c.exec(ctx, "ufw", op.Args...); e != nil {
 				return e
 			}
+			if op.Args[1] == "enable" {
+				// enable is a no-op when UFW is already active. Restoring the
+				// files alone leaves the changed kernel rules in place. Keep
+				// this here so journals written by older versions also reload.
+				if _, e := c.exec(ctx, "ufw", "reload"); e != nil {
+					return e
+				}
+			}
 		case "firewall-cmd":
 			if !validFireUndo(op.Args) {
 				return errors.New("invalid firewalld recovery")

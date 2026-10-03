@@ -13,6 +13,8 @@
 
 firewalld 保留区域绑定、已有永久配置和运行规则。停用状态先读取离线配置并预先写入管理放行端口，再启动服务。默认拒绝区域明确保留 ICMP/IPv6 控制通信；首次开启超时会恢复原停用状态。多个绑定区域无法确认 SSH 所属区域时保持只读，需在主机核对。nftables 仅原子替换 `inet wukong_panel`，使用独立 `wukong-firewall` 启动加载器；不修改或调用发行版的全局 nftables 重载文件。停用会撤销悟空的拒绝入站及 deny 执行，保留可再次启用的规则配置。
 
+UFW 对相同协议、端口范围、来源的允许/拒绝采用替换：预览同时列出删除旧规则与添加新规则，两种方向都要求连接确认。仅可替换已由悟空管理且未受保护的简单规则；外部规则需先确认接管。拒绝规则使用 `prepend`，按 IPv4/IPv6 各自的规则顺序置于已有允许规则之前，避免混用双栈编号。规则顺序遵循 [UFW 官方发行版手册](https://manpages.debian.org/trixie/ufw/ufw.8.en.html)。
+
 ## SSH 防护
 
 默认 maxretry=5、findtime=600、bantime=3600、mode=normal。支持 normal/ddos/extra/aggressive，白名单支持 IPv4/IPv6/CIDR，保留回环，拒绝全地址白名单。白名单不会自动取浏览器、反代或中央主机的地址。
@@ -50,6 +52,8 @@ UFW 使用发行版 `iptables-multiport`（官方 UFW action 默认会封锁所�
 
 恢复只操作备份中的固定路径、选定 firewalld 区域、悟空 nftables 表和识别的 jail。云侧断网或 NAT 映射不由此恢复任务管理。
 
+UFW 原先已启用时，恢复磁盘配置后必须再执行 `reload` 才完成内核恢复，不能只调用 `enable`。这也适用于 v1.7.0 写出的旧事务；重载失败会保留 pending journal，恢复服务继续重试，并在完成重载和封禁同步后才记录已回滚。原先未启用时仍恢复为停用状态。
+
 ## 验证
 
 `go test ./...`、`go test -race ./...`、`go vet ./...`；`cd web && npm test && npm run build`；Linux amd64/arm64 编译。双实例舰队测试实际通过 HTTPS、CSRF、任务、回执与持久化 journal，原生命令使用隔离 fixture，验证所选目标和并发重复写只执行一次。
@@ -58,6 +62,7 @@ UFW 使用发行版 `iptables-multiport`（官方 UFW action 默认会封锁所�
 
 ```sh
 sh scripts/test-host-security-native.sh debian:12
+sh scripts/test-host-security-native.sh debian:13
 sh scripts/test-host-security-native.sh ubuntu:24.04
 sh scripts/test-host-security-native.sh rockylinux:9
 sh scripts/test-host-security-native.sh almalinux:9
@@ -65,4 +70,4 @@ sh scripts/test-host-security-native.sh alpine:3.21
 # ARM 主机可使用 WUKONG_SECURITY_ARCH=arm64
 ```
 
-覆盖 TCP/UDP 真实收发和拒绝、ICMP/IPv6 控制通信、原生允许/拒绝与 IPv4/IPv6、第三方规则、持久化、真实 SSH 失败与成功、白名单、SSH 专用封禁、解封、重载后封禁、接管及解除接管、其他 jail 保留、Agent 被杀后的独立恢复和 PID 1 重启后的恢复。systemd 发行版同时验证 journal 和真实 sshd 文件日志，Alpine 验证文件日志。确认期限断言为 90 秒；超时测试缩短测试 journal 的期限以加速，重启测试保留完整 90 秒窗口。第二个移除所有 capabilities 的容器验证不可用诊断。Debian 矩阵额外验证 Root Agent 的真实包安装保持保护停用；五个发行版纳入 PR CI。
+覆盖 TCP/UDP 真实收发和拒绝、ICMP/IPv6 控制通信、原生允许/拒绝与 IPv4/IPv6、第三方规则、持久化、真实 SSH 失败与成功、白名单、SSH 专用封禁、解封、重载后封禁、接管及解除接管、其他 jail 保留、Agent 被杀后的独立恢复和 PID 1 重启后的恢复。systemd 发行版同时验证 journal 和真实 sshd 文件日志，Alpine 验证文件日志。UFW 额外覆盖 IPv4/IPv6 同条件规则互换、CIDR/UDP 范围、替换中途失败，以及防火墙保持启用时完整等待 90 秒、由独立恢复服务还原实际连通性并保留 SSH 封禁。其他超时用例可缩短测试 journal 的期限，重启测试保留完整 90 秒窗口。第二个移除所有 capabilities 的容器验证不可用诊断。Debian 12 额外验证 Root Agent 的真实包安装保持保护停用；Debian 12/13、Ubuntu、Rocky、AlmaLinux、Alpine 纳入 PR CI。
