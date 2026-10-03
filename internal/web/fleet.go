@@ -731,6 +731,17 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, http.StatusNotFound, mapErr.Error())
 		return
 	}
+	if kind == "security.fail2ban.preview" || kind == "security.fail2ban.apply" {
+		var request model.SecurityRequest
+		if json.Unmarshal(payload, &request) != nil {
+			writeError(w, 400, "invalid security request")
+			return
+		}
+		if request.Operation == "reinstall" && !fleetHasCapability(host, "security.fail2ban.reset") {
+			writeError(w, 409, "远端 Agent 不支持清理重装，请更新完整面板")
+			return
+		}
+	}
 	command, job, err := s.queueFleetCommand(host, kind, payload, session.Username, async)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
@@ -840,7 +851,7 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 		if json.Unmarshal(body, &request) != nil {
 			return "", nil, false, errors.New("invalid security request")
 		}
-		return "security." + parts[1] + "." + parts[2], body, parts[2] == "apply" && request.Operation == "install", nil
+		return "security." + parts[1] + "." + parts[2], body, parts[2] == "apply" && (request.Operation == "install" || parts[1] == "fail2ban" && request.Operation == "reinstall"), nil
 	case len(parts) >= 3 && parts[0] == "system" && parts[1] == "security-transactions":
 		payload, _ := json.Marshal(model.SecurityRequest{TransactionID: parts[2]})
 		if len(parts) == 3 && r.Method == http.MethodGet {

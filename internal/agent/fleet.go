@@ -29,7 +29,7 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"security.firewall", "security.fail2ban", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"security.firewall", "security.fail2ban", "security.fail2ban.reset", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 }
 
 type FleetClientConfig struct {
@@ -415,8 +415,15 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 	if localJob.ID != "" {
 		_ = c.store.UpdateJob(localJob.ID, "running", 20, "中央命令执行中", "")
 	}
-	if timeout > 2*time.Minute {
-		timeout = 2 * time.Minute
+	limit := 2 * time.Minute
+	if command.Kind == "security.fail2ban.apply" || command.Kind == "security.firewall.apply" {
+		var request model.SecurityRequest
+		if json.Unmarshal(command.Payload, &request) == nil && (request.Operation == "install" || command.Kind == "security.fail2ban.apply" && request.Operation == "reinstall") {
+			limit = 9 * time.Minute
+		}
+	}
+	if timeout > limit {
+		timeout = limit
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

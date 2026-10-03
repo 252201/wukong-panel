@@ -3,6 +3,23 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  "停止 Fail2ban，解除它管理的所有当前封禁（包括非 SSH 防护）": "Stop Fail2ban and remove all of its current bans, including non-SSH protection",
+  "保存并验证完整配置、数据库与面板管理状态备份": "Save and verify a complete backup of configurations, database and panel ownership",
+  "恢复发行版默认过滤器和动作；所有防护保持停用，重新检查参数后再启用 SSH 登录防护": "Restore distribution filters and actions. All protection stays disabled; review settings before enabling SSH login protection again",
+  "此操作会删除所有 Fail2ban 自定义防护、白名单、过滤器及历史封禁数据库，包括其他软件创建的配置": "This removes all custom Fail2ban protection, whitelists, filters and ban history, including configurations created by other software",
+  "重装期间及完成后，SSH 登录防护停用；主机防火墙、SSH 服务和悟空节点规则保持原样": "SSH login protection stays disabled during and after reinstallation. Other firewall rules, SSH and Wukong nodes are preserved",
+  "失败时由独立恢复任务恢复原配置和服务状态；备份保留在 Root Agent 安全目录，软件包版本不会降级；系统 SSH 日志与 Fail2ban 日志保留用于排查": "An independent task restores configuration and service state on failure. Backups remain in the Root Agent security directory. Package versions are not downgraded; SSH and Fail2ban diagnostic logs are retained",
+  "存在自定义 Fail2ban 服务覆盖，请由管理员核对后再清理": "Custom Fail2ban service overrides require administrator review before resetting",
+  "存在自定义 Fail2ban 启动参数，请由管理员核对后再清理": "Custom Fail2ban launch options require administrator review before resetting",
+  "存在自定义数据库或运行路径，无法完全自动清理，请由管理员处理": "Custom database or runtime paths prevent a complete automatic reset; ask your administrator",
+  "Fail2ban 不是受支持的发行版软件包安装": "Fail2ban is not installed from a supported distribution package",
+  "当前发行版不支持自动重新安装": "Automatic reinstallation is unavailable on this distribution",
+  "无法确认 Fail2ban 服务状态，禁止清理": "Fail2ban service state cannot be verified; resetting is blocked",
+  "缺少 CAP_NET_ADMIN，无法安全清理封禁": "CAP_NET_ADMIN is missing; bans cannot be safely cleared",
+  "请输入 RESET FAIL2BAN 确认完全清理": "Type RESET FAIL2BAN to confirm a complete reset",
+  "状态已变化，请重新预览": "The state changed. Preview again before applying",
+  "远端 Agent 不支持清理重装，请更新完整面板": "The remote Agent does not support resetting. Update the full panel",
+
   '。': '.',
   '悟': 'W',
   '舰': 'F',
@@ -568,6 +585,10 @@ const english: Record<string, string> = {
 }
 
 const dynamicRules: Array<[RegExp, (...parts: string[]) => string]> = [
+  [/^清空 \/etc\/fail2ban 和 \/var\/lib\/fail2ban，重新安装发行版软件包：(.+)$/, (_, packages) => `Clear /etc/fail2ban and /var/lib/fail2ban; reinstall distribution packages: ${packages}`],
+  [/^当前运行的防护配置：(.+)$/, (_, names) => `Currently running protection configurations: ${names}`],
+  [/^将清除的配置名称（含默认模板）：(.+)$/, (_, names) => `Configurations to reset, including distribution templates: ${names}`],
+  [/^含符号链接或特殊文件，无法安全清理：(.+)$/, (_, path) => `A symlink or special file prevents safe resetting: ${path}`],
   [/^天宫 \/ (.+)$/, (_, page) => `Control plane / ${page}`],
   [/^(\d+)天\s+(\d+)时$/, (_, days, hours) => `${days}d ${hours}h`],
   [/^(\d+)时$/, (_, hours) => `${hours}h`],
