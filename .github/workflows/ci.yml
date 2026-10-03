@@ -29,6 +29,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - run: npm test
+        working-directory: web
       - run: npm run build
         working-directory: web
       - run: go test -race ./...
@@ -98,3 +100,20 @@ jobs:
             if sh /src/install.sh --uninstall-sing-box --unattended >/tmp/singbox-uninstall.log 2>&1; then exit 1; fi
             grep -q "未检测到已安装" /tmp/singbox-uninstall.log
           '
+
+  host-security-matrix:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:12, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+      - name: Verify native firewall, SSH bans, independent recovery and reboot
+        run: sh scripts/test-host-security-native.sh "${{ matrix.image }}"

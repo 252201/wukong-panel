@@ -29,7 +29,7 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"security.firewall", "security.fail2ban", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 }
 
 type FleetClientConfig struct {
@@ -291,6 +291,10 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	snapshot.DeploymentDefaults = defaults
 	snapshot.ResidentialExit = &residential
 	snapshot.SOCKSExit = &socks
+	firewall, _ := c.manager.Firewall(ctx, "")
+	fail2ban, _ := c.manager.Fail2ban(ctx)
+	snapshot.Firewall = &firewall
+	snapshot.Fail2ban = &fail2ban
 	snapshot.Endpoints = endpoints
 	snapshot.Timeline = timeline
 	return snapshot, nil
@@ -400,6 +404,9 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 	}
 	c.mutate.Lock()
 	defer c.mutate.Unlock()
+	if receipt, err := c.store.FleetReceipt(command.ID); err == nil {
+		return receipt
+	}
 	timeout := time.Until(command.ExpiresAt)
 	if timeout <= 0 {
 		return model.FleetCommandResult{Status: "failed", Error: "命令已过期"}
@@ -519,6 +526,34 @@ func (c *FleetConnector) executeOnce(ctx context.Context, command model.FleetCom
 		}
 		_ = json.Unmarshal(command.Payload, &r)
 		return c.manager.MigrationPlan(ctx, r.Target)
+	case "security.firewall.status", "security.fail2ban.status":
+		var r model.SecurityRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		if command.Kind == "security.firewall.status" {
+			return c.manager.Firewall(ctx, r.Zone)
+		}
+		return c.manager.Fail2ban(ctx)
+	case "security.firewall.preview", "security.fail2ban.preview", "security.firewall.apply", "security.fail2ban.apply":
+		var r model.SecurityRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		parts := strings.Split(command.Kind, ".")
+		if parts[2] == "preview" {
+			return c.manager.SecurityPreview(ctx, parts[1], r)
+		}
+		return c.manager.SecurityApply(ctx, parts[1], r)
+	case "security.transaction.confirm", "security.transaction.status":
+		var r model.SecurityRequest
+		if err := json.Unmarshal(command.Payload, &r); err != nil {
+			return nil, err
+		}
+		if command.Kind == "security.transaction.confirm" {
+			return c.manager.SecurityConfirm(ctx, r.TransactionID)
+		}
+		return c.manager.SecurityTransaction(ctx, r.TransactionID)
 	case "residential.configure":
 		var r model.ResidentialExitRequest
 		if err := json.Unmarshal(command.Payload, &r); err != nil {

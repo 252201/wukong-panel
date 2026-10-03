@@ -197,6 +197,14 @@ sudo sh install.sh --firewall-off
 
 开启防火墙时安装器会优先识别当前 SSH 监听端口并自动放行，避免因自定义 SSH 端口导致锁死；云厂商安全组仍需单独配置。
 
+## 主机安全
+
+侧栏的“安全 / Security”页提供本机及舰队完整面板的防火墙和 Fail2ban SSH 管理。优先沿用正在运行的后端；无后端时，Debian/Ubuntu 选择 UFW，Rocky/AlmaLinux 选择 firewalld，Alpine 选择 nftables。多后端、复杂规则、缺少权限或旧 Agent 会显示具体原因并禁止写入。
+
+每项变更先预览，再核对状态、验证备份并执行。首次开启拒绝其他入站，放行实际 SSH、Nginx 面板入口、80/443 和现有公网节点所需的 TCP/UDP 端口。无法识别管理端口时必须填写确认；未来节点仅提供端口建议。可能影响连接的操作需要在 90 秒内确认，独立 systemd/OpenRC 恢复服务负责超时或重启回滚。nftables 只修改悟空自己的表；不调用整机 flush。
+
+SSH 防护默认正常模式，10 分钟失败 5 次封禁 1 小时，支持白名单、计数、封禁列表及逐个解封。已有 SSH jail 先展示后接管，解除接管恢复原配置；其他 jail 的配置不变。详细流程、API 和隔离验证见 [安全管理说明](docs/host-security.md)。此功能交付于开发 PR，尚未发布或部署。
+
 ## 中央多机管理
 
 在准备作为中央的面板进入“设置 → 中央多机控制”。这里有两个职责不同的地址：
@@ -244,7 +252,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --leave-controller
 ```
 
-中央模式首版不提供跨主机批量部署、面板升级、防火墙、RBAC、多主复制或自动故障切换。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
+中央模式不提供跨主机批量部署、面板升级、RBAC、多主复制或自动故障切换。安全页支持具备独立安全能力的完整远端面板；旧 Agent 与轻量探针只读。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
 
 ### AnyTLS
 

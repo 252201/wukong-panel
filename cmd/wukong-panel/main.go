@@ -22,6 +22,7 @@ import (
 	"github.com/252201/wukong-panel/internal/agent"
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/hostlocation"
+	"github.com/252201/wukong-panel/internal/hostsecurity"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/monitor"
 	"github.com/252201/wukong-panel/internal/netcheck"
@@ -91,8 +92,41 @@ func (d directAgent) RemoveSOCKSExit(ctx context.Context, r model.SOCKSExitDelet
 	return d.manager.RemoveSOCKSExit(ctx, r.Confirm)
 }
 
+func (d directAgent) Firewall(ctx context.Context, zone string) (model.FirewallState, error) {
+	return d.manager.Firewall(ctx, zone)
+}
+func (d directAgent) Fail2ban(ctx context.Context) (model.Fail2banState, error) {
+	return d.manager.Fail2ban(ctx)
+}
+func (d directAgent) SecurityPreview(ctx context.Context, k string, r model.SecurityRequest) (model.SecurityPreview, error) {
+	return d.manager.SecurityPreview(ctx, k, r)
+}
+func (d directAgent) SecurityApply(ctx context.Context, k string, r model.SecurityRequest) (model.SecurityResult, error) {
+	return d.manager.SecurityApply(ctx, k, r)
+}
+func (d directAgent) SecurityConfirm(ctx context.Context, id string) (model.SecurityTransaction, error) {
+	return d.manager.SecurityConfirm(ctx, id)
+}
+func (d directAgent) SecurityTransaction(ctx context.Context, id string) (model.SecurityTransaction, error) {
+	return d.manager.SecurityTransaction(ctx, id)
+}
+
 func main() {
 	cfg := config.Parse(version)
+	if cfg.Command == "security-recovery" || cfg.Command == "security-firewall" {
+		if os.Geteuid() != 0 {
+			log.Fatal("security-recovery requires root")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		c := hostsecurity.New(cfg.SecretDir, false)
+		if cfg.Command == "security-firewall" {
+			fatalIf(c.LoadFirewall(ctx))
+		} else {
+			fatalIf(c.Watch(ctx))
+		}
+		return
+	}
 	if cfg.Command == "singbox" {
 		runSingBoxCLI(context.Background(), cfg, cfg.Args)
 		return

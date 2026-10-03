@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
+import SecurityPanel from './SecurityPanel.vue'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
@@ -10,7 +11,7 @@ import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
 import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
-type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'jobs' | 'settings'
+type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
 
 const authenticated = ref(false)
@@ -90,8 +91,8 @@ const formHydrating = ref(false)
 const probeJobs = reactive<Record<string, string>>({})
 
 const words = {
-  'zh-CN': { fleet: '舰队', overview: '总览', nodes: '节点', traffic: '流量', system: '系统', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
-  'en-US': { fleet: 'Fleet', overview: 'Overview', nodes: 'Nodes', traffic: 'Traffic', system: 'System', jobs: 'Jobs', settings: 'Settings', deploy: 'Deploy node', import: 'Import nodes', online: 'Online', offline: 'Offline' },
+  'zh-CN': { fleet: '舰队', overview: '总览', nodes: '节点', traffic: '流量', system: '系统', security: '安全', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
+  'en-US': { fleet: 'Fleet', overview: 'Overview', nodes: 'Nodes', traffic: 'Traffic', system: 'System', security: 'Security', jobs: 'Jobs', settings: 'Settings', deploy: 'Deploy node', import: 'Import nodes', online: 'Online', offline: 'Offline' },
 }
 const t = (key: keyof typeof words['zh-CN']) => words[language.value][key]
 const navItems = computed(() => [
@@ -100,6 +101,7 @@ const navItems = computed(() => [
   { id: 'nodes' as Page, seal: '节', label: t('nodes') },
   { id: 'traffic' as Page, seal: '流', label: t('traffic') },
   { id: 'system' as Page, seal: '系', label: t('system') },
+  { id: 'security' as Page, seal: language.value === 'en-US' ? 'S' : '安', label: t('security') },
   { id: 'jobs' as Page, seal: '任', label: t('jobs') },
   { id: 'settings' as Page, seal: '设', label: t('settings') },
 ])
@@ -1060,6 +1062,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <div class="privacy-banner"><span>隐</span><div><b>端点隐私策略</b><p>客户端 IP 默认脱敏；原始端点保留 24 小时，设备聚合保留 90 天。</p></div><label class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled" @change="saveSettings"><i></i></label></div>
       </div>
 
+      <SecurityPanel v-else-if="page === 'security'" :key="selectedHostId" :host-id="selectedHostId" :host-name="currentFleetHost?.name || '本机'" :online="!remoteHost || !!currentFleetHost?.online" :compatible="!remoteHost || !!currentFleetHost?.compatible" :capabilities="currentFleetHost?.capabilities || []" :language="language" />
       <div v-else-if="page === 'system'" class="page-content">
         <div class="page-intro"><div><p>HOST VITALS</p><h2>主机资源与运行态势</h2></div><span class="live-badge"><i></i>Agent 正常</span></div>
         <section class="vital-grid"><article v-for="item in vitalItems" :key="item.name"><div class="vital-dial" :style="{ '--vital': `${item.value * 3.6}deg` }"><b>{{ item.value.toFixed(1) }}<small>%</small></b></div><h3>{{ item.name }}</h3><p>{{ item.meta }}</p><strong v-if="item.usage" class="vital-usage">{{ item.usage }}</strong></article></section>

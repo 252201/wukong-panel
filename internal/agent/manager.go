@@ -30,6 +30,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/hostsecurity"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
@@ -37,10 +38,11 @@ import (
 )
 
 type Manager struct {
-	cfg      config.Config
-	store    *store.Store
-	vault    *security.Vault
-	mutation sync.Mutex
+	cfg             config.Config
+	store           *store.Store
+	vault           *security.Vault
+	mutation        sync.Mutex
+	securityFactory func() *hostsecurity.Controller
 }
 
 const (

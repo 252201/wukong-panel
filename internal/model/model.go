@@ -373,6 +373,8 @@ type FleetHost struct {
 }
 
 type FleetSnapshot struct {
+	Firewall           *FirewallState             `json:"firewall,omitempty"`
+	Fail2ban           *Fail2banState             `json:"fail2ban,omitempty"`
 	Full               bool                       `json:"full"`
 	Location           *HostLocation              `json:"location,omitempty"`
 	Overview           Overview                   `json:"overview"`
