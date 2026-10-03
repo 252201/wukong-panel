@@ -610,17 +610,50 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 	}
 	c.lastProcessCPU = current
 	c.lastProcessTotal = totalCPU
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CPU == items[j].CPU {
+	return selectProcessSnapshot(items, 100), totalCount
+}
+
+// Retain both top CPU and top memory consumers. A CPU-only cut loses idle
+// processes with high RSS before the UI can sort them. The union is bounded.
+func selectProcessSnapshot(items []model.ProcessStat, limit int) []model.ProcessStat {
+	cpuLess := func(i, j int) bool {
+		if items[i].CPU != items[j].CPU {
+			return items[i].CPU > items[j].CPU
+		}
+		if items[i].RSSBytes != items[j].RSSBytes {
 			return items[i].RSSBytes > items[j].RSSBytes
 		}
-		return items[i].CPU > items[j].CPU
-	})
-	if len(items) > 100 {
-		items = items[:100]
+		return items[i].PID < items[j].PID
 	}
-	return items, totalCount
+	sort.Slice(items, cpuLess)
+	if len(items) <= limit {
+		return items
+	}
+	selected := append([]model.ProcessStat{}, items[:limit]...)
+	seen := map[int]bool{}
+	for _, item := range selected {
+		seen[item.PID] = true
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].RSSBytes != items[j].RSSBytes {
+			return items[i].RSSBytes > items[j].RSSBytes
+		}
+		if items[i].CPU != items[j].CPU {
+			return items[i].CPU > items[j].CPU
+		}
+		return items[i].PID < items[j].PID
+	})
+	for _, item := range items[:limit] {
+		if !seen[item.PID] {
+			selected = append(selected, item)
+			seen[item.PID] = true
+		}
+	}
+	items = selected
+	sort.Slice(items, cpuLess)
+	return items
 }
+
 func load1() float64 {
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {

@@ -29,7 +29,7 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"security.firewall", "security.fail2ban", "security.fail2ban.reset", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"security.firewall", "security.firewall.batch", "security.fail2ban", "security.fail2ban.reset", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 }
 
 type FleetClientConfig struct {
@@ -240,7 +240,7 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	}
 	metrics, _ := c.store.Metrics(1)
 	devices, _ := c.store.ActiveDevices(25*time.Second, 12)
-	processes, count, _ := c.store.Processes(20)
+	processes, count, _ := c.store.Processes(200)
 	settings, _ := c.store.Settings()
 	billingStart, billingEnd := fleetBillingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
 	usedRX, usedTX, _ := c.store.TrafficBetween(billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02"))

@@ -41,3 +41,22 @@ test('combined legacy rules match both protocols without matching other transpor
  assert.equal(securityRuleMatchesProtocol(rule,'icmp'),false)
  assert.deepEqual(securityRuleServices(rule,[{port:21967,protocol:'tcp',reason:'面板入口'},{port:21967,protocol:'udp',reason:'节点 UDP'}],'zh-CN'),['面板入口','节点 UDP'])
 })
+
+test('batch eligibility separates external adoption from managed deletion and protects entry ports', async()=>{
+ const {securityBatchEligible}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+ const rule={adoptable:true,managed:false,protected:false}
+ assert.equal(securityBatchEligible(rule,'adopt'),true)
+ assert.equal(securityBatchEligible(rule,'delete'),false)
+ assert.equal(securityBatchEligible({...rule,managed:true},'adopt'),false)
+ assert.equal(securityBatchEligible({...rule,managed:true},'delete'),true)
+ assert.equal(securityBatchEligible({...rule,managed:true,protected:true},'delete'),false)
+ assert.equal(securityBatchEligible({...rule,protected:true},'adopt'),true)
+ assert.equal(securityBatchEligible({...rule,adoptable:false},'adopt'),false)
+})
+
+test('batch previews explain each rule, source and zone in both languages',async()=>{
+ const {securityRuleChange}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+ assert.equal(securityRuleChange('delete allow:tcp/udp:8080:8080:any:','zh-CN'),'删除 · 允许 8080/TCP + UDP · 任意 IP')
+ assert.equal(securityRuleChange('adopt deny:tcp:9000:9010:2001:db8::/64:public','en-US'),'Adopt · deny 9000–9010/TCP · 2001:db8::/64 · Zone public')
+ assert.equal(securityRuleChange('unknown error','zh-CN'),null)
+})

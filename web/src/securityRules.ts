@@ -27,3 +27,19 @@ export function securityStateFresh(checkedAt: string, now = Date.now()): boolean
  const checked = Date.parse(checkedAt)
  return Number.isFinite(checked) && now >= checked - 5000 && now - checked < 90_000
 }
+
+export function securityBatchEligible(rule: SecurityRule, mode: 'adopt'|'delete'): boolean {
+ return rule.adoptable && (mode === 'adopt' ? !rule.managed : rule.managed && !rule.protected)
+}
+
+export function securityRuleChange(text: string, language: string): string | null {
+ const match = /^(adopt|delete) (allow|deny):(tcp|udp|tcp\/udp):(\d+):(\d+):(.+):([^:]*)$/.exec(text)
+ if (!match) return null
+ const [,operation,action,protocol,first,last,source,zone] = match
+ const en = language === 'en-US'
+ const verb = operation === 'adopt' ? (en ? 'Adopt' : '接管') : (en ? 'Delete' : '删除')
+ const verdict = action === 'allow' ? (en ? 'allow' : '允许') : (en ? 'deny' : '拒绝')
+ const ports = first === last ? first : `${first}–${last}`
+ const transport = protocol === 'tcp/udp' ? 'TCP + UDP' : protocol!.toUpperCase()
+ return `${verb} · ${verdict} ${ports}/${transport} · ${source === 'any' ? (en ? 'Any IP' : '任意 IP') : source}${zone ? ` · ${en ? 'Zone' : '区域'} ${zone}` : ''}`
+}

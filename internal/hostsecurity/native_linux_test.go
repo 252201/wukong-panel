@@ -332,6 +332,7 @@ func TestNativeSecurity(t *testing.T) {
 	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
 	nativeConnect(t, "icmp4", "10.203.0.1", "")
 	nativeConnect(t, "icmp6", "fd42:203::1", "")
+	nativeFirewallBatch(t, c)
 	if backend == "ufw" {
 		nativeUFWLegacyRules(t, c)
 	}
@@ -1133,4 +1134,141 @@ func nativeFail2banReset(t *testing.T, c *Controller) {
 	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.4")
 	nativeConnect(t, "tcp", "10.203.0.1:22222", "")
 	t.Log("Fail2ban reset: active conflicting SSH and unrelated jails, actual ban, package failure full rollback, real reinstall, clean database/configs, disabled protection, SSH/panel/firewall preserved")
+}
+
+// Real packets validate the whole batch, including a failure after kernel mutation.
+func nativeFirewallBatch(t *testing.T, c *Controller) {
+	t.Helper()
+	ctx := context.Background()
+	f, e := c.Firewall(ctx, "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	tcp, e := net.Listen("tcp", ":55444")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer tcp.Close()
+	go func() {
+		for {
+			conn, e := tcp.Accept()
+			if e != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	udp, e := net.ListenPacket("udp", ":55445")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer udp.Close()
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, addr, e := udp.ReadFrom(buf)
+			if e != nil {
+				return
+			}
+			_, _ = udp.WriteTo(buf[:n], addr)
+		}
+	}()
+	external := []model.SecurityRule{
+		{Action: "allow", Protocol: "tcp", PortFrom: 55444, PortTo: 55444, Source: "any", Zone: f.Zone, Adoptable: true},
+		{Action: "allow", Protocol: "udp", PortFrom: 55445, PortTo: 55445, Source: "any", Zone: f.Zone, Adoptable: true},
+	}
+	if f.Backend == "nftables" {
+		rules := append(append([]model.SecurityRule{}, f.Rules...), external...)
+		if e = c.applyNFT(ctx, rules, true); e != nil {
+			t.Fatal(e)
+		}
+		if e = c.persistNFT(ctx); e != nil {
+			t.Fatal(e)
+		}
+	} else {
+		for _, rr := range external {
+			if f.Backend == "ufw" {
+				_, e = c.exec(ctx, "ufw", ufwArgs(rr, false)...)
+			} else {
+				for _, perm := range []bool{false, true} {
+					if _, e = c.exec(ctx, "firewall-cmd", fireArgs(rr, false, perm)...); e != nil {
+						t.Fatal(e)
+					}
+				}
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
+	f, e = c.Firewall(ctx, "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	ids := []string{}
+	for _, rr := range f.Rules {
+		if rr.PortFrom == 55444 || rr.PortFrom == 55445 {
+			if rr.Managed || !rr.Adoptable {
+				t.Fatalf("external %+v", rr)
+			}
+			ids = append(ids, rr.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatal(f)
+	}
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "batch-adopt", RuleIDs: ids, Zone: f.Zone})
+	checkAllowed := func() {
+		nativeConnect(t, "tcp", "10.203.0.1:55444", "")
+		nativeConnect(t, "tcp", "[fd42:203::1]:55444", "")
+		nativeConnect(t, "udp", "10.203.0.1:55445", "")
+		nativeConnect(t, "udp", "[fd42:203::1]:55445", "")
+	}
+	checkAllowed()
+	request := model.SecurityRequest{Operation: "batch-delete", RuleIDs: ids, Zone: f.Zone}
+	preview, e := c.Preview(ctx, "firewall", request)
+	if e != nil {
+		t.Fatal(e)
+	}
+	request.Revision = preview.Revision
+	run := c.Run
+	injected := false
+	c.Run = func(ctx context.Context, name string, args []string, input string) (string, error) {
+		out, e := run(ctx, name, args, input)
+		deleting := name == "ufw" && strings.Contains(strings.Join(args, " "), "delete allow 55445/") || name == "firewall-cmd" && strings.Contains(strings.Join(args, " "), "--remove-port=55445/") || name == "nft" && len(args) > 0 && args[0] == "-f" && strings.HasPrefix(input, "delete table inet wukong_panel")
+		if deleting && !injected && e == nil {
+			injected = true
+			return out, errors.New("injected batch failure after kernel change")
+		}
+		return out, e
+	}
+	_, e = c.Apply(ctx, "firewall", request)
+	c.Run = run
+	if e == nil || !injected {
+		t.Fatalf("no injected failure: %v", e)
+	}
+	checkAllowed()
+	restored, e := c.Firewall(ctx, f.Zone)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range ids {
+		found := false
+		for _, rr := range restored.Rules {
+			if rr.ID == id && rr.Managed {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("lost batch ownership after recovery")
+		}
+	}
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "batch-delete", RuleIDs: ids, Zone: f.Zone})
+	nativeConnect(t, "blocked", "10.203.0.1:55444", "")
+	nativeConnect(t, "blocked", "[fd42:203::1]:55444", "")
+	nativeConnect(t, "udp-blocked", "10.203.0.1:55445", "")
+	nativeConnect(t, "udp-blocked", "[fd42:203::1]:55445", "")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "")
+	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
+	t.Log("Firewall batch: external TCP/UDP adoption, second-step failure recovery, whole-batch deletion and IPv4/IPv6 management connectivity passed")
 }

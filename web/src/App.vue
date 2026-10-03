@@ -4,9 +4,11 @@ import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
+import { securityStatusCache } from './securityStatus'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, translateText, type Locale } from './i18n'
+import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
 import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
@@ -57,6 +59,13 @@ const settingsDraftDirty = ref(false)
 let syncingFleetDraft = false
 let syncingSettingsDraft = false
 const overview = ref<Overview | null>(null)
+const processSortKey = ref<ProcessSortKey>('cpu')
+const processSortAscending = ref(false)
+const sortedProcesses = computed(() => sortProcesses(overview.value?.processes || [], processSortKey.value, processSortAscending.value))
+function changeProcessSort(key: ProcessSortKey) {
+  processSortAscending.value = processSortKey.value === key ? !processSortAscending.value : false
+  processSortKey.value = key
+}
 const nodes = ref<NodeItem[]>([])
 const jobs = ref<Job[]>([])
 const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, collectEndpoints: true })
@@ -546,7 +555,7 @@ async function changePassword() {
   catch (error) { notify(error instanceof Error ? error.message : '修改失败') }
   finally { busy.value = false }
 }
-async function logout() { try { await api.logout() } finally { authenticated.value = false; overview.value = null } }
+async function logout() { try { await api.logout() } finally { securityStatusCache.clear(); authenticated.value = false; overview.value = null } }
 function setThemePreference(preference: ThemePreference) {
   themePreference.value = preference
   applyThemePreference(preference)
@@ -1116,7 +1125,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <div v-if="migrationPlan" class="migration-files"><article v-for="file in migrationPlan.files" :key="file.path"><div><b>{{ file.path.split('/').pop() }}</b><small v-if="file.interfaces?.length">引用网卡 {{ file.interfaces.join(', ') }}</small></div><span>{{ (file.changes || []).length }} 项变更</span><ul v-if="(file.changes || []).length || (file.warnings || []).length || (file.errors || []).length"><li v-for="item in file.changes || []" :key="`c-${item}`">＋ {{ item }}</li><li v-for="item in file.warnings || []" :key="`w-${item}`" class="warning">! {{ item }}</li><li v-for="item in file.errors || []" :key="`e-${item}`" class="error">× {{ item }}</li></ul></article></div>
           <p v-else class="migration-empty">扫描结果会列出字段迁移、共享配置、网卡依赖和无法自动处理的项目。实际升级仍由 root 权限安全安装流程执行。</p>
         </section>
-        <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span>CPU</span><span>内存</span></div><div class="process-scroll"><div v-for="process in overview?.processes || []" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="[process.name, processServiceLabel(process.service), ...(process.nodes || [])].filter(Boolean).join(' · ')"><span>{{ process.name }}</span><small v-if="processServiceLabel(process.service)">{{ processServiceLabel(process.service) }}</small><small v-if="process.nodes?.length">{{ process.nodes.join(' · ') }}</small></b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div><p class="process-help">UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。</p></section>
+        <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span role="columnheader" :aria-sort="processSortKey === 'cpu' ? (processSortAscending ? 'ascending' : 'descending') : 'none'"><button type="button" class="process-sort" :class="{active:processSortKey === 'cpu'}" :aria-label="translateText('按 CPU 排序', language)" @click="changeProcessSort('cpu')">CPU {{processSortKey === 'cpu' ? (processSortAscending ? '↑' : '↓') : '↕'}}</button></span><span role="columnheader" :aria-sort="processSortKey === 'memory' ? (processSortAscending ? 'ascending' : 'descending') : 'none'"><button type="button" class="process-sort" :class="{active:processSortKey === 'memory'}" :aria-label="translateText('按内存排序', language)" @click="changeProcessSort('memory')">{{translateText('内存',language)}} {{processSortKey === 'memory' ? (processSortAscending ? '↑' : '↓') : '↕'}}</button></span></div><div class="process-scroll"><div v-for="process in sortedProcesses" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="[process.name, processServiceLabel(process.service), ...(process.nodes || [])].filter(Boolean).join(' · ')"><span>{{ process.name }}</span><small v-if="processServiceLabel(process.service)">{{ processServiceLabel(process.service) }}</small><small v-if="process.nodes?.length">{{ process.nodes.join(' · ') }}</small></b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div><p v-if="(overview?.processCount || 0) > sortedProcesses.length" class="process-help">{{translateText('排序范围为已采集的进程，采样保留 CPU 与内存占用最高的进程。',language)}} {{sortedProcesses.length}} / {{overview?.processCount}}</p><p class="process-help">UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。</p></section>
       </div>
 
       <div v-else-if="page === 'jobs'" class="page-content">

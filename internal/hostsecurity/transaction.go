@@ -114,6 +114,15 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 	if e = c.validateBackup(verify); e != nil {
 		return result, e
 	}
+	if kind == "firewall" && (r.Operation == "batch-adopt" || r.Operation == "batch-delete") {
+		current, e := c.Firewall(ctx, r.Zone)
+		if e != nil {
+			return result, e
+		}
+		if current.Revision != r.Revision {
+			return result, errors.New("状态已变化，请重新预览")
+		}
+	}
 	if e = c.save("pending.json", j); e != nil {
 		return result, e
 	}
@@ -180,6 +189,33 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 			}
 			if !found {
 				return result, errors.New("新规则未实际生效")
+			}
+		}
+		if r.Operation == "batch-adopt" || r.Operation == "batch-delete" {
+			for _, id := range r.RuleIDs {
+				if r.Operation == "batch-delete" {
+					for _, before := range j.Before.Rules {
+						if before.ID == id {
+							for _, actual := range f.Rules {
+								if sameRule(before, actual) {
+									return result, errors.New("批量规则变更未实际生效")
+								}
+							}
+						}
+					}
+				}
+				found := false
+				for _, rule := range f.Rules {
+					if rule.ID == id {
+						found = true
+						if r.Operation == "batch-adopt" && !rule.Managed {
+							return result, errors.New("批量接管未实际生效")
+						}
+					}
+				}
+				if r.Operation == "batch-delete" && found || r.Operation == "batch-adopt" && !found {
+					return result, errors.New("批量规则变更未实际生效")
+				}
 			}
 		}
 		result.Firewall = &f

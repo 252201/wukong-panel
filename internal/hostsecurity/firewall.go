@@ -19,7 +19,7 @@ func (c *Controller) Firewall(ctx context.Context, zone string) (model.FirewallS
 	if e != nil {
 		return model.FirewallState{}, e
 	}
-	r := model.FirewallState{CheckedAt: c.Now(), Rules: []model.SecurityRule{}, Zones: []string{}, Policy: "unknown", Pending: c.pending()}
+	r := model.FirewallState{SupportsBatch: true, CheckedAt: c.Now(), Rules: []model.SecurityRule{}, Zones: []string{}, Policy: "unknown", Pending: c.pending()}
 	ssh, panel := c.ports(ctx)
 	if len(ssh) == 0 {
 		ssh = s.SSHPorts
@@ -861,6 +861,9 @@ func (c *Controller) changeRule(ctx context.Context, backend string, r model.Sec
 	return errors.New("invalid rule backend")
 }
 func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityRequest) (model.SecurityPreview, error) {
+	if len(r.RuleIDs) > 0 && r.Operation != "batch-adopt" && r.Operation != "batch-delete" {
+		return model.SecurityPreview{}, errors.New("批量规则 ID 仅用于批量接管或删除")
+	}
 	for _, ports := range [][]int{r.SSHPorts, r.PanelPorts} {
 		if len(ports) > 64 {
 			return model.SecurityPreview{}, errors.New("管理端口最多 64 个")
@@ -975,33 +978,27 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 			}
 		}
 		p.Changes = append(p.Changes, ruleKey(rr))
-	case "delete", "adopt":
-		var rr *model.SecurityRule
-		for _, v := range f.Rules {
-			if v.ID == r.RuleID {
-				copy := v
-				rr = &copy
-				break
+	case "delete", "adopt", "batch-delete", "batch-adopt":
+		rules, e := selectedFirewallRules(r, f.Rules)
+		if e != nil {
+			return p, e
+		}
+		adopt := r.Operation == "adopt" || r.Operation == "batch-adopt"
+		for _, rr := range rules {
+			op := "delete"
+			if adopt {
+				op = "adopt"
+			}
+			p.Changes = append(p.Changes, op+" "+ruleKey(rr))
+			if rr.Protocol == "tcp/udp" && !adopt {
+				warning := "此为 TCP/UDP 合并规则；删除会同时移除此端口的 TCP 和 UDP 放行或拒绝，仅操作当前已有的地址族"
+				if !contains(p.Warnings, warning) {
+					p.Warnings = append(p.Warnings, warning)
+				}
 			}
 		}
-		if rr == nil || !rr.Adoptable {
-			return p, errors.New("只能操作完整识别的简单规则")
-		}
-		if r.Operation == "delete" {
-			if !rr.Managed {
-				return p, errors.New("请先确认接管此规则")
-			}
-			if rr.Protected {
-				return p, errors.New("SSH 和面板入口规则受保护")
-			}
-			p.NeedsConfirmation = true
-		} else if rr.Managed {
-			return p, errors.New("规则已由悟空管理")
-		}
-		p.Changes = []string{r.Operation + " " + ruleKey(*rr)}
-		if rr.Protocol == "tcp/udp" {
-			p.Warnings = append(p.Warnings, "此为 TCP/UDP 合并规则；删除会同时移除此端口的 TCP 和 UDP 放行或拒绝，仅操作当前已有的地址族")
-		}
+		p.NeedsConfirmation = !adopt
+
 	default:
 		return p, errors.New("未知防火墙操作")
 	}
@@ -1016,15 +1013,16 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 	if e != nil {
 		return e
 	}
-	if r.Operation == "adopt" {
-		for _, rr := range f.Rules {
-			if rr.ID == r.RuleID {
-				rr.Managed = true
-				s.Rules = append(s.Rules, rr)
-				return nil
-			}
+	if r.Operation == "adopt" || r.Operation == "batch-adopt" {
+		rules, e := selectedFirewallRules(r, f.Rules)
+		if e != nil {
+			return e
 		}
-		return errors.New("规则不存在")
+		for _, rr := range rules {
+			rr.Managed = true
+			s.Rules = append(s.Rules, rr)
+		}
+		return nil
 	}
 	if f.Backend == "firewalld" && !f.Active && r.Operation == "enable" {
 		ssh, panel := c.ports(ctx)
@@ -1103,10 +1101,18 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 			}
 		}
 	}
-	if r.Operation == "delete" {
+	if r.Operation == "delete" || r.Operation == "batch-delete" {
+		selected, e := selectedFirewallRules(r, f.Rules)
+		if e != nil {
+			return e
+		}
+		removed := map[string]bool{}
+		for _, rr := range selected {
+			removed[rr.ID] = true
+		}
 		filtered := []model.SecurityRule{}
 		for _, rr := range rules {
-			if rr.ID == r.RuleID {
+			if removed[rr.ID] {
 				if f.Backend != "nftables" {
 					if e = c.changeRule(ctx, f.Backend, rr, true, j); e != nil {
 						return e
@@ -1119,7 +1125,7 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 		rules = filtered
 		filtered = []model.SecurityRule{}
 		for _, rr := range s.Rules {
-			if rr.ID != r.RuleID {
+			if !removed[rr.ID] {
 				filtered = append(filtered, rr)
 			}
 		}
