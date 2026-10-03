@@ -6,13 +6,29 @@ import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
-import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, type Locale } from './i18n'
+import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, translateText, type Locale } from './i18n'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
 import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
+
+const processServiceLabels: Record<string, string> = {
+  fail2ban: '登录防护服务 · Fail2ban',
+  'fail2ban-client': '登录防护管理工具 · Fail2ban',
+  firewalld: '防火墙服务 · firewalld',
+  'firewalld-client': '防火墙管理工具 · firewalld',
+  ufw: '防火墙规则管理工具 · UFW',
+  nftables: '防火墙规则管理工具 · nftables',
+  iptables: '防火墙规则管理工具 · iptables',
+  ip6tables: '防火墙规则管理工具 · ip6tables',
+  'security-recovery': '悟空安全自动恢复',
+  'security-firewall': '悟空防火墙规则加载',
+}
+function processServiceLabel(service?: string): string {
+  return service && Object.hasOwn(processServiceLabels, service) ? translateText(processServiceLabels[service], language.value) : ''
+}
 
 const authenticated = ref(false)
 const loading = ref(true)
@@ -1100,7 +1116,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <div v-if="migrationPlan" class="migration-files"><article v-for="file in migrationPlan.files" :key="file.path"><div><b>{{ file.path.split('/').pop() }}</b><small v-if="file.interfaces?.length">引用网卡 {{ file.interfaces.join(', ') }}</small></div><span>{{ (file.changes || []).length }} 项变更</span><ul v-if="(file.changes || []).length || (file.warnings || []).length || (file.errors || []).length"><li v-for="item in file.changes || []" :key="`c-${item}`">＋ {{ item }}</li><li v-for="item in file.warnings || []" :key="`w-${item}`" class="warning">! {{ item }}</li><li v-for="item in file.errors || []" :key="`e-${item}`" class="error">× {{ item }}</li></ul></article></div>
           <p v-else class="migration-empty">扫描结果会列出字段迁移、共享配置、网卡依赖和无法自动处理的项目。实际升级仍由 root 权限安全安装流程执行。</p>
         </section>
-        <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span>CPU</span><span>内存</span></div><div class="process-scroll"><div v-for="process in overview?.processes || []" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="[process.name, ...(process.nodes || [])].join(' · ')"><span>{{ process.name }}</span><small v-if="process.nodes?.length">{{ process.nodes.join(' · ') }}</small></b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div></section>
+        <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span>CPU</span><span>内存</span></div><div class="process-scroll"><div v-for="process in overview?.processes || []" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="[process.name, processServiceLabel(process.service), ...(process.nodes || [])].filter(Boolean).join(' · ')"><span>{{ process.name }}</span><small v-if="processServiceLabel(process.service)">{{ processServiceLabel(process.service) }}</small><small v-if="process.nodes?.length">{{ process.nodes.join(' · ') }}</small></b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div><p class="process-help">UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。</p></section>
       </div>
 
       <div v-else-if="page === 'jobs'" class="page-content">

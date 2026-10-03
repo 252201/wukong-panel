@@ -42,11 +42,12 @@ type command struct {
 	Input string
 }
 type savedFile struct {
-	Path   string
-	Exists bool
-	Data   []byte
-	Mode   uint32
-	Hash   string
+	Directory bool
+	Path      string
+	Exists    bool
+	Data      []byte
+	Mode      uint32
+	Hash      string
 }
 type state struct {
 	Rules       []model.SecurityRule
@@ -61,19 +62,23 @@ type state struct {
 	PanelPorts  []int
 }
 type journal struct {
-	Transaction model.SecurityTransaction
-	Kind        string
-	BootID      string
-	Backend     string
-	Files       []savedFile
-	Undo        []command
-	Before      state
-	Bans        map[string][]string
-	Started     bool
-	Runtime     []command
-	Target      string
-	BootEnabled map[string]bool
-	Install     bool
+	Reset        bool
+	ResetRunning bool
+	ResetCleaned bool
+	ResetFiles   []savedFile
+	Transaction  model.SecurityTransaction
+	Kind         string
+	BootID       string
+	Backend      string
+	Files        []savedFile
+	Undo         []command
+	Before       state
+	Bans         map[string][]string
+	Started      bool
+	Runtime      []command
+	Target       string
+	BootEnabled  map[string]bool
+	Install      bool
 }
 
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -257,8 +262,36 @@ func allowedPath(p string) bool {
 	return p == "/etc/systemd/system/wukong-firewall.service" || p == "/etc/init.d/wukong-firewall" || p == "/usr/sbin/policy-rc.d" || p == nftPath || p == "/etc/nftables.conf" || p == "/etc/nftables.nft" || p == jailPath || p == "/etc/ufw/user.rules" || p == "/etc/ufw/user6.rules" || p == "/etc/ufw/ufw.conf" || p == "/etc/default/ufw" || regexp.MustCompile(`^/etc/firewalld/zones/[A-Za-z0-9_-]+\.xml$`).MatchString(p)
 }
 func (c *Controller) validateBackup(j journal) error {
+	if j.Reset {
+		if j.Kind != "fail2ban" {
+			return errors.New("invalid reset journal")
+		}
+		if err := validateResetFiles(j.ResetFiles); err != nil {
+			return err
+		}
+		roots := resetRoots[:1]
+		if j.ResetCleaned {
+			roots = resetRoots
+		}
+		for _, root := range roots {
+			found := false
+			for _, f := range j.ResetFiles {
+				if f.Path == root {
+					found = true
+					if f.Exists && !f.Directory {
+						return errors.New("invalid reset root")
+					}
+				}
+			}
+			if !found {
+				return errors.New("incomplete reset backup")
+			}
+		}
+	} else if len(j.ResetFiles) > 0 {
+		return errors.New("unexpected reset backup")
+	}
 	for _, f := range j.Files {
-		if !allowedPath(f.Path) || f.Exists && digest(f.Data) != f.Hash {
+		if !allowedPath(f.Path) || f.Directory || f.Exists && digest(f.Data) != f.Hash {
 			return errors.New("backup validation failed")
 		}
 	}
@@ -498,24 +531,39 @@ func (c *Controller) install(ctx context.Context, kind, backend string) (err err
 			return e
 		}
 		args := []string{"install", "-y", pkg}
-		if kind == "fail2ban" {
+		if kind == "fail2ban-reinstall" {
+			args = []string{"-o", "Dpkg::Options::=--force-confmiss", "-o", "Dpkg::Options::=--force-confnew", "install", "--reinstall", "-y", "fail2ban"}
+		}
+		if kind == "fail2ban" || kind == "fail2ban-reinstall" {
 			args = append(args, "python3-systemd")
 		}
 		_, e := c.exec(ctx, "apt-get", args...)
 		return e
 	case "dnf":
-		if kind == "fail2ban" {
+		if kind == "fail2ban" || kind == "fail2ban-reinstall" {
 			if _, e := c.exec(ctx, "dnf", "install", "-y", "epel-release"); e != nil {
 				return e
 			}
 		}
+		if kind == "fail2ban-reinstall" {
+			packages, e := c.resetPackages(ctx)
+			if e != nil {
+				return e
+			}
+			_, e = c.exec(ctx, "dnf", append([]string{"reinstall", "-y"}, packages...)...)
+			return e
+		}
 		args := []string{"install", "-y", pkg}
-		if kind == "fail2ban" {
+		if kind == "fail2ban" || kind == "fail2ban-reinstall" {
 			args = append(args, "python3-systemd")
 		}
 		_, e := c.exec(ctx, "dnf", args...)
 		return e
 	case "apk":
+		if kind == "fail2ban-reinstall" {
+			_, e := c.exec(ctx, "apk", "fix", "--reinstall", "fail2ban", "fail2ban-openrc")
+			return e
+		}
 		_, e := c.exec(ctx, "apk", "add", pkg, pkg+"-openrc")
 		return e
 	}

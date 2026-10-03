@@ -186,6 +186,9 @@ CREATE TABLE IF NOT EXISTS fleet_subscription_cache (
 	if err := s.ensureColumn("process_recent", "node_names", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("process_recent", "service", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("network_group_samples", "target_results_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
@@ -653,7 +656,7 @@ func (s *Store) ReplaceProcesses(ts int64, totalCount int, processes []model.Pro
 			continue
 		}
 		nodeNames, _ := json.Marshal(process.Nodes)
-		if _, err = tx.Exec(`INSERT INTO process_recent(pid,name,cpu,rss_bytes,memory_percent,node_names,updated_at) VALUES(?,?,?,?,?,?,?)`, process.PID, process.Name, process.CPU, process.RSSBytes, process.MemoryPercent, string(nodeNames), ts); err != nil {
+		if _, err = tx.Exec(`INSERT INTO process_recent(pid,name,cpu,rss_bytes,memory_percent,node_names,service,updated_at) VALUES(?,?,?,?,?,?,?,?)`, process.PID, process.Name, process.CPU, process.RSSBytes, process.MemoryPercent, string(nodeNames), process.Service, ts); err != nil {
 			return err
 		}
 	}
@@ -671,7 +674,7 @@ func (s *Store) Processes(limit int) ([]model.ProcessStat, int, error) {
 	if err := s.DB.QueryRow("SELECT total_count FROM process_state WHERE id=1").Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.DB.Query(`SELECT pid,name,cpu,rss_bytes,memory_percent,node_names FROM process_recent ORDER BY cpu DESC,rss_bytes DESC LIMIT ?`, limit)
+	rows, err := s.DB.Query(`SELECT pid,name,cpu,rss_bytes,memory_percent,node_names,service FROM process_recent ORDER BY cpu DESC,rss_bytes DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -680,7 +683,7 @@ func (s *Store) Processes(limit int) ([]model.ProcessStat, int, error) {
 	for rows.Next() {
 		var item model.ProcessStat
 		var nodeNames string
-		if err = rows.Scan(&item.PID, &item.Name, &item.CPU, &item.RSSBytes, &item.MemoryPercent, &nodeNames); err != nil {
+		if err = rows.Scan(&item.PID, &item.Name, &item.CPU, &item.RSSBytes, &item.MemoryPercent, &nodeNames, &item.Service); err != nil {
 			return nil, 0, err
 		}
 		_ = json.Unmarshal([]byte(nodeNames), &item.Nodes)

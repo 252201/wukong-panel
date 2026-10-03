@@ -134,6 +134,15 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		return model.Fail2banState{}, e
 	}
 	r := model.Fail2banState{Installed: c.Lookup("fail2ban-client"), CheckedAt: c.Now(), Jails: []model.SSHJail{}, Config: s.Config, ManagedJail: s.Jail, SSHPorts: []int{}}
+	if c.Lookup("fail2ban-client") {
+		if e := c.resetGuard(ctx); e != nil {
+			r.ResetReason = e.Error()
+		} else if _, e := c.resetPackages(ctx); e != nil {
+			r.ResetReason = e.Error()
+		} else {
+			r.CanReset = true
+		}
+	}
 	r.SSHPorts, _ = c.ports(ctx)
 	r.LogBackend, r.LogPath, e = c.logSource(ctx)
 	logErr := e
@@ -292,6 +301,9 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 	return r, nil
 }
 func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequest) (model.SecurityPreview, error) {
+	if req.Operation == "reinstall" {
+		return c.resetPlan(ctx)
+	}
 	f, e := c.Fail2ban(ctx)
 	if e != nil {
 		return model.SecurityPreview{}, e
