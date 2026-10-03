@@ -17,6 +17,8 @@ func resetFixture(t *testing.T) (*Controller, *[]string, *bool) {
 	c, _, calls := configuredSSHFixture(t)
 	writeTestFile(t, c, "/etc/fail2ban/jail.d/conflict.local", "[sshd]\nenabled=true\n[sshd-ddos]\nenabled=true\n")
 	writeTestFile(t, c, "/var/lib/fail2ban/fail2ban.sqlite3", "old history")
+	writeTestFile(t, c, "/etc/default/fail2ban", "# Debian defaults\nFAIL2BAN_OPTS=\"\"\n")
+	writeTestFile(t, c, "/etc/conf.d/fail2ban", "# Alpine defaults\nFAIL2BAN_OPTIONS=\"\"\n")
 	running := false
 	base := c.Run
 	c.Run = func(ctx context.Context, n string, a []string, in string) (string, error) {

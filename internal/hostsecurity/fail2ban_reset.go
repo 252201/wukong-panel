@@ -191,7 +191,7 @@ func (c *Controller) resetGuard(ctx context.Context) error {
 		if b, err := c.read(p); err == nil {
 			for _, l := range strings.Split(string(b), "\n") {
 				l = strings.TrimSpace(l)
-				if l != "" && !strings.HasPrefix(l, "#") && !regexp.MustCompile(`^[A-Z_]+\s*=\s*(?:""|'')\s*$`).MatchString(l) {
+				if l != "" && !strings.HasPrefix(l, "#") && !regexp.MustCompile(`^[A-Z0-9_]+\s*=\s*(?:""|'')\s*$`).MatchString(l) {
 					return errors.New("存在自定义 Fail2ban 启动参数，请由管理员核对后再清理")
 				}
 			}
@@ -226,7 +226,7 @@ func (c *Controller) resetPlan(ctx context.Context) (model.SecurityPreview, erro
 			}
 			key := strings.TrimSpace(parts[0])
 			value := strings.TrimSpace(strings.SplitN(parts[1], " #", 2)[0])
-			if key == "dbfile" && value != "None" && value != ":memory:" && !strings.HasPrefix(value, "/var/lib/fail2ban/") || key == "socket" && value != "/var/run/fail2ban/fail2ban.sock" && value != "/run/fail2ban/fail2ban.sock" || key == "pidfile" && value != "/var/run/fail2ban/fail2ban.pid" && value != "/run/fail2ban/fail2ban.pid" {
+			if key == "dbfile" && value != "None" && value != ":memory:" && !(filepath.Clean(value) == value && strings.HasPrefix(value, "/var/lib/fail2ban/")) || key == "socket" && value != "/var/run/fail2ban/fail2ban.sock" && value != "/run/fail2ban/fail2ban.sock" || key == "pidfile" && value != "/var/run/fail2ban/fail2ban.pid" && value != "/run/fail2ban/fail2ban.pid" {
 				return p, errors.New("存在自定义数据库或运行路径，无法完全自动清理，请由管理员处理")
 			}
 		}
