@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
+import { securityStatusCache } from './securityStatus'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
 import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, translateText, type Locale } from './i18n'
@@ -554,7 +555,7 @@ async function changePassword() {
   catch (error) { notify(error instanceof Error ? error.message : '修改失败') }
   finally { busy.value = false }
 }
-async function logout() { try { await api.logout() } finally { authenticated.value = false; overview.value = null } }
+async function logout() { try { await api.logout() } finally { securityStatusCache.clear(); authenticated.value = false; overview.value = null } }
 function setThemePreference(preference: ThemePreference) {
   themePreference.value = preference
   applyThemePreference(preference)
