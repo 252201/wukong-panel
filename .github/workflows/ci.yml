@@ -13,15 +13,33 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  changes:
     if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.scope.outputs.frontend }}
+      backend: ${{ steps.scope.outputs.backend }}
+      installers: ${{ steps.scope.outputs.installers }}
+      security: ${{ steps.scope.outputs.security }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test scope selection and failure handling
+        run: python3 -m unittest discover -s scripts -p 'ci_scope_test.py' -v
+      - name: Select checks from complete PR diff and validate versions
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci_scope.py --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+
+  frontend:
+    needs: changes
+    if: github.event.pull_request.draft == false && needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.5"
-          cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -33,6 +51,17 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+
+  backend:
+    needs: changes
+    if: github.event.pull_request.draft == false && needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
       - run: go test -race ./...
       - name: Verify ICMP with and without NET_RAW in isolated Linux containers
         run: |
@@ -65,29 +94,47 @@ jobs:
           SING_BOX_TEST_BIN="/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box" \
             go test -run '^(TestGeneratedConfigsPassRealSingBoxCheck|TestGeneratedVLESSRealityCompletesFullRoundTrip|TestGeneratedAnyTLSCompletesFullRoundTrip|TestGeneratedProbesPassRealSingBoxCheck)$' -v ./internal/agent ./internal/singboxconfig
       - run: go vet ./...
-      - run: sh -n install.sh uninstall.sh bootstrap.sh probe-install.sh compat/deploy-hy2.sh
-      - run: sh scripts/test-install-acme-status.sh
-      - run: sh scripts/test-install-actions.sh
-      - run: sh scripts/test-install-hardening.sh
-      - run: sh scripts/test-install-residential-dependencies.sh
-      - run: sh scripts/test-install-residential-peer-install.sh
-      - run: sh scripts/test-install-residential-peer-remove.sh
-      - run: sh scripts/test-singbox-lifecycle.sh
       - run: |
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-$arch ./cmd/wukong-panel
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-probe-$arch ./cmd/wukong-probe
           done
 
+  installer-regressions:
+    needs: changes
+    if: github.event.pull_request.draft == false && needs.changes.outputs.installers == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer regression checks
+        run: |
+          sh -n install.sh uninstall.sh bootstrap.sh probe-install.sh compat/deploy-hy2.sh
+          for script in \
+            scripts/test-install-acme-status.sh \
+            scripts/test-install-actions.sh \
+            scripts/test-install-hardening.sh \
+            scripts/test-install-residential-dependencies.sh \
+            scripts/test-install-residential-peer-install.sh \
+            scripts/test-install-residential-peer-remove.sh \
+            scripts/test-singbox-lifecycle.sh; do
+            sh "$script"
+          done
+
   installer-matrix:
+    needs: changes
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     strategy:
       matrix:
         image: [debian:12, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
     steps:
+      - name: Installer changes not present
+        if: needs.changes.outputs.installers != 'true'
+        run: echo "No installer changes; compatibility check completed without containers."
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.installers == 'true'
       - name: Validate installer syntax in target image
+        if: needs.changes.outputs.installers == 'true'
         run: |
           docker run --rm -v "$PWD:/src:ro" "${{ matrix.image }}" sh -c '
             sh -n /src/install.sh /src/uninstall.sh /src/bootstrap.sh /src/probe-install.sh
@@ -102,7 +149,8 @@ jobs:
           '
 
   host-security-matrix:
-    if: github.event.pull_request.draft == false
+    needs: changes
+    if: github.event.pull_request.draft == false && needs.changes.outputs.security == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -123,3 +171,15 @@ jobs:
         env:
           WUKONG_SECURITY_BACKEND: ${{ matrix.backend }}
         run: sh scripts/test-host-security-native.sh "${{ matrix.image }}"
+
+  # Keep the existing required "test" context; it now gates every selected job.
+  test:
+    needs: [changes, frontend, backend, installer-regressions, installer-matrix, host-security-matrix]
+    if: always() && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every in-scope check to succeed
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_scope.py --check-jobs
