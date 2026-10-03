@@ -172,7 +172,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
   <section class="panel-card security-card">
    <div class="card-head"><div><span class="section-mark jade">防</span><div><h3>{{t('防火墙管理','Firewall')}}</h3><p>{{firewall?.backend || '—'}} · {{firewall?.policy || '—'}}</p></div></div><span>{{!fwVerified ? t('状态待复核','Status awaiting verification') : firewall?.active && online && securityStateFresh(firewall.checkedAt,now) && firewall.policy === 'deny' ? t('入站防护已开启','Inbound protection enabled') : t('入站防护未开启','Inbound protection disabled')}}</span></div>
    <p v-if="!support('firewall')" class="security-warning">{{t('远端 Agent 不支持防火墙管理，请更新完整面板。','The remote Agent does not support firewall management. Update the full panel.')}}</p>
-   <p v-if="fwLoading" class="security-loading" role="status">{{firewall ? t('正在复核防火墙；下方是上次采样结果。','Checking firewall; the previous sample is shown below.') : t('正在读取防火墙状态…','Loading firewall status…')}}</p>
+   <p v-if="fwLoading && !fwCurrent" class="security-loading" role="status">{{firewall ? t('正在复核防火墙；下方是上次采样结果。','Checking firewall; the previous sample is shown below.') : t('正在读取防火墙状态…','Loading firewall status…')}}</p>
    <p v-if="fwError" role="alert" class="security-warning">{{t('防火墙状态读取失败：','Failed to load firewall status: ')}}{{fwError}} {{firewall ? t('下方仅显示上次采样，已禁用操作。','The previous sample is shown; actions are disabled.') : ''}}</p>
    <p v-if="firewall?.reason" class="security-warning">{{firewall.reason}}</p>
    <small v-if="firewall" :class="{stale: !securityStateFresh(firewall.checkedAt, now)}">{{t('采样时间','Sampled')}} {{new Date(firewall.checkedAt).toLocaleString(language)}} {{!securityStateFresh(firewall.checkedAt,now) ? t('（已过期）','(stale)') : ''}}</small>
@@ -217,7 +217,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
   <section class="panel-card security-card">
    <div class="card-head"><div><span class="section-mark">护</span><div><h3>{{t('SSH 登录防护（Fail2ban）','SSH login protection (Fail2ban)')}}</h3><p>{{fail2ban?.logBackend || '—'}} {{fail2ban?.logPath}} · SSH {{fail2ban?.sshPorts.join(', ') || '—'}}</p></div></div><span>{{!fbVerified ? t('状态待复核','Status awaiting verification') : fail2ban?.active && !fail2ban.reason && online && fail2ban.logBackend && securityStateFresh(fail2ban.checkedAt,now) ? t('SSH 登录防护已开启','SSH login protection enabled') : t('防护尚未就绪','Protection not ready')}}</span></div>
    <p v-if="!support('fail2ban')" class="security-warning">{{t('远端 Agent 不支持 SSH 防护管理，请更新完整面板。','The remote Agent does not support SSH protection. Update the full panel.')}}</p>
-   <p v-if="fbLoading" class="security-loading" role="status">{{fail2ban ? t('正在复核 SSH 防护；下方是上次采样结果。','Checking SSH protection; the previous sample is shown below.') : t('正在读取 SSH 防护状态…','Loading SSH protection status…')}}</p>
+   <p v-if="fbLoading && !fbCurrent" class="security-loading" role="status">{{fail2ban ? t('正在复核 SSH 防护；下方是上次采样结果。','Checking SSH protection; the previous sample is shown below.') : t('正在读取 SSH 防护状态…','Loading SSH protection status…')}}</p>
    <p v-if="fbError" role="alert" class="security-warning">{{t('SSH 防护状态读取失败：','Failed to load SSH protection status: ')}}{{fbError}} {{fail2ban ? t('下方仅显示上次采样，已禁用操作。','The previous sample is shown; actions are disabled.') : ''}}</p>
    <div class="security-guidance">
     <b v-if="fail2ban?.canActivate">{{t('已安装，SSH 登录防护尚未启用','Installed; SSH login protection is not enabled')}}</b>
