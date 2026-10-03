@@ -705,12 +705,16 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		return
 	}
 	resource := strings.Trim(r.PathValue("resource"), "/")
+	if cap := requiredSecurityCapability(resource); cap != "" && !fleetHasCapability(host, cap) {
+		writeError(w, 409, "远端 Agent 不支持此安全功能，请更新完整面板")
+		return
+	}
 	if fleetHasCapability(host, "probe") {
 		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
 		return
 	}
 	if r.Method == http.MethodGet {
-		if s.writeFleetSnapshotResource(w, host, resource) {
+		if !host.Online && s.writeFleetSnapshotResource(w, host, resource) || !strings.HasPrefix(resource, "system/firewall") && !strings.HasPrefix(resource, "system/fail2ban") && s.writeFleetSnapshotResource(w, host, resource) {
 			return
 		}
 	}
@@ -801,6 +805,10 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 	case resource == "settings":
 		snapshot.Settings.SubscriptionToken = maskToken(snapshot.Settings.SubscriptionToken)
 		writeJSON(w, http.StatusOK, snapshot.Settings)
+	case resource == "system/firewall":
+		writeJSON(w, 200, snapshot.Firewall)
+	case resource == "system/fail2ban":
+		writeJSON(w, 200, snapshot.Fail2ban)
 	case resource == "system/residential-exit":
 		writeJSON(w, http.StatusOK, snapshot.ResidentialExit)
 	case resource == "system/socks-exit":
@@ -824,6 +832,24 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 	}
 	parts := strings.Split(resource, "/")
 	switch {
+	case r.Method == http.MethodGet && (resource == "system/firewall" || resource == "system/fail2ban"):
+		payload, _ := json.Marshal(model.SecurityRequest{Zone: r.URL.Query().Get("zone")})
+		return "security." + parts[1] + ".status", payload, false, nil
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "system" && (parts[1] == "firewall" || parts[1] == "fail2ban") && (parts[2] == "preview" || parts[2] == "apply"):
+		var request model.SecurityRequest
+		if json.Unmarshal(body, &request) != nil {
+			return "", nil, false, errors.New("invalid security request")
+		}
+		return "security." + parts[1] + "." + parts[2], body, parts[2] == "apply" && request.Operation == "install", nil
+	case len(parts) >= 3 && parts[0] == "system" && parts[1] == "security-transactions":
+		payload, _ := json.Marshal(model.SecurityRequest{TransactionID: parts[2]})
+		if len(parts) == 3 && r.Method == http.MethodGet {
+			return "security.transaction.status", payload, false, nil
+		}
+		if len(parts) == 4 && parts[3] == "confirm" && r.Method == http.MethodPost {
+			return "security.transaction.confirm", payload, false, nil
+		}
+		return "", nil, false, errors.New("invalid transaction action")
 	case r.Method == http.MethodGet && resource == "imports/scan":
 		return "imports.scan", body, false, nil
 	case r.Method == http.MethodGet && resource == "system/sing-box/migration":
@@ -886,6 +912,9 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 		}
 	}
 	ttl := 2 * time.Minute
+	if createJob && strings.HasPrefix(kind, "security.") {
+		ttl = 9 * time.Minute
+	}
 	if !createJob {
 		ttl = 60 * time.Second
 	}

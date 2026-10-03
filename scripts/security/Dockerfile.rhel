@@ -1,0 +1,6 @@
+ARG BASE=rockylinux:9
+FROM ${BASE}
+ENV container=docker
+RUN dnf install -y epel-release && dnf install -y systemd dbus firewalld nftables fail2ban fail2ban-server python3-systemd openssh-server nginx iproute procps-ng && dnf clean all
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

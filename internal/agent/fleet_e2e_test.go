@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/252201/wukong-panel/internal/hostsecurity"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,6 +93,7 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	controllerManager := NewManager(config.Config{DataDir: controllerDir, SecretDir: filepath.Join(controllerDir, "secrets"), Demo: true}, controllerStore, controllerVault)
+	installSecurityFleetFixture(t, controllerManager)
 	controller := webserver.New(config.Config{DataDir: controllerDir, BasePath: "/", SecureCookie: false, Demo: true}, controllerStore, fleetE2EAgent{controllerManager}, "0.9.0")
 	tlsServer := httptest.NewTLSServer(controller.Handler())
 	defer tlsServer.Close()
@@ -99,6 +106,7 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 	}
 	remoteConfig := config.Config{DataDir: remoteDir, SecretDir: filepath.Join(remoteDir, "secrets"), Demo: true}
 	remoteManager := NewManager(remoteConfig, remoteStore, remoteVault)
+	nativeWrites := installSecurityFleetFixture(t, remoteManager)
 	connector := &FleetConnector{
 		cfg: remoteConfig, client: FleetClientConfig{ControllerURL: tlsServer.URL + "/", HostID: host.ID, HostName: host.Name},
 		token: agentToken, store: remoteStore, manager: remoteManager, version: "0.9.0", http: tlsServer.Client(),
@@ -146,6 +154,81 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 	}
 	cookie, csrf = fleetE2ELogin(t, tlsServer.Client(), tlsServer.URL, "fleet-e2e-password")
 
+	for _, resource := range []string{"system/firewall", "system/fail2ban"} {
+		request, _ := http.NewRequest(http.MethodGet, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/"+resource, nil)
+		request.AddCookie(cookie)
+		response, err := tlsServer.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != 200 || !bytes.Contains(data, []byte("checkedAt")) {
+			t.Fatalf("remote security read %s: %d %s", resource, response.StatusCode, data)
+		}
+	}
+	sendSecurity := func(action string, body any) []byte {
+		t.Helper()
+		data, _ := json.Marshal(body)
+		request, _ := http.NewRequest(http.MethodPost, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/system/firewall/"+action, bytes.NewReader(data))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-CSRF-Token", csrf)
+		request.AddCookie(cookie)
+		response, e := tlsServer.Client().Do(request)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer response.Body.Close()
+		result, _ := io.ReadAll(response.Body)
+		if response.StatusCode != 200 {
+			t.Fatalf("fleet security %s: %d %s", action, response.StatusCode, result)
+		}
+		return result
+	}
+	securityRequest := model.SecurityRequest{Operation: "add", Rule: model.SecurityRule{Action: "allow", Protocol: "tcp", PortFrom: 33333, Source: "any"}}
+	var preview model.SecurityPreview
+	_ = json.Unmarshal(sendSecurity("preview", securityRequest), &preview)
+	securityRequest.Revision = preview.Revision
+	sendSecurity("apply", securityRequest)
+	localState, _ := controllerManager.Firewall(context.Background(), "")
+	remoteState, _ := remoteManager.Firewall(context.Background(), "")
+	localFound, remoteFound := false, false
+	for _, rule := range localState.Rules {
+		if rule.PortFrom == 33333 {
+			localFound = true
+		}
+	}
+	for _, rule := range remoteState.Rules {
+		if rule.PortFrom == 33333 && rule.Managed {
+			remoteFound = true
+		}
+	}
+	if localFound || !remoteFound || nativeWrites() != 1 {
+		t.Fatalf("host isolation local=%t remote=%t writes=%d", localFound, remoteFound, nativeWrites())
+	}
+	securityRequest.Rule.PortFrom = 33334
+	preview, _ = remoteManager.SecurityPreview(context.Background(), "firewall", securityRequest)
+	securityRequest.Revision = preview.Revision
+	payload, _ := json.Marshal(securityRequest)
+	retry := model.FleetCommand{ID: "security-write-idempotence", Kind: "security.firewall.apply", ExpiresAt: time.Now().Add(time.Minute), Payload: payload}
+	var receipts [2]model.FleetCommandResult
+	var parallel sync.WaitGroup
+	for i := range receipts {
+		parallel.Add(1)
+		go func(i int) { defer parallel.Done(); receipts[i] = connector.execute(context.Background(), retry) }(i)
+	}
+	parallel.Wait()
+	if receipts[0].Status != "success" || !bytes.Equal(receipts[0].Result, receipts[1].Result) || nativeWrites() != 2 {
+		t.Fatalf("duplicate native write %+v %+v count=%d", receipts[0], receipts[1], nativeWrites())
+	}
+
+	// The new command is delivered once, and a retry returns the saved receipt.
+	receiptCommand := model.FleetCommand{ID: "security-idempotence", Kind: "security.firewall.status", ExpiresAt: time.Now().Add(time.Minute), Payload: json.RawMessage(`{}`)}
+	first := connector.execute(context.Background(), receiptCommand)
+	second := connector.execute(context.Background(), receiptCommand)
+	if first.Status != "success" || !bytes.Equal(first.Result, second.Result) {
+		t.Fatalf("security receipt mismatch %+v %+v", first, second)
+	}
 	settings := model.Settings{Language: "zh-CN", Timezone: "Asia/Taipei", Interface: "auto", TrafficQuotaBytes: 987654321, BillingResetDay: 9, CollectEndpoints: false}
 	settingsBody, _ := json.Marshal(settings)
 	request, _ := http.NewRequest(http.MethodPut, tlsServer.URL+"/api/v1/fleet/hosts/"+host.ID+"/settings", bytes.NewReader(settingsBody))
@@ -171,4 +254,50 @@ func TestFleetDualInstanceEndToEnd(t *testing.T) {
 			t.Fatalf("%s audit count=%d err=%v", label, count, err)
 		}
 	}
+}
+
+// The control plane uses real sockets, CSRF, fleet transport, journals and receipts;
+// only native OS commands are replaced, so this test cannot change its host.
+func installSecurityFleetFixture(t *testing.T, m *Manager) func() int {
+	t.Helper()
+	root := t.TempDir()
+	for path, body := range map[string]string{"etc/os-release": "ID=debian\n", "proc/self/status": "CapEff:\t1000\n", "proc/sys/kernel/random/boot_id": "fleet-fixture", "etc/nginx/conf.d/wukong-panel.conf": "server {\n listen 9443;\n}\n"} {
+		full := filepath.Join(root, path)
+		if e := os.MkdirAll(filepath.Dir(full), 0700); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.WriteFile(full, []byte(body), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var mu sync.Mutex
+	rules := []string{"ufw allow 46961/tcp", "ufw allow 9443/tcp"}
+	writes := 0
+	runner := func(_ context.Context, name string, args []string, _ string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		key := strings.Join(args, " ")
+		switch {
+		case name == "ss":
+			return "LISTEN 0 128 0.0.0.0:46961 *:* users:((\"sshd\",pid=1,fd=3))\nLISTEN 0 128 0.0.0.0:9443 *:* users:((\"nginx\",pid=2,fd=4))", nil
+		case name == "ufw" && key == "status verbose":
+			return "Status: active\nDefault: deny (incoming), allow (outgoing)", nil
+		case name == "ufw" && key == "show added":
+			return strings.Join(rules, "\n"), nil
+		case name == "ufw" && len(args) == 2 && args[0] == "allow":
+			rules = append(rules, "ufw "+key)
+			writes++
+			return "Rule added", nil
+		}
+		return "", errors.New(fmt.Sprintf("fixture command unavailable: %s %v", name, args))
+	}
+	m.securityFactory = func() *hostsecurity.Controller {
+		c := hostsecurity.New(m.cfg.SecretDir, false)
+		c.Root = root
+		c.Run = runner
+		c.Lookup = func(n string) bool { return n == "ufw" }
+		c.Arm = func(context.Context) error { return nil }
+		return c
+	}
+	return func() int { mu.Lock(); defer mu.Unlock(); return writes }
 }

@@ -1,0 +1,3 @@
+FROM alpine:3.21
+RUN apk add --no-cache openrc busybox-openrc nftables nftables-openrc fail2ban fail2ban-openrc openssh openssh-server openssh-server-common openssh-server-common-openrc nginx nginx-openrc iproute2 python3 procps
+CMD ["/sbin/init"]

@@ -50,6 +50,10 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 	mux.HandleFunc("GET /health", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.manager.Version(r.Context())})
 	}))
+	mux.HandleFunc("GET /host-security/{kind}", s.authorize(s.hostSecurity))
+	mux.HandleFunc("POST /host-security/{kind}/{action}", s.authorize(s.hostSecurity))
+	mux.HandleFunc("GET /security-transactions/{id}", s.authorize(s.securityTransaction))
+	mux.HandleFunc("POST /security-transactions/{id}/confirm", s.authorize(s.securityTransaction))
 	mux.HandleFunc("GET /network-health", s.authorize(s.networkHealth))
 	mux.HandleFunc("GET /scan", s.authorize(s.scan))
 	mux.HandleFunc("GET /nodes/deployment-defaults", s.authorize(s.deploymentDefaults))

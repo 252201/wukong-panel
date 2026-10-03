@@ -282,3 +282,29 @@ export const api = {
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
 }
+
+export interface SecurityRule { id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
+export interface SecurityPort { port: number; protocol: string; reason: string; protected: boolean }
+export interface SecurityTransaction { id: string; status: string; deadline: string; error?: string }
+export interface FirewallState { backend: string; installed: boolean; active: boolean; writable: boolean; reason?: string; policy: string; zone?: string; zones: string[]; rules: SecurityRule[]; requiredPorts: SecurityPort[]; revision: string; checkedAt: string; pending?: SecurityTransaction }
+export interface SSHProtectionConfig { maxRetry: number; findTime: number; banTime: number; mode: string; ignoreIPs: string[] }
+export interface SSHJail { name: string; managed: boolean; failed: number; totalFailed: number; banned: string[]; totalBanned: number; config: SSHProtectionConfig }
+export interface Fail2banState { installed: boolean; active: boolean; writable: boolean; reason?: string; logBackend: string; logPath?: string; sshPorts: number[]; jails: SSHJail[]; config: SSHProtectionConfig; managedJail?: string; revision: string; checkedAt: string }
+export interface SecurityRequest { operation: string; revision?: string; rule?: Partial<SecurityRule>; ruleId?: string; zone?: string; sshPorts?: number[]; panelPorts?: number[]; config?: SSHProtectionConfig; jail?: string; ip?: string }
+export interface SecurityPreview { revision: string; changes: string[]; warnings: string[]; requiredPorts: SecurityPort[]; needsConfirmation: boolean }
+export interface SecurityResult { firewall?: FirewallState; fail2ban?: Fail2banState; transaction?: SecurityTransaction; jobId?: string }
+// Bind every request to the host captured by the security page. A host switch
+// cannot retarget a pending preview, mutation, installation job or confirmation.
+export function hostSecurityAPI(hostId: string) {
+ const prefix = hostId === 'local' ? '' : `fleet/hosts/${encodeURIComponent(hostId)}/`
+ const call = <T>(path: string, options: RequestInit = {}) => request<T>(prefix + path, options, false)
+ return {
+  firewall: (zone = '') => call<FirewallState>(`system/firewall?zone=${encodeURIComponent(zone)}`),
+  fail2ban: () => call<Fail2banState>('system/fail2ban'),
+  preview: (kind: string, body: SecurityRequest) => call<SecurityPreview>(`system/${kind}/preview`, {method:'POST',body:JSON.stringify(body)}),
+  apply: (kind: string, body: SecurityRequest) => call<SecurityResult>(`system/${kind}/apply`, {method:'POST',body:JSON.stringify(body)}),
+  confirm: (id: string) => call<SecurityTransaction>(`system/security-transactions/${encodeURIComponent(id)}/confirm`, {method:'POST',body:'{}'}),
+  transaction: (id: string) => call<SecurityTransaction>(`system/security-transactions/${encodeURIComponent(id)}`),
+  job: (id: string) => call<Job>(`jobs/${encodeURIComponent(id)}`),
+ }
+}
