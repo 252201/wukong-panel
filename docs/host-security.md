@@ -1,6 +1,6 @@
 # 防火墙与 Fail2ban SSH 管理
 
-本次从 v1.6.6 开发，保留非特权 ICMP Echo 兼容。交付代码及 PR，不变更版本元数据、不发布 Release、不部署 VPS。所有系统命令在 Root Agent 执行，Web 经登录、CSRF、审计与任务日志调用 Unix Socket；完整远端面板沿用 HTTPS 舰队命令、串行执行和幂等回执。
+安全页随 v1.7.0 发布。本功能从 v1.6.6 开发，并保留非特权 ICMP Echo 兼容。所有系统命令在 Root Agent 执行，Web 经登录、CSRF、审计与任务日志调用 Unix Socket；完整远端面板沿用 HTTPS 舰队命令、串行执行和幂等回执。发布本身不会修改 VPS。
 
 ## 使用
 

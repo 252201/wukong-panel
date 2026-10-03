@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.6.6-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.7.0-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -147,7 +147,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.6.6 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.7.0 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -203,7 +203,7 @@ sudo sh install.sh --firewall-off
 
 每项变更先预览，再核对状态、验证备份并执行。首次开启拒绝其他入站，放行实际 SSH、Nginx 面板入口、80/443 和现有公网节点所需的 TCP/UDP 端口。无法识别管理端口时必须填写确认；未来节点仅提供端口建议。可能影响连接的操作需要在 90 秒内确认，独立 systemd/OpenRC 恢复服务负责超时或重启回滚。nftables 只修改悟空自己的表；不调用整机 flush。
 
-SSH 防护默认正常模式，10 分钟失败 5 次封禁 1 小时，支持白名单、计数、封禁列表及逐个解封。已有 SSH jail 先展示后接管，解除接管恢复原配置；其他 jail 的配置不变。详细流程、API 和隔离验证见 [安全管理说明](docs/host-security.md)。此功能交付于开发 PR，尚未发布或部署。
+SSH 防护默认正常模式，10 分钟失败 5 次封禁 1 小时，支持白名单、计数、封禁列表及逐个解封。已有 SSH jail 先展示后接管，解除接管恢复原配置；其他 jail 的配置不变。详细流程、API 和限制见 [安全管理说明](docs/host-security.md)。
 
 ## 中央多机管理
 
