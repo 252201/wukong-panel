@@ -23,6 +23,7 @@ type SecurityPort struct {
 	Protected bool   `json:"protected"`
 }
 type FirewallState struct {
+	SupportsBatch bool                 `json:"supportsBatch,omitempty"`
 	Backend       string               `json:"backend"`
 	Installed     bool                 `json:"installed"`
 	Active        bool                 `json:"active"`
@@ -76,6 +77,7 @@ type SecurityRequest struct {
 	Operation     string              `json:"operation"`
 	Revision      string              `json:"revision,omitempty"`
 	Rule          SecurityRule        `json:"rule"`
+	RuleIDs       []string            `json:"ruleIds,omitempty"`
 	RuleID        string              `json:"ruleId,omitempty"`
 	Zone          string              `json:"zone,omitempty"`
 	SSHPorts      []int               `json:"sshPorts,omitempty"`

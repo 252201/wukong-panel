@@ -286,11 +286,11 @@ export const api = {
 export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
 export interface SecurityPort { port: number; protocol: string; reason: string; protected: boolean }
 export interface SecurityTransaction { id: string; status: string; deadline: string; error?: string }
-export interface FirewallState { backend: string; installed: boolean; active: boolean; writable: boolean; reason?: string; policy: string; zone?: string; zones: string[]; rules: SecurityRule[]; requiredPorts: SecurityPort[]; revision: string; checkedAt: string; pending?: SecurityTransaction }
+export interface FirewallState { supportsBatch?: boolean; backend: string; installed: boolean; active: boolean; writable: boolean; reason?: string; policy: string; zone?: string; zones: string[]; rules: SecurityRule[]; requiredPorts: SecurityPort[]; revision: string; checkedAt: string; pending?: SecurityTransaction }
 export interface SSHProtectionConfig { maxRetry: number; findTime: number; banTime: number; mode: string; ignoreIPs: string[] }
 export interface SSHJail { name: string; configuredOnly?: boolean; managed: boolean; failed: number; totalFailed: number; banned: string[]; totalBanned: number; config: SSHProtectionConfig }
 export interface Fail2banState { canReset?: boolean; resetReason?: string; installed: boolean; active: boolean; writable: boolean; canActivate?: boolean; reason?: string; logBackend: string; logPath?: string; sshPorts: number[]; jails: SSHJail[]; config: SSHProtectionConfig; managedJail?: string; revision: string; checkedAt: string }
-export interface SecurityRequest { confirmation?: string; operation: string; revision?: string; rule?: Partial<SecurityRule>; ruleId?: string; zone?: string; sshPorts?: number[]; panelPorts?: number[]; config?: SSHProtectionConfig; jail?: string; ip?: string }
+export interface SecurityRequest { confirmation?: string; operation: string; revision?: string; rule?: Partial<SecurityRule>; ruleId?: string; ruleIds?: string[]; zone?: string; sshPorts?: number[]; panelPorts?: number[]; config?: SSHProtectionConfig; jail?: string; ip?: string }
 export interface SecurityPreview { revision: string; changes: string[]; warnings: string[]; requiredPorts: SecurityPort[]; needsConfirmation: boolean }
 export interface SecurityResult { firewall?: FirewallState; fail2ban?: Fail2banState; transaction?: SecurityTransaction; jobId?: string }
 // Bind every request to the host captured by the security page. A host switch

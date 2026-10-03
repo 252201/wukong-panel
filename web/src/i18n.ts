@@ -3,6 +3,15 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  '按 CPU 排序': 'Sort by CPU',
+  '按内存排序': 'Sort by memory',
+  '排序范围为已采集的进程，采样保留 CPU 与内存占用最高的进程。': 'Sorting covers sampled processes, retaining the highest CPU and memory consumers.',
+  '远端 Agent 不支持防火墙批量操作，请更新完整面板': 'Update the full remote panel to support firewall batch actions',
+  '批量操作需选择 1–100 条规则，不能同时指定单条规则': 'Choose 1–100 rules for a batch without specifying a single rule',
+  '规则 ID 无效或重复': 'Invalid or duplicate rule ID',
+  '批量规则 ID 仅用于批量接管或删除': 'Batch rule IDs are only accepted for batch adoption or deletion',
+  '批量接管未实际生效': 'Batch adoption did not take effect',
+  '批量规则变更未实际生效': 'Batch rule changes did not take effect',
   '此为 TCP/UDP 合并规则；删除会同时移除此端口的 TCP 和 UDP 放行或拒绝，仅操作当前已有的地址族': 'This is a combined TCP/UDP rule. Deleting it removes both protocols for this port, only in its existing address families',
   '已有 TCP/UDP 合并规则，请先预览删除整条规则，再分别添加需要的协议': 'A combined TCP/UDP rule already exists. Preview deleting the whole rule before adding separate protocols',
 

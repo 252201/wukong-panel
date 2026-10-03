@@ -742,6 +742,17 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 	}
+	if kind == "security.firewall.preview" || kind == "security.firewall.apply" {
+		var request model.SecurityRequest
+		if json.Unmarshal(payload, &request) != nil {
+			writeError(w, 400, "invalid security request")
+			return
+		}
+		if (request.Operation == "batch-adopt" || request.Operation == "batch-delete") && !fleetHasCapability(host, "security.firewall.batch") {
+			writeError(w, 409, "远端 Agent 不支持防火墙批量操作，请更新完整面板")
+			return
+		}
+	}
 	command, job, err := s.queueFleetCommand(host, kind, payload, session.Username, async)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())

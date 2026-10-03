@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { hostSecurityAPI, type FirewallState, type Fail2banState, type SecurityRequest, type SecurityPreview, type SSHProtectionConfig, type Job } from './api'
 import { translateText } from './i18n'
-import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh } from './securityRules'
+import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange } from './securityRules'
 const props = defineProps<{hostId: string; hostName: string; online: boolean; compatible: boolean; capabilities: string[]; language: string}>()
 const client = hostSecurityAPI(props.hostId)
 const t = (zh: string, en: string) => props.language === 'en-US' ? en : zh
-const securityCopy = (text: string) => translateText(text,props.language === 'en-US' ? 'en-US' : 'zh-CN')
+const securityCopy = (text: string) => securityRuleChange(text,props.language) || translateText(text,props.language === 'en-US' ? 'en-US' : 'zh-CN')
 const firewall = ref<FirewallState | null>(null)
 const fail2ban = ref<Fail2banState | null>(null)
 const error = ref('')
@@ -14,6 +14,18 @@ const resetConfirmation = ref('')
 const busy = ref(false)
 const refreshing = ref(false)
 const zone = ref('')
+const batchMode = ref<'adopt'|'delete'>('adopt')
+const selectedRules = ref<string[]>([])
+const batchSupported = computed(() => support('firewall.batch') && !!firewall.value?.supportsBatch)
+const batchWritable = computed(() => fwWritable.value && batchSupported.value && !pending.value)
+const batchEligible = computed(() => (firewall.value?.rules || []).filter(item => securityBatchEligible(item, batchMode.value)))
+const allSelected = computed(() => batchEligible.value.length > 0 && batchEligible.value.slice(0,100).every(item => selectedRules.value.includes(item.id)))
+watch([batchMode, zone], () => { selectedRules.value = [] })
+function selectAll() { selectedRules.value = allSelected.value ? [] : batchEligible.value.slice(0,100).map(item => item.id) }
+function stageBatch() {
+ if (!batchWritable.value || !selectedRules.value.length || selectedRules.value.length > 100) return
+ void stage('firewall', {operation:`batch-${batchMode.value}`,ruleIds:[...selectedRules.value]})
+}
 const now = ref(Date.now())
 const pending = ref<{kind: 'firewall'|'fail2ban'; request: SecurityRequest; preview: SecurityPreview} | null>(null)
 const job = ref<Job | null>(null)
@@ -41,7 +53,7 @@ async function refresh() {
  try {
   const [fw, fb] = await Promise.allSettled([support('firewall') ? client.firewall(zone.value) : Promise.resolve(null),support('fail2ban') ? client.fail2ban() : Promise.resolve(null)])
   if (!alive) return
-  if (fw.status === 'fulfilled') { firewall.value = fw.value; if (fw.value?.zone) zone.value = fw.value.zone }
+  if (fw.status === 'fulfilled') { if (fw.value?.revision !== firewall.value?.revision) selectedRules.value = []; firewall.value = fw.value; if (fw.value?.zone) zone.value = fw.value.zone }
   else error.value = String(fw.reason?.message || fw.reason)
   if (fb.status === 'fulfilled') { fail2ban.value = fb.value; if (fb.value && !hydrated) {const existing = fb.value.jails.length === 1 && !fb.value.managedJail && fb.value.active ? fb.value.jails[0].config : fb.value.config;Object.assign(config, existing); whitelist.value = existing.ignoreIPs.join('\n');hydrated = true} }
   else error.value = String(fb.reason?.message || fb.reason)
@@ -67,6 +79,7 @@ async function apply() {
   const result = await client.apply(staged.kind, {...staged.request, ...(staged.request.operation === 'reinstall' ? {confirmation:resetConfirmation.value} : {})})
   if (!alive) return
   pending.value = null
+  selectedRules.value = []
   if (result.firewall) firewall.value = result.firewall
   if (result.fail2ban) fail2ban.value = result.fail2ban
   if (result.jobId) job.value = {id:result.jobId,status:'running',progress:0,message:t('正在安装','Installing'),kind:'security.install',target:props.hostName,error:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}
@@ -119,9 +132,18 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
     <label class="wide">{{t('来源 IP / CIDR（留空为任意）','Source IP / CIDR (empty means any)')}}<input v-model="rule.source" placeholder="192.0.2.1/32 · 2001:db8::/64"></label>
     <button class="primary" :disabled="!fwWritable">{{t('预览添加规则','Preview rule')}}</button>
    </form>
+   <div class="security-batch security-actions">
+    <label>{{t('批量操作','Batch action')}}<select v-model="batchMode" :disabled="!batchWritable"><option value="adopt">{{t('接管外部规则','Adopt external rules')}}</option><option value="delete">{{t('删除悟空规则','Delete managed rules')}}</option></select></label>
+    <span>{{t('已选','Selected')}} {{selectedRules.length}} / 100</span>
+    <button class="secondary" :disabled="!batchWritable || !selectedRules.length" @click="selectedRules = []">{{t('清空选择','Clear selection')}}</button>
+    <button :class="batchMode === 'delete' ? 'danger-button' : 'primary'" :disabled="!batchWritable || !selectedRules.length || selectedRules.length > 100" @click="stageBatch">{{batchMode === 'delete' ? t('预览批量删除','Preview batch deletion') : t('预览批量接管','Preview batch adoption')}}</button>
+   </div>
+   <p v-if="!batchSupported" class="security-footnote">{{t('Agent 不支持防火墙批量操作，请更新完整面板。','Update the full panel to support firewall batch actions.')}}</p>
+   <p class="security-footnote">{{t('先选择批量操作类型，再勾选规则；受保护规则不可删除。整批预览、整批应用，执行失败恢复全部变更。','Choose an action, then select rules. Protected rules cannot be deleted. The batch is reviewed and applied together; failures restore the entire change.')}}</p>
    <div class="security-table-wrap"><table class="security-table">
-    <thead><tr><th>{{t('规则','Rule')}}</th><th>{{t('对应服务 / 用途','Service / purpose')}}</th><th>{{t('来源 IP','Source IP')}}</th><th>{{t('归属','Ownership')}}</th><th>{{t('操作','Actions')}}</th></tr></thead>
+    <thead><tr><th class="security-select"><input type="checkbox" :checked="allSelected" :indeterminate="selectedRules.length > 0 && !allSelected" :disabled="!batchWritable || !batchEligible.length" :aria-label="t('全选可操作规则（最多 100 条）','Select eligible rules (up to 100)')" @change="selectAll"></th><th>{{t('规则','Rule')}}</th><th>{{t('对应服务 / 用途','Service / purpose')}}</th><th>{{t('来源 IP','Source IP')}}</th><th>{{t('归属','Ownership')}}</th><th>{{t('操作','Actions')}}</th></tr></thead>
     <tbody><tr v-for="item in firewall?.rules" :key="item.id">
+     <td class="security-select"><input v-model="selectedRules" type="checkbox" :value="item.id" :disabled="!batchWritable || !securityBatchEligible(item,batchMode) || selectedRules.length >= 100 && !selectedRules.includes(item.id)" :aria-label="`${t('选择规则','Select rule')} ${item.portFrom}/${item.protocol}`"></td>
      <td>{{item.description || `${t(item.action === 'allow' ? '允许' : '拒绝',item.action)} ${item.portFrom}${item.portTo !== item.portFrom ? '–'+item.portTo : ''}/${item.protocol === 'tcp/udp' ? 'TCP + UDP' : item.protocol}`}}<small v-if="item.addressFamilies?.length" class="security-rule-family">{{item.addressFamilies.map(family => family === 'ipv4' ? 'IPv4' : 'IPv6').join(' · ')}}</small></td>
      <td class="security-rule-services"><span v-for="service in securityRuleServices(item, firewall?.requiredPorts || [], language)" :key="service">{{service}}</span><small v-if="!securityRuleServices(item, firewall?.requiredPorts || [], language).length">{{t('未识别服务','Unidentified service')}}</small></td>
      <td>{{item.source === 'any' ? t('任意 IP','Any IP') : item.source || '—'}}</td>
@@ -162,5 +184,6 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
 </template>
 
 <style scoped>
+.security-batch>span{font-size:12px;color:var(--muted)}.security-select{width:32px}.security-select input{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}.security-select input:disabled{cursor:default}
 .security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:22px;margin-bottom:20px}.security-card>.card-head{margin-bottom:15px}.security-warning{color:var(--danger-text);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.security-actions{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:18px 0}.security-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}.security-form label,.security-actions label{display:grid;gap:7px;min-width:0;font-size:12px}.security-form small,.security-footnote,.security-card>small{font-size:11px;color:var(--muted);line-height:1.6}.security-form .wide{grid-column:1/-1}.security-form button{align-self:end;min-height:40px;grid-column:1/-1;justify-self:start}.security-ports{grid-template-columns:repeat(2,minmax(0,1fr))}.security-port-list{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.security-port-list>b{width:100%;font-size:12px}.security-port-list>span{padding:6px 9px;border:1px solid var(--line);font-size:11px;overflow-wrap:anywhere}.security-port-list button,.security-table button,.security-bans button,.security-jail header button{background:transparent;border:1px solid var(--line);color:var(--gold);padding:4px 8px;margin-left:6px;cursor:pointer}.security-table-wrap{overflow-x:auto}.security-table{width:100%;border-collapse:collapse;font-size:12px}.security-table th,.security-table td{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.security-rule-services span{display:block;min-width:140px;max-width:320px;line-height:1.65}.security-rule-services small{color:var(--muted)}.security-table th{color:var(--muted);font-weight:500}.security-notice{padding:20px;margin-bottom:20px}.security-notice p{font-size:12px;line-height:1.7}.security-notice b{margin-right:16px}.security-guidance{padding:14px 16px;margin:14px 0;background:var(--surface-code);border-left:3px solid var(--gold)}.security-guidance b{font-size:13px}.security-guidance p{font-size:12px;line-height:1.7;margin:6px 0;color:var(--muted)}.security-technical{font-size:11px;color:var(--muted)}.security-technical summary{cursor:pointer}.security-technical code{overflow-wrap:anywhere}.security-jail{border-top:1px solid var(--line);padding:16px 0}.security-jail header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.security-jail header span,.security-jail p{font-size:11px;color:var(--muted)}.security-bans{display:flex;flex-wrap:wrap;gap:10px}.security-bans span{display:flex;align-items:center}.security-preview ul{padding-left:18px;font-size:13px;line-height:1.8}.security-preview p{font-size:12px;line-height:1.7}.stale{color:var(--danger-text)!important}@media(max-width:700px){.security-form{grid-template-columns:repeat(2,minmax(0,1fr))}.security-ports{grid-template-columns:1fr}.security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:16px}.security-table{min-width:680px}.security-notice button{display:block;margin-top:12px}}@media(max-width:400px){.security-form{grid-template-columns:1fr}.security-preview{padding:20px}}
 </style>

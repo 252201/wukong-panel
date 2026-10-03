@@ -772,3 +772,5 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 .security-rule-family { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .process-help { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+.process-sort{border:0;background:transparent;color:inherit;font:inherit;padding:8px 0;cursor:pointer}.process-sort.active{color:var(--gold)}.process-sort:focus-visible{outline:2px solid var(--gold);outline-offset:3px}

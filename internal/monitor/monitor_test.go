@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"github.com/252201/wukong-panel/internal/model"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,5 +256,38 @@ func TestEndpointCaptureFilterSeparatesTCPAndUDPPorts(t *testing.T) {
 	want := "(udp and (src port 45080 or src port 45115)) or (tcp and (src port 45080 or src port 45116))"
 	if got := endpointCaptureFilter(ports); got != want {
 		t.Fatalf("endpointCaptureFilter() = %q, want %q", got, want)
+	}
+}
+
+func TestProcessSnapshotRetainsIdleMemoryConsumers(t *testing.T) {
+	items := []model.ProcessStat{}
+	for i := 1; i <= 300; i++ {
+		items = append(items, model.ProcessStat{PID: i, CPU: float64(301 - i), RSSBytes: int64(i), Service: "fail2ban"})
+	}
+	selected := selectProcessSnapshot(items, 100)
+	if len(selected) != 200 {
+		t.Fatalf("union length %d", len(selected))
+	}
+	seen := map[int]bool{}
+	for _, p := range selected {
+		if seen[p.PID] {
+			t.Fatal("duplicate PID")
+		}
+		seen[p.PID] = true
+		if p.Service != "fail2ban" {
+			t.Fatal("lost labels")
+		}
+	}
+	for _, pid := range []int{1, 100, 201, 300} {
+		if !seen[pid] {
+			t.Fatalf("missing CPU/memory consumer %d", pid)
+		}
+	}
+	if seen[150] {
+		t.Fatal("unbounded sampling")
+	}
+	selected = selectProcessSnapshot([]model.ProcessStat{{PID: 2, CPU: 1, RSSBytes: 1}, {PID: 1, CPU: 1, RSSBytes: 1}}, 100)
+	if selected[0].PID != 1 {
+		t.Fatal("unstable tie")
 	}
 }
