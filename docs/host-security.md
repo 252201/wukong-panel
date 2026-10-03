@@ -56,6 +56,12 @@ UFW 使用发行版 `iptables-multiport`（官方 UFW action 默认会封锁所�
 
 UFW 原先已启用时，恢复磁盘配置后必须再执行 `reload` 才完成内核恢复，不能只调用 `enable`。这也适用于 v1.7.0 写出的旧事务；重载失败会保留 pending journal，恢复服务继续重试，并在完成重载和封禁同步后才记录已回滚。原先未启用时仍恢复为停用状态。
 
+## 进程用途标注
+
+系统页保留原始进程名，并在下方标注可识别的 Fail2ban 服务/客户端、firewalld 服务/客户端、UFW、nftables、iptables/ip6tables 规则工具，以及悟空安全恢复和规则加载进程。兼容 Python 解释器启动的服务与 Linux 截断的工具名；只按进程名及实际执行的脚本识别，不把参数中出现的工具名称当成服务。命令行只在主机本地用于识别，快照和数据库只保存固定用途标识。
+
+用途标注随本机与舰队进程快照传递；旧 Agent 未上报用途时仍显示原始名称，已有节点名称保留。进程列表仍按资源使用排序和限量展示，标注不代表具体 SSH 防护已生效。UFW/nftables 通常没有常驻管理进程，真实防护状态以安全页为准。
+
 ## 验证
 
 `go test ./...`、`go test -race ./...`、`go vet ./...`；`cd web && npm test && npm run build`；Linux amd64/arm64 编译。双实例舰队测试实际通过 HTTPS、CSRF、任务、回执与持久化 journal，原生命令使用隔离 fixture，验证所选目标和并发重复写只执行一次。

@@ -350,15 +350,50 @@ func TestReplaceProcessesPreservesCountAndOrdering(t *testing.T) {
 	}
 	defer s.Close()
 	processes := []model.ProcessStat{
-		{PID: 20, Name: "wukong-panel", CPU: 1.2, RSSBytes: 40_000_000, MemoryPercent: 2},
+		{PID: 20, Name: "wukong-panel", Service: "security-recovery", CPU: 1.2, RSSBytes: 40_000_000, MemoryPercent: 2},
 		{PID: 10, Name: "sing-box", Nodes: []string{"Apple-TV", "iPhone18"}, CPU: 6.9, RSSBytes: 84_000_000, MemoryPercent: 4.2},
 	}
 	if err := s.ReplaceProcesses(time.Now().Unix(), 106, processes); err != nil {
 		t.Fatal(err)
 	}
 	items, count, err := s.Processes(10)
-	if err != nil || count != 106 || len(items) != 2 || items[0].Name != "sing-box" || len(items[0].Nodes) != 2 || items[0].Nodes[1] != "iPhone18" {
+	if err != nil || count != 106 || len(items) != 2 || items[0].Name != "sing-box" || len(items[0].Nodes) != 2 || items[0].Nodes[1] != "iPhone18" || items[1].Service != "security-recovery" {
 		t.Fatalf("unexpected processes: %#v count=%d err=%v", items, count, err)
+	}
+}
+
+func TestLegacyProcessSchemaMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-process.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`CREATE TABLE process_recent (
+		pid INTEGER PRIMARY KEY, name TEXT NOT NULL, cpu REAL NOT NULL, rss_bytes INTEGER NOT NULL,
+		memory_percent REAL NOT NULL, node_names TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL
+	);
+	INSERT INTO process_recent VALUES(1, 'sing-box', 1, 1024, 1, '["existing-node"]', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	items, _, err := s.Processes(10)
+	if err != nil || len(items) != 1 || items[0].Service != "" || len(items[0].Nodes) != 1 || items[0].Nodes[0] != "existing-node" {
+		t.Fatalf("legacy process lost during migration: %#v, %v", items, err)
+	}
+	if err = s.ReplaceProcesses(2, 1, []model.ProcessStat{{PID: 2, Name: "python3", Service: "firewalld"}}); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err = s.Processes(10)
+	if err != nil || len(items) != 1 || items[0].Service != "firewalld" {
+		t.Fatalf("service did not survive storage: %#v, %v", items, err)
 	}
 }
 

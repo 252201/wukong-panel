@@ -100,7 +100,7 @@ export interface NetworkTargetResult {
   packetsReceived: number
 }
 
-export interface ProcessStat { pid: number; name: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }
+export interface ProcessStat { pid: number; name: string; service?: string; nodes?: string[]; cpu: number; rssBytes: number; memoryPercent: number }
 
 export interface NodeEditDetails { node: NodeItem; v6OnlyDomains: string[] }
 

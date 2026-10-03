@@ -3,6 +3,17 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  '登录防护服务 · Fail2ban': 'Login protection service · Fail2ban',
+  '登录防护管理工具 · Fail2ban': 'Login protection management tool · Fail2ban',
+  '防火墙服务 · firewalld': 'Firewall service · firewalld',
+  '防火墙管理工具 · firewalld': 'Firewall management tool · firewalld',
+  '防火墙规则管理工具 · UFW': 'Firewall rule management tool · UFW',
+  '防火墙规则管理工具 · nftables': 'Firewall rule management tool · nftables',
+  '防火墙规则管理工具 · iptables': 'Firewall rule management tool · iptables',
+  '防火墙规则管理工具 · ip6tables': 'Firewall rule management tool · ip6tables',
+  '悟空安全自动恢复': 'Wukong security recovery',
+  '悟空防火墙规则加载': 'Wukong firewall rule loading',
+  'UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。': 'UFW / nftables usually have no persistent process. Check the Security page for protection status.',
   "停止 Fail2ban，解除它管理的所有当前封禁（包括非 SSH 防护）": "Stop Fail2ban and remove all of its current bans, including non-SSH protection",
   "保存并验证完整配置、数据库与面板管理状态备份": "Save and verify a complete backup of configurations, database and panel ownership",
   "恢复发行版默认过滤器和动作；所有防护保持停用，重新检查参数后再启用 SSH 登录防护": "Restore distribution filters and actions. All protection stays disabled; review settings before enabling SSH login protection again",
@@ -19,7 +30,6 @@ const english: Record<string, string> = {
   "请输入 RESET FAIL2BAN 确认完全清理": "Type RESET FAIL2BAN to confirm a complete reset",
   "状态已变化，请重新预览": "The state changed. Preview again before applying",
   "远端 Agent 不支持清理重装，请更新完整面板": "The remote Agent does not support resetting. Update the full panel",
-
   '。': '.',
   '悟': 'W',
   '舰': 'F',

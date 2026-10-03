@@ -222,6 +222,7 @@ type Metric struct {
 type ProcessStat struct {
 	PID           int      `json:"pid"`
 	Name          string   `json:"name"`
+	Service       string   `json:"service,omitempty"`
 	Nodes         []string `json:"nodes,omitempty"`
 	CPU           float64  `json:"cpu"`
 	RSSBytes      int64    `json:"rssBytes"`

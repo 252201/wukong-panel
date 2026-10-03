@@ -588,10 +588,11 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 			name = statusName
 		}
 		var cmdline []byte
-		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") {
+		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") || securityProcessCandidate(name) {
 			cmdline, _ = os.ReadFile("/proc/" + entry.Name() + "/cmdline")
-			name = processDisplayName(name, cmdline)
 		}
+		service := securityProcessService(name, cmdline)
+		name = processDisplayName(name, cmdline)
 		nodeNames := []string(nil)
 		if name == "sing-box" {
 			nodeNames = append(nodeNames, nodeNamesByConfig[processConfigPath(cmdline)]...)
@@ -605,7 +606,7 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 			memoryPercent = float64(rss) / float64(memoryTotal) * 100
 		}
 		current[pid] = ticks
-		items = append(items, model.ProcessStat{PID: pid, Name: name, Nodes: nodeNames, CPU: cpu, RSSBytes: rss, MemoryPercent: memoryPercent})
+		items = append(items, model.ProcessStat{PID: pid, Name: name, Service: service, Nodes: nodeNames, CPU: cpu, RSSBytes: rss, MemoryPercent: memoryPercent})
 	}
 	c.lastProcessCPU = current
 	c.lastProcessTotal = totalCPU
