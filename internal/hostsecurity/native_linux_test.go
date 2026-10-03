@@ -829,6 +829,12 @@ func TestNativeAfterReboot(t *testing.T) {
 func nativeConfiguredSSHActivation(t *testing.T, c *Controller, zone string) {
 	t.Helper()
 	ctx := context.Background()
+	// Use a separate peer: the next fresh jail can legitimately replay recent
+	// authentication failures, so this scenario must not pre-ban its test IP.
+	if _, e := c.exec(ctx, "ip", "netns", "exec", "security-client", "ip", "addr", "add", "10.203.0.5/24", "dev", "test-client"); e != nil {
+		t.Fatal(e)
+	}
+	defer c.exec(ctx, "ip", "netns", "exec", "security-client", "ip", "addr", "del", "10.203.0.5/24", "dev", "test-client")
 	if e := c.service(ctx, "stop", "fail2ban"); e != nil {
 		t.Fatal(e)
 	}
@@ -885,17 +891,17 @@ func nativeConfiguredSSHActivation(t *testing.T, c *Controller, zone string) {
 		t.Fatal("changed original SSH configuration", e)
 	}
 	for i := 0; i < 3; i++ {
-		nativeConnect(t, "ssh-fail", "10.203.0.1:46961", "10.203.0.2")
+		nativeConnect(t, "ssh-fail", "10.203.0.1:46961", "10.203.0.5")
 	}
 	waitNative(t, "adopted stopped SSH ban", func() bool {
 		v, _ := c.Fail2ban(ctx)
-		return len(v.Jails) == 1 && contains(v.Jails[0].Banned, "10.203.0.2")
+		return len(v.Jails) == 1 && contains(v.Jails[0].Banned, "10.203.0.5")
 	})
-	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
-	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.2")
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.5")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.5")
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.3")
-	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
-	nativeConnect(t, "tcp", "10.203.0.1:46961", "10.203.0.2")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.5"})
+	nativeConnect(t, "tcp", "10.203.0.1:46961", "10.203.0.5")
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "disable"})
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "detach"})
 	if e = c.service(ctx, "stop", "fail2ban"); e != nil {
