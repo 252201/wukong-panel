@@ -167,3 +167,28 @@ func TestFail2banStartupWaitsForReadiness(t *testing.T) {
 		t.Fatalf("%v", e)
 	}
 }
+
+func TestConfiguredSSHRevisionIgnoresDiagnosticTimestamps(t *testing.T) {
+	c, dump, _ := configuredSSHFixture(t)
+	commands := *dump
+	*dump = "2026-10-03 08:00:00 WARNING allowipv6 not defined, using auto\n" + commands
+	before, e := c.Fail2ban(context.Background())
+	if e != nil || !before.CanActivate {
+		t.Fatalf("%+v %v", before, e)
+	}
+	*dump = "2026-10-03 08:00:02 WARNING allowipv6 not defined, using auto\n" + commands
+	after, e := c.Fail2ban(context.Background())
+	if e != nil || before.Revision != after.Revision {
+		t.Fatalf("diagnostics changed revision: %s %s %v", before.Revision, after.Revision, e)
+	}
+	*dump += "\n['set', 'sshd', 'maxretry', 8]"
+	changed, e := c.Fail2ban(context.Background())
+	if e != nil || changed.Revision == before.Revision {
+		t.Fatal("actual configuration change did not invalidate revision", e)
+	}
+	for _, invalid := range []string{"", "WARNING could not dump configuration"} {
+		if _, e := fail2banConfigDump(invalid); e == nil {
+			t.Fatal("missing command stream was accepted")
+		}
+	}
+}

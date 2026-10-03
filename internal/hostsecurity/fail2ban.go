@@ -158,6 +158,9 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		r.Reason = "Fail2ban 服务未运行或无法连接"
 		// Query effective package configuration without starting a daemon or jail.
 		dump, de := c.exec(ctx, "fail2ban-client", "-d")
+		if de == nil {
+			dump, de = fail2banConfigDump(dump)
+		}
 		raw = append(raw, dump)
 		if de != nil {
 			r.Reason = "无法验证 Fail2ban 有效配置：" + de.Error()
@@ -644,6 +647,23 @@ func (c *Controller) fail2banStopped(ctx context.Context) bool {
 		return err != nil && strings.Contains(out, "status: stopped")
 	}
 	return false
+}
+
+// Older clients mix timestamped logging warnings into CombinedOutput even on
+// successful -d. Revisions compare the actual command stream, not diagnostics.
+func fail2banConfigDump(output string) (string, error) {
+	commandLine := regexp.MustCompile(`^\['[A-Za-z][A-Za-z0-9_-]*',`)
+	commands := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if commandLine.MatchString(line) {
+			commands = append(commands, line)
+		}
+	}
+	if len(commands) == 0 {
+		return "", errors.New("未读取到有效的防护配置命令")
+	}
+	return strings.Join(commands, "\n"), nil
 }
 func (c *Controller) waitFail2ban(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
