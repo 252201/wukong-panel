@@ -4,7 +4,12 @@ set -eu
 base=${1:-debian:12}
 arch=${WUKONG_SECURITY_ARCH:-amd64}
 case "$base" in debian:*|ubuntu:*) file=debian;backend=ufw ;; rockylinux:*|almalinux:*) file=rhel;backend=firewalld ;; alpine:*) file=alpine;backend=nftables ;; *) exit 2 ;; esac
+install_ufw=0
+if [ "${WUKONG_SECURITY_BACKEND:-}" != "" ] && [ "$WUKONG_SECURITY_BACKEND" != default ]; then
+ case "$file:$WUKONG_SECURITY_BACKEND" in alpine:ufw) backend=ufw;install_ufw=1 ;; *) exit 2 ;; esac
+fi
 image="wukong-security-test-${file}-$(printf '%s' "$base" | tr ':/' '--')"
+image="$image-$backend"
 mkdir -p build
 work=$(mktemp -d "$PWD/build/security-native.XXXXXX")
 container="wukong-security-test-$$"
@@ -12,7 +17,7 @@ cleanup() { code=$?; if [ "$code" -ne 0 ]; then docker exec "$container" sh -c '
 trap cleanup EXIT HUP INT TERM
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -o "$work/security.test" ./internal/hostsecurity
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -o "$work/wukong-panel" ./cmd/wukong-panel
-docker build --build-arg BASE="$base" -t "$image" -f "scripts/security/Dockerfile.$file" scripts/security >"$work/image-build.log" 2>&1 || { cat "$work/image-build.log"; exit 1; }
+docker build --build-arg BASE="$base" --build-arg WUKONG_INSTALL_UFW="$install_ufw" -t "$image" -f "scripts/security/Dockerfile.$file" scripts/security >"$work/image-build.log" 2>&1 || { cat "$work/image-build.log"; exit 1; }
 docker run -d --name "$container" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock -v "$work/security.test:/security.test:ro" -v "$work/wukong-panel:/wukong-panel:ro" -v "$PWD/scripts/security/setup.sh:/setup.sh:ro" -v "$PWD/scripts/security/network.sh:/network.sh:ro" "$image" >/dev/null
 wait_init() {
  for attempt in $(seq 1 60); do

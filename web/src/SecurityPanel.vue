@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { hostSecurityAPI, type FirewallState, type Fail2banState, type SecurityRequest, type SecurityPreview, type SSHProtectionConfig, type Job } from './api'
 import { translateText } from './i18n'
-import { parseSecurityPorts, securityRuleServices, securityStateFresh } from './securityRules'
+import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh } from './securityRules'
 const props = defineProps<{hostId: string; hostName: string; online: boolean; compatible: boolean; capabilities: string[]; language: string}>()
 const client = hostSecurityAPI(props.hostId)
 const t = (zh: string, en: string) => props.language === 'en-US' ? en : zh
@@ -33,7 +33,7 @@ const fbWritable = computed(() => enabled.value && support('fail2ban') && fail2b
 const resetWritable = computed(() => enabled.value && support('fail2ban.reset') && fail2ban.value?.canReset && securityStateFresh(fail2ban.value.checkedAt, now.value))
 const seconds = computed(() => Math.max(0, Math.ceil((Date.parse(firewall.value?.pending?.deadline || '') - now.value) / 1000)))
 function configRequest(): SSHProtectionConfig { return {...config, ignoreIPs: whitelist.value.split(/[\s,]+/).filter(Boolean)} }
-function portAllowed(port: {port:number;protocol:string}): boolean {return !!firewall.value?.rules.some(rule => rule.adoptable && rule.action==='allow' && rule.source==='any' && rule.protocol===port.protocol && rule.portFrom<=port.port && rule.portTo>=port.port)}
+function portAllowed(port: {port:number;protocol:string}): boolean {return !!firewall.value?.rules.some(rule => rule.adoptable && rule.action==='allow' && rule.source==='any' && securityRuleMatchesProtocol(rule,port.protocol) && (rule.protocol!=='tcp/udp' || (rule.addressFamilies?.includes('ipv4') && rule.addressFamilies?.includes('ipv6'))) && rule.portFrom<=port.port && rule.portTo>=port.port)}
 
 async function refresh() {
  if (refreshing.value || !alive) return
@@ -122,7 +122,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
    <div class="security-table-wrap"><table class="security-table">
     <thead><tr><th>{{t('规则','Rule')}}</th><th>{{t('对应服务 / 用途','Service / purpose')}}</th><th>{{t('来源 IP','Source IP')}}</th><th>{{t('归属','Ownership')}}</th><th>{{t('操作','Actions')}}</th></tr></thead>
     <tbody><tr v-for="item in firewall?.rules" :key="item.id">
-     <td>{{item.description || `${t(item.action === 'allow' ? '允许' : '拒绝',item.action)} ${item.portFrom}${item.portTo !== item.portFrom ? '–'+item.portTo : ''}/${item.protocol}`}}</td>
+     <td>{{item.description || `${t(item.action === 'allow' ? '允许' : '拒绝',item.action)} ${item.portFrom}${item.portTo !== item.portFrom ? '–'+item.portTo : ''}/${item.protocol === 'tcp/udp' ? 'TCP + UDP' : item.protocol}`}}<small v-if="item.addressFamilies?.length" class="security-rule-family">{{item.addressFamilies.map(family => family === 'ipv4' ? 'IPv4' : 'IPv6').join(' · ')}}</small></td>
      <td class="security-rule-services"><span v-for="service in securityRuleServices(item, firewall?.requiredPorts || [], language)" :key="service">{{service}}</span><small v-if="!securityRuleServices(item, firewall?.requiredPorts || [], language).length">{{t('未识别服务','Unidentified service')}}</small></td>
      <td>{{item.source === 'any' ? t('任意 IP','Any IP') : item.source || '—'}}</td>
      <td>{{item.protected ? t('受保护','Protected') : item.managed ? t('悟空管理','Wukong managed') : t('已有外部规则','Existing external rule')}}</td>

@@ -3,17 +3,18 @@ package model
 import "time"
 
 type SecurityRule struct {
-	ID          string `json:"id"`
-	Action      string `json:"action"`
-	Protocol    string `json:"protocol"`
-	PortFrom    int    `json:"portFrom"`
-	PortTo      int    `json:"portTo"`
-	Source      string `json:"source"`
-	Zone        string `json:"zone,omitempty"`
-	Managed     bool   `json:"managed"`
-	Protected   bool   `json:"protected"`
-	Adoptable   bool   `json:"adoptable"`
-	Description string `json:"description,omitempty"`
+	AddressFamilies []string `json:"addressFamilies,omitempty"`
+	ID              string   `json:"id"`
+	Action          string   `json:"action"`
+	Protocol        string   `json:"protocol"`
+	PortFrom        int      `json:"portFrom"`
+	PortTo          int      `json:"portTo"`
+	Source          string   `json:"source"`
+	Zone            string   `json:"zone,omitempty"`
+	Managed         bool     `json:"managed"`
+	Protected       bool     `json:"protected"`
+	Adoptable       bool     `json:"adoptable"`
+	Description     string   `json:"description,omitempty"`
 }
 type SecurityPort struct {
 	Port      int    `json:"port"`

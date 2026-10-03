@@ -109,6 +109,10 @@ jobs:
       fail-fast: false
       matrix:
         image: [debian:12, debian:13, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
+        backend: [default]
+        include:
+          - image: alpine:3.21
+            backend: ufw
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -116,4 +120,6 @@ jobs:
           go-version: "1.26.5"
           cache: true
       - name: Verify native firewall, SSH bans, independent recovery and reboot
+        env:
+          WUKONG_SECURITY_BACKEND: ${{ matrix.backend }}
         run: sh scripts/test-host-security-native.sh "${{ matrix.image }}"

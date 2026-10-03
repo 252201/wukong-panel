@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 const source = readFileSync(new URL('./securityRules.ts', import.meta.url), 'utf8')
 const js = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
-const {parseSecurityPorts,securityStateFresh,securityRuleServices} = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+const {parseSecurityPorts,securityStateFresh,securityRuleServices,securityRuleMatchesProtocol} = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
 test('explicit ports reject invalid values and preserve non-default SSH', () => {
  assert.deepEqual(parseSecurityPorts('46961, 9443,46961'),[9443,46961])
  assert.deepEqual(parseSecurityPorts(''),[])
@@ -32,4 +32,12 @@ test('rule purposes match the host protocol and range, preserving node names and
  assert.deepEqual(securityRuleServices(rule,[],'zh-CN'),[])
  assert.deepEqual(securityRuleServices({...rule,protocol:'tcp',portFrom:9443,portTo:9443},ports,'en-US'),['Panel entrance'])
  assert.deepEqual(securityRuleServices({...rule,portTo:49707},ports,'en-US'),['Node US-纯V6-旧金山'])
+})
+
+test('combined legacy rules match both protocols without matching other transports', () => {
+ const rule = {adoptable:true,protocol:'tcp/udp',portFrom:21967,portTo:21967,source:'any',action:'allow',addressFamilies:['ipv4']}
+ assert.equal(securityRuleMatchesProtocol(rule,'tcp'),true)
+ assert.equal(securityRuleMatchesProtocol(rule,'udp'),true)
+ assert.equal(securityRuleMatchesProtocol(rule,'icmp'),false)
+ assert.deepEqual(securityRuleServices(rule,[{port:21967,protocol:'tcp',reason:'面板入口'},{port:21967,protocol:'udp',reason:'节点 UDP'}],'zh-CN'),['面板入口','节点 UDP'])
 })

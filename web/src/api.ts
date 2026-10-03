@@ -283,7 +283,7 @@ export const api = {
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
 }
 
-export interface SecurityRule { id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
+export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
 export interface SecurityPort { port: number; protocol: string; reason: string; protected: boolean }
 export interface SecurityTransaction { id: string; status: string; deadline: string; error?: string }
 export interface FirewallState { backend: string; installed: boolean; active: boolean; writable: boolean; reason?: string; policy: string; zone?: string; zones: string[]; rules: SecurityRule[]; requiredPorts: SecurityPort[]; revision: string; checkedAt: string; pending?: SecurityTransaction }

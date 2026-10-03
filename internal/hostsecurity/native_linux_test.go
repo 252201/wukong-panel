@@ -239,6 +239,25 @@ func TestNativeSecurity(t *testing.T) {
 		if _, e := c.exec(ctx, "ufw", "allow", "5566/tcp"); e != nil {
 			t.Fatal(e)
 		}
+		if _, e := c.exec(ctx, "ufw", "allow", "5567"); e != nil {
+			t.Fatal(e)
+		}
+		// Reproduce an old IPv4-only, protocol-less rule without changing an
+		// active firewall. Turning IPv6 back on must not invent IPv6 coverage.
+		defaults, e := c.read("/etc/default/ufw")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = atomic(c.path("/etc/default/ufw"), []byte(strings.ReplaceAll(string(defaults), "IPV6=yes", "IPV6=no")), 0644); e != nil {
+			t.Fatal(e)
+		}
+		_, addErr := c.exec(ctx, "ufw", "allow", "5568")
+		if e = atomic(c.path("/etc/default/ufw"), defaults, 0644); e != nil {
+			t.Fatal(e)
+		}
+		if addErr != nil {
+			t.Fatal(addErr)
+		}
 	case "firewalld":
 		// First enable from a stopped daemon must return to stopped on timeout.
 		if e := c.service(ctx, "stop", "firewalld"); e != nil {
@@ -313,6 +332,9 @@ func TestNativeSecurity(t *testing.T) {
 	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
 	nativeConnect(t, "icmp4", "10.203.0.1", "")
 	nativeConnect(t, "icmp6", "fd42:203::1", "")
+	if backend == "ufw" {
+		nativeUFWLegacyRules(t, c)
+	}
 	listener, e := net.Listen("tcp", ":22222")
 	if e != nil {
 		t.Fatal(e)
@@ -574,6 +596,116 @@ func TestNativeSecurity(t *testing.T) {
 	}
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	t.Logf("PASS %s: IPv4/IPv6 allow/deny, protected ports, existing rules, persistence, SSH-only bans, whitelist, unban, independent 90s recovery", backend)
+}
+
+func nativeUFWLegacyRules(t *testing.T, c *Controller) {
+	t.Helper()
+	ctx := context.Background()
+	for _, port := range []string{"5567", "5568"} {
+		tcp, err := net.Listen("tcp", ":"+port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tcp.Close()
+		go func() {
+			for {
+				conn, err := tcp.Accept()
+				if err != nil {
+					return
+				}
+				conn.Close()
+			}
+		}()
+		udp, err := net.ListenPacket("udp", ":"+port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer udp.Close()
+		go func() {
+			buf := make([]byte, 64)
+			for {
+				n, addr, err := udp.ReadFrom(buf)
+				if err != nil {
+					return
+				}
+				_, _ = udp.WriteTo(buf[:n], addr)
+			}
+		}()
+	}
+	find := func(port int) model.SecurityRule {
+		t.Helper()
+		f, err := c.Firewall(ctx, "")
+		if err != nil || !f.Writable {
+			t.Fatalf("legacy state: %+v %v", f, err)
+		}
+		for _, r := range f.Rules {
+			if r.PortFrom == port && r.Protocol == "tcp/udp" {
+				return r
+			}
+		}
+		t.Fatal("missing combined legacy rule", port)
+		return model.SecurityRule{}
+	}
+	dual, single := find(5567), find(5568)
+	if strings.Join(dual.AddressFamilies, ",") != "ipv4,ipv6" || strings.Join(single.AddressFamilies, ",") != "ipv4" {
+		t.Fatalf("inferred wrong address families: %+v %+v", dual, single)
+	}
+	before4, _ := c.read("/etc/ufw/user.rules")
+	before6, _ := c.read("/etc/ufw/user6.rules")
+	for _, r := range []model.SecurityRule{dual, single} {
+		nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "adopt", RuleID: r.ID})
+	}
+	after4, _ := c.read("/etc/ufw/user.rules")
+	after6, _ := c.read("/etc/ufw/user6.rules")
+	if digest(before4) != digest(after4) || digest(before6) != digest(after6) {
+		t.Fatal("adoption rewrote external configuration")
+	}
+	if _, err := c.exec(ctx, "ufw", "reload"); err != nil {
+		t.Fatal(err)
+	}
+	for _, port := range []string{"5567", "5568"} {
+		nativeConnect(t, "tcp", "10.203.0.1:"+port, "")
+		nativeConnect(t, "udp", "10.203.0.1:"+port, "")
+	}
+	nativeConnect(t, "tcp", "[fd42:203::1]:5567", "")
+	nativeConnect(t, "udp", "[fd42:203::1]:5567", "")
+	nativeConnect(t, "blocked", "[fd42:203::1]:5568", "")
+	nativeConnect(t, "udp-blocked", "[fd42:203::1]:5568", "")
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "delete", RuleID: dual.ID})
+	for _, addr := range []string{"10.203.0.1:5567", "[fd42:203::1]:5567"} {
+		nativeConnect(t, "blocked", addr, "")
+		nativeConnect(t, "udp-blocked", addr, "")
+	}
+	// Fail after the actual grouped deletion and verify file + kernel recovery.
+	base := c.Run
+	c.Run = func(ctx context.Context, name string, args []string, input string) (string, error) {
+		out, err := base(ctx, name, args, input)
+		if err == nil && name == "ufw" && strings.Join(args, " ") == "--force delete allow 5568" {
+			return out, errors.New("injected grouped-delete failure")
+		}
+		return out, err
+	}
+	request := model.SecurityRequest{Operation: "delete", RuleID: single.ID}
+	p, err := c.Preview(ctx, "firewall", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Revision = p.Revision
+	_, err = c.Apply(ctx, "firewall", request)
+	c.Run = base
+	if err == nil {
+		t.Fatal("grouped deletion did not fail")
+	}
+	if recovered := find(5568); recovered.ID != single.ID || !recovered.Managed {
+		t.Fatal("ownership not restored", recovered)
+	}
+	nativeConnect(t, "tcp", "10.203.0.1:5568", "")
+	nativeConnect(t, "udp", "10.203.0.1:5568", "")
+	nativeConnect(t, "blocked", "[fd42:203::1]:5568", "")
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "delete", RuleID: single.ID})
+	nativeConnect(t, "blocked", "10.203.0.1:5568", "")
+	nativeConnect(t, "udp-blocked", "10.203.0.1:5568", "")
+	t.Log("Legacy UFW: combined TCP/UDP rules, IPv4-only and dual-stack coverage, preservation, adoption, grouped deletion and failed-delete recovery passed")
 }
 
 // Reproduce the v1.7.0 production failures using real UFW and packets. These

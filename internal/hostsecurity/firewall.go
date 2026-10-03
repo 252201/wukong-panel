@@ -108,7 +108,12 @@ func (c *Controller) Firewall(ctx context.Context, zone string) (model.FirewallS
 					r.Writable = false
 					r.Reason = e.Error()
 				} else {
-					r.Rules = parseUFW(added)
+					v4, e4 := c.read("/etc/ufw/user.rules")
+					v6, e6 := c.read("/etc/ufw/user6.rules")
+					if (e4 != nil && !errors.Is(e4, os.ErrNotExist)) || (e6 != nil && !errors.Is(e6, os.ErrNotExist)) {
+						v4, v6 = nil, nil // Never infer an absent family from an unreadable file.
+					}
+					r.Rules = reconcileUFW(added, string(v4), string(v6))
 				}
 				if strings.Contains(ut, "deny (incoming)") {
 					r.Policy = "deny"
@@ -345,7 +350,7 @@ func (c *Controller) Firewall(ctx context.Context, zone string) (model.FirewallS
 			}
 		}
 		for _, p := range r.RequiredPorts {
-			if p.Protected && rr.Protocol == p.Protocol && p.Port >= rr.PortFrom && p.Port <= rr.PortTo {
+			if p.Protected && ruleProtocolMatches(*rr, p.Protocol) && p.Port >= rr.PortFrom && p.Port <= rr.PortTo {
 				rr.Protected = true
 			}
 		}
@@ -411,6 +416,7 @@ func field(s, key string) string {
 }
 func parseUFW(s string) []model.SecurityRule {
 	result := []model.SecurityRule{}
+	legacy := regexp.MustCompile(`^ufw (allow|deny) (?:in )?([0-9]+)$`)
 	re := regexp.MustCompile(`^ufw (allow|deny) (?:in )?([0-9]+(?::[0-9]+)?)/(tcp|udp)(?: comment ['"]([^'"]*)['"])?$`)
 	full := regexp.MustCompile(`^ufw (allow|deny) (?:in )?from (\S+) to any port ([0-9]+(?::[0-9]+)?) proto (tcp|udp)(?: comment ['"]([^'"]*)['"])?$`)
 	for _, l := range strings.Split(s, "\n") {
@@ -430,6 +436,13 @@ func parseUFW(s string) []model.SecurityRule {
 				r = nr
 			} else {
 				r.Adoptable = false
+			}
+		} else if m := legacy.FindStringSubmatch(l); m != nil {
+			port, err := strconv.Atoi(m[2])
+			if err == nil && port >= 1 && port <= 65535 {
+				r = model.SecurityRule{Action: m[1], Protocol: "tcp/udp", PortFrom: port, PortTo: port, Source: "any", Adoptable: true}
+			} else {
+				r.Description = l
 			}
 		} else {
 			r.Description = l
@@ -773,7 +786,11 @@ func ufwArgs(r model.SecurityRule, remove bool) []string {
 	}
 	a = append(a, r.Action)
 	if r.Source == "any" {
-		a = append(a, portSpec(r, ":")+"/"+r.Protocol)
+		port := portSpec(r, ":")
+		if r.Protocol != "tcp/udp" {
+			port += "/" + r.Protocol
+		}
+		a = append(a, port)
 	} else {
 		a = append(a, "from", r.Source, "to", "any", "port", portSpec(r, ":"), "proto", r.Protocol)
 	}
@@ -788,6 +805,9 @@ func ufwReplacements(r model.SecurityRule, rules []model.SecurityRule) ([]model.
 	for _, old := range rules {
 		match := old
 		match.Action = r.Action
+		if old.Protocol == "tcp/udp" && ruleProtocolMatches(old, r.Protocol) {
+			match.Protocol = r.Protocol
+		}
 		if old.Action == r.Action || !sameRule(match, r) {
 			continue
 		}
@@ -796,6 +816,9 @@ func ufwReplacements(r model.SecurityRule, rules []model.SecurityRule) ([]model.
 		}
 		if !old.Adoptable || !old.Managed {
 			return nil, errors.New("存在相同条件的外部规则，请先确认接管后再替换")
+		}
+		if old.Protocol == "tcp/udp" {
+			return nil, errors.New("已有 TCP/UDP 合并规则，请先预览删除整条规则，再分别添加需要的协议")
 		}
 		replaced = append(replaced, old)
 	}
@@ -898,7 +921,7 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 				return p, errors.New("已有复杂规则无法判断管理端口可达性，请先核对")
 			}
 			for _, port := range p.RequiredPorts {
-				if rr.Action == "deny" && rr.Protocol == port.Protocol && port.Port >= rr.PortFrom && port.Port <= rr.PortTo {
+				if rr.Action == "deny" && ruleProtocolMatches(rr, port.Protocol) && port.Port >= rr.PortFrom && port.Port <= rr.PortTo {
 					return p, errors.New("已有拒绝规则覆盖需保留的端口，请先核对并处理")
 				}
 			}
@@ -927,7 +950,11 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 		}
 		rr.Zone = f.Zone
 		for _, v := range f.Rules {
-			if sameRule(rr, v) {
+			match := v
+			if v.Protocol == "tcp/udp" && ruleProtocolMatches(v, rr.Protocol) && contains(v.AddressFamilies, "ipv4") && contains(v.AddressFamilies, "ipv6") {
+				match.Protocol = rr.Protocol
+			}
+			if sameRule(rr, match) {
 				return p, errors.New("已有相同规则")
 			}
 		}
@@ -972,6 +999,9 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 			return p, errors.New("规则已由悟空管理")
 		}
 		p.Changes = []string{r.Operation + " " + ruleKey(*rr)}
+		if rr.Protocol == "tcp/udp" {
+			p.Warnings = append(p.Warnings, "此为 TCP/UDP 合并规则；删除会同时移除此端口的 TCP 和 UDP 放行或拒绝，仅操作当前已有的地址族")
+		}
 	default:
 		return p, errors.New("未知防火墙操作")
 	}
