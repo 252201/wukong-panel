@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func defaults() model.SSHProtectionConfig {
@@ -135,10 +136,12 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 	r := model.Fail2banState{Installed: c.Lookup("fail2ban-client"), CheckedAt: c.Now(), Jails: []model.SSHJail{}, Config: s.Config, ManagedJail: s.Jail, SSHPorts: []int{}}
 	r.SSHPorts, _ = c.ports(ctx)
 	r.LogBackend, r.LogPath, e = c.logSource(ctx)
+	logErr := e
 	if e != nil {
 		r.Reason = e.Error()
 	}
 	raw := []string{}
+	canActivate := false
 	if c.Demo {
 		r.Reason = "演示环境不执行系统安全操作"
 		r.Revision = c.revision(s)
@@ -160,14 +163,23 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 			r.Reason = "无法验证 Fail2ban 有效配置：" + de.Error()
 		} else {
 			adds := regexp.MustCompile(`(?m)^\['add', '([A-Za-z0-9_-]+)',`)
-			for _, match := range adds.FindAllStringSubmatch(dump, -1) {
+			configured := adds.FindAllStringSubmatch(dump, -1)
+			for _, match := range configured {
 				name := match[1]
 				if strings.Contains(strings.ToLower(name), "ssh") || regexp.MustCompile(`(?m)^\['set', '`+regexp.QuoteMeta(name)+`', '(?:addjournalmatch|addlogpath)', .*?(?:sshd|auth\.log|/secure)`).MatchString(dump) {
-					r.Jails = append(r.Jails, model.SSHJail{Name: name, Config: defaults(), Banned: []string{}})
+					r.Jails = append(r.Jails, model.SSHJail{Name: name, ConfiguredOnly: true, Config: defaults(), Banned: []string{}})
 				}
 			}
 			if len(r.Jails) > 0 {
-				r.Reason = "存在已配置但未运行的 SSH jail，请在主机启动并核对后确认接管"
+				r.Reason = "SSH 登录防护尚未启动，已有配置需要检查后才能启用"
+				// Only activate a single default SSH configuration. Starting a daemon
+				// with other enabled jails would change unrelated protection too.
+				canActivate = s.Jail == "" && len(configured) == 1 && len(r.Jails) == 1 && r.Jails[0].Name == "sshd" && len(regexp.MustCompile(`(?m)^\['add',`).FindAllStringIndex(dump, -1)) == 1 && c.fail2banStopped(ctx)
+				if canActivate {
+					r.Reason = "SSH 登录防护尚未启动，可预览并启用已有配置"
+				} else {
+					r.Reason = "SSH 登录防护尚未启动；现有配置无法安全自动启用，请让服务器管理员检查并启动 Fail2ban，再交由面板管理"
+				}
 			}
 		}
 	} else {
@@ -196,7 +208,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		}
 	}
 	r.Writable = r.LogBackend != "" && len(r.SSHPorts) > 0 && c.family() != ""
-	if err != nil && len(r.Jails) > 0 {
+	if err != nil && len(r.Jails) > 0 && !canActivate {
 		r.Writable = false
 	}
 	if err != nil && strings.HasPrefix(r.Reason, "无法验证") {
@@ -204,10 +216,14 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 	}
 	if len(r.Jails) > 1 {
 		r.Writable = false
-		r.Reason = "存在多个 SSH jail，请在主机合并防护配置后再确认接管"
+		r.Reason = "检测到多个 SSH 登录防护配置，为避免重复封禁，请让服务器管理员合并配置后再交由面板管理"
 	}
 	if len(r.SSHPorts) == 0 {
 		r.Reason = "未识别到实际 SSH 端口"
+	}
+	if logErr != nil {
+		r.Writable = false
+		r.Reason = logErr.Error()
 	}
 	if _, e := c.read("/etc/fail2ban/filter.d/sshd.conf"); e != nil {
 		r.Writable = false
@@ -268,6 +284,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		r.Writable = false
 		r.Reason = "上次安全变更尚待确认或恢复"
 	}
+	r.CanActivate = canActivate && r.Writable
 	r.Revision = c.revision(s, raw, r.LogBackend, r.LogPath, r.SSHPorts, err == nil)
 	return r, nil
 }
@@ -351,6 +368,13 @@ func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequ
 		}
 		p.Changes = []string{fmt.Sprintf("SSH：%d 次 / %d 秒，封禁 %d 秒，模式 %s；白名单 %s", cfg.MaxRetry, cfg.FindTime, cfg.BanTime, cfg.Mode, strings.Join(cfg.IgnoreIPs, ", "))}
 		p.Warnings = []string{"仅防护实际 SSH TCP 端口；白名单不会自动使用浏览器或中央主机地址"}
+		if req.Operation == "adopt" {
+			p.Changes = append([]string{"将已有 SSH 登录防护（配置名称：" + req.Jail + "）交由面板管理，保留原配置文件，使用本次预览参数"}, p.Changes...)
+		}
+		if f.CanActivate {
+			p.Changes = append(p.Changes, "启动 Fail2ban 并设置开机启动，防护 SSH TCP 端口 "+joinPorts(f.SSHPorts))
+			p.Warnings = append(p.Warnings, "当前防护尚未运行；启用前会备份、校验配置，失败时恢复原配置和服务状态，不新建重复防护")
+		}
 	case "disable":
 		p.Changes = []string{"仅停用 " + f.ManagedJail + "；其他 jail 保持运行"}
 	case "detach":
@@ -564,6 +588,9 @@ func (c *Controller) applyFail2ban(ctx context.Context, r model.SecurityRequest,
 		if e = c.service(ctx, "start", "fail2ban"); e != nil {
 			return e
 		}
+		if e = c.waitFail2ban(ctx); e != nil {
+			return e
+		}
 	}
 	if enabled {
 		if _, e = c.exec(ctx, "fail2ban-client", "reload", "--restart", "--if-exists", s.Jail); e != nil {
@@ -606,6 +633,33 @@ func (c *Controller) applyFail2ban(ctx context.Context, r model.SecurityRequest,
 		delete(bans, s.Jail)
 	}
 	return c.resyncBans(ctx, bans)
+}
+func (c *Controller) fail2banStopped(ctx context.Context) bool {
+	if c.isSystemd() {
+		out, _ := c.exec(ctx, "systemctl", "is-active", "fail2ban.service")
+		return out == "inactive" || out == "failed"
+	}
+	if c.Lookup("rc-service") {
+		out, err := c.exec(ctx, "rc-service", "fail2ban", "status")
+		return err != nil && strings.Contains(out, "status: stopped")
+	}
+	return false
+}
+func (c *Controller) waitFail2ban(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var err error
+	for i := 0; i < 50; i++ {
+		if _, err = c.exec(ctx, "fail2ban-client", "ping"); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("SSH 防护服务启动后未就绪：%w", err)
 }
 func copyBans(in map[string][]string) map[string][]string {
 	out := map[string][]string{}

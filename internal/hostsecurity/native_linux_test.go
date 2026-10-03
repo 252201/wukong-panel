@@ -362,6 +362,7 @@ func TestNativeSecurity(t *testing.T) {
 			t.Fatal("third-party table lost", e)
 		}
 	}
+	nativeConfiguredSSHActivation(t, c, f.Zone)
 	// Test SSH protection using real failed authentications and actual network blocks.
 	if e = c.service(ctx, "start", "fail2ban"); e != nil {
 		t.Fatal(e)
@@ -821,4 +822,87 @@ func TestNativeAfterReboot(t *testing.T) {
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
 	t.Log("PID 1 restart recovered pending transaction and management connectivity")
+}
+
+// Exercise the package-default configured-but-stopped SSH protection without
+// requiring a beginner to start a daemon from a shell before panel adoption.
+func nativeConfiguredSSHActivation(t *testing.T, c *Controller, zone string) {
+	t.Helper()
+	ctx := context.Background()
+	if e := c.service(ctx, "stop", "fail2ban"); e != nil {
+		t.Fatal(e)
+	}
+	backend, path, e := c.logSource(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	originalPath := "/etc/fail2ban/jail.d/zzz-native-configured.local"
+	original := renderJail("sshd", defaults(), true, backend, path, "nftables-multiport[name=sshd,port=22,protocol=tcp]", []int{22})
+	if e = os.WriteFile(originalPath, original, 0600); e != nil {
+		t.Fatal(e)
+	}
+	defer os.Remove(originalPath)
+	beforeBoot := c.bootEnabled(ctx, "fail2ban")
+	fb, e := c.Fail2ban(ctx)
+	if e != nil || fb.Active || !fb.CanActivate || !fb.Writable || len(fb.Jails) != 1 || !fb.Jails[0].ConfiguredOnly {
+		t.Fatalf("configured stopped SSH %+v %v", fb, e)
+	}
+	cfg := defaults()
+	cfg.MaxRetry = 3
+	cfg.IgnoreIPs = []string{"10.203.0.3"}
+	req := model.SecurityRequest{Operation: "adopt", Jail: "sshd", Config: cfg, Zone: zone}
+	preview, e := c.Preview(ctx, "fail2ban", req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	req.Revision = preview.Revision
+	base := c.Run
+	injected := false
+	c.Run = func(ctx context.Context, n string, a []string, in string) (string, error) {
+		out, err := base(ctx, n, a, in)
+		args := strings.Join(a, " ")
+		if !injected && err == nil && (n == "systemctl" && args == "start fail2ban.service" || n == "rc-service" && args == "fail2ban start") {
+			injected = true
+			return out, errors.New("injected failure after actual Fail2ban startup")
+		}
+		return out, err
+	}
+	_, failure := c.Apply(ctx, "fail2ban", req)
+	c.Run = base
+	if !injected || failure == nil || c.pending() != nil || !c.fail2banStopped(ctx) || c.bootEnabled(ctx, "fail2ban") != beforeBoot {
+		t.Fatalf("failed activation did not restore stopped service: injected=%v failure=%v", injected, failure)
+	}
+	if _, e = os.Stat(jailPath); !errors.Is(e, os.ErrNotExist) {
+		t.Fatalf("failed activation left override: %v", e)
+	}
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "adopt", Jail: "sshd", Config: cfg, Zone: zone})
+	fb, e = c.Fail2ban(ctx)
+	if e != nil || !fb.Active || fb.ManagedJail != "sshd" || len(fb.Jails) != 1 || !fb.Jails[0].Managed || fb.Jails[0].ConfiguredOnly {
+		t.Fatalf("activated SSH %+v %v", fb, e)
+	}
+	current, e := os.ReadFile(originalPath)
+	if e != nil || string(current) != string(original) {
+		t.Fatal("changed original SSH configuration", e)
+	}
+	for i := 0; i < 3; i++ {
+		nativeConnect(t, "ssh-fail", "10.203.0.1:46961", "10.203.0.2")
+	}
+	waitNative(t, "adopted stopped SSH ban", func() bool {
+		v, _ := c.Fail2ban(ctx)
+		return len(v.Jails) == 1 && contains(v.Jails[0].Banned, "10.203.0.2")
+	})
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.2")
+	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.3")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
+	nativeConnect(t, "tcp", "10.203.0.1:46961", "10.203.0.2")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "disable"})
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "detach"})
+	if e = c.service(ctx, "stop", "fail2ban"); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Remove(originalPath); e != nil {
+		t.Fatal(e)
+	}
+	t.Log("configured inactive SSH: preview/adopt/start, startup failure rollback, original config retained, actual port 46961 ban/whitelist/unban passed")
 }

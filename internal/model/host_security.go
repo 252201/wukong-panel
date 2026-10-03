@@ -44,18 +44,20 @@ type SSHProtectionConfig struct {
 	IgnoreIPs []string `json:"ignoreIPs"`
 }
 type SSHJail struct {
-	Name        string              `json:"name"`
-	Managed     bool                `json:"managed"`
-	Failed      int                 `json:"failed"`
-	TotalFailed int                 `json:"totalFailed"`
-	Banned      []string            `json:"banned"`
-	TotalBanned int                 `json:"totalBanned"`
-	Config      SSHProtectionConfig `json:"config"`
+	Name           string              `json:"name"`
+	ConfiguredOnly bool                `json:"configuredOnly,omitempty"`
+	Managed        bool                `json:"managed"`
+	Failed         int                 `json:"failed"`
+	TotalFailed    int                 `json:"totalFailed"`
+	Banned         []string            `json:"banned"`
+	TotalBanned    int                 `json:"totalBanned"`
+	Config         SSHProtectionConfig `json:"config"`
 }
 type Fail2banState struct {
 	Installed   bool                `json:"installed"`
 	Active      bool                `json:"active"`
 	Writable    bool                `json:"writable"`
+	CanActivate bool                `json:"canActivate,omitempty"`
 	Reason      string              `json:"reason,omitempty"`
 	LogBackend  string              `json:"logBackend"`
 	LogPath     string              `json:"logPath,omitempty"`

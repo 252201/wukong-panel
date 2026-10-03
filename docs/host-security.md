@@ -17,11 +17,13 @@ UFW 对相同协议、端口范围、来源的允许/拒绝采用替换：预览
 
 ## SSH 防护
 
+页面以“SSH 登录防护”说明用途，jail 名称放在技术详情中。未运行时不把无法获取的失败及封禁统计显示为 0；已有防护的启用或接管统一从参数表单预览，不创建重复防护。
+
 默认 maxretry=5、findtime=600、bantime=3600、mode=normal。支持 normal/ddos/extra/aggressive，白名单支持 IPv4/IPv6/CIDR，保留回环，拒绝全地址白名单。白名单不会自动取浏览器、反代或中央主机的地址。
 
 优先可读 systemd journal（需要 python3-systemd）；否则检查实际 auth.log、secure 或 messages，采用 polling 文件后端。使用发行版 `sshd` 过滤器，固定兼容 sshd-session 及 BusyBox syslog 前缀，通过独立 jail 参数覆盖，不修改默认过滤器。检测到真实失败日志时额外检查过滤器能否匹配；日志、依赖、过滤器或运行配置异常会明确提示。只防护实际 SSH TCP 端口。
 
-未配置 SSH jail 时创建 `wukong-sshd`；已有正在运行的 SSH jail 先只读展示，预览接管后沿用原名称。已配置但停用、多个 SSH jail 或多个 firewalld 区域需在主机核对，避免重复防护。Alpine 包可能默认启用 sshd 与 sshd-ddos，页面会如实提示。覆盖文件为 `/etc/fail2ban/jail.d/zzzz-wukong-ssh.local`，停用只关闭悟空管理的 jail，解除接管删除该覆盖并恢复原配置。
+未配置 SSH jail 时创建 `wukong-sshd`；已有正在运行的 SSH jail 先只读展示，预览接管后沿用原名称。单个默认 `sshd` 配置且服务明确停用时，在日志、过滤器、权限和后端校验通过后，可从页面“预览并启用现有防护”：沿用 `sshd` 名称，以独立覆盖应用所选参数，先备份、验证再启动服务并设置开机启动；失败恢复原配置及停用状态。存在其他启用配置、自定义名称、多个 SSH jail、服务状态不明或多个 firewalld 区域时仍需管理员核对，避免改变无关防护。Alpine 包可能默认启用 sshd 与 sshd-ddos，页面会如实提示。覆盖文件为 `/etc/fail2ban/jail.d/zzzz-wukong-ssh.local`，停用只关闭悟空管理的 jail，解除接管删除该覆盖并恢复原配置。
 
 UFW 使用发行版 `iptables-multiport`（官方 UFW action 默认会封锁所有端口）；firewalld 使用 `firewallcmd-rich-rules` 和实际单个 SSH 区域，多个 SSH 端口分别建立 action；nftables 使用 `nftables-multiport`。状态校验实际动作、过滤表达式、日志源、白名单及内核中的封禁规则。关闭会使 SSH 封禁失效的防火墙时，要求先停用相关防护。
 
