@@ -457,6 +457,11 @@ func richRule(r model.SecurityRule) string {
 	return fmt.Sprintf(`rule family="%s" source address="%s" port port="%s" protocol="%s" %s`, family, r.Source, portSpec(r, "-"), r.Protocol, action)
 }
 func parseRich(s, zone string) (model.SecurityRule, bool) {
+	for _, protocol := range []string{"icmp", "ipv6-icmp"} {
+		if strings.TrimSpace(s) == `rule protocol value="`+protocol+`" accept` {
+			return model.SecurityRule{Action: "allow", Protocol: protocol, Source: "any", Zone: zone, Protected: true, Description: s}, true
+		}
+	}
 	any := regexp.MustCompile(`^rule port port="([0-9]+(?:-[0-9]+)?)" protocol="(tcp|udp)" (accept|drop)$`)
 	if m := any.FindStringSubmatch(strings.TrimSpace(s)); m != nil {
 		a, b, p, ok := parsedPort(m[1] + "/" + m[2])
@@ -1134,6 +1139,30 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 			}
 			if !f.Active {
 				return errors.New("请先启动 firewalld 后重新预览")
+			}
+			// DROP zones do not inherit the default target's ICMP allowance.
+			// Preserve PMTU discovery, IPv6 control traffic and ping explicitly.
+			for _, protocol := range []string{"icmp", "ipv6-icmp"} {
+				for _, permanent := range []bool{false, true} {
+					args := []string{"--zone=" + f.Zone, `--add-rich-rule=rule protocol value="` + protocol + `" accept`}
+					undo := []string{"--zone=" + f.Zone, `--remove-rich-rule=rule protocol value="` + protocol + `" accept`}
+					if permanent {
+						args = append(args, "--permanent")
+						undo = append(undo, "--permanent")
+					}
+					query := append([]string{}, args...)
+					query[1] = strings.Replace(query[1], "--add-rich-rule=", "--query-rich-rule=", 1)
+					if _, e = c.exec(ctx, "firewall-cmd", query...); e == nil {
+						continue
+					}
+					j.Undo = append(j.Undo, command{Name: "firewall-cmd", Args: undo})
+					if e = c.save("pending.json", j); e != nil {
+						return e
+					}
+					if _, e = c.exec(ctx, "firewall-cmd", args...); e != nil {
+						return e
+					}
+				}
 			}
 			if f.Policy != "deny" {
 				runtime, e := c.fireRuntime(ctx)

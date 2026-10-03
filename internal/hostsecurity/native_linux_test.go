@@ -6,6 +6,9 @@ import (
 	"context"
 	"github.com/252201/wukong-panel/internal/model"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 	"net"
 	"os"
 	"os/exec"
@@ -44,6 +47,70 @@ func TestSecurityNetworkChild(t *testing.T) {
 	}
 	addr := os.Getenv("WUKONG_SECURITY_ADDR")
 	source := os.Getenv("WUKONG_SECURITY_SOURCE")
+	if op == "icmp4" || op == "icmp6" {
+		network, bind, protocol := "ip4:icmp", "0.0.0.0", 1
+		var requestType, replyType icmp.Type = ipv4.ICMPTypeEcho, ipv4.ICMPTypeEchoReply
+		if op == "icmp6" {
+			network, bind, protocol = "ip6:ipv6-icmp", "::", 58
+			requestType, replyType = ipv6.ICMPTypeEchoRequest, ipv6.ICMPTypeEchoReply
+		}
+		conn, e := icmp.ListenPacket(network, bind)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer conn.Close()
+		id := os.Getpid() & 0xffff
+		msg := icmp.Message{Type: requestType, Body: &icmp.Echo{ID: id, Seq: 1, Data: []byte("wukong-network-test")}}
+		body, e := msg.Marshal(nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = conn.WriteTo(body, &net.IPAddr{IP: net.ParseIP(addr)}); e != nil {
+			t.Fatal(e)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 1500)
+		for {
+			n, _, e := conn.ReadFrom(buf)
+			if e != nil {
+				t.Fatal(e)
+			}
+			reply, e := icmp.ParseMessage(protocol, buf[:n])
+			if e != nil {
+				t.Fatal(e)
+			}
+			if echo, ok := reply.Body.(*icmp.Echo); ok && reply.Type == replyType && echo.ID == id && echo.Seq == 1 {
+				return
+			}
+		}
+	}
+	if op == "udp" || op == "udp-blocked" {
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		if source != "" {
+			dialer.LocalAddr = &net.UDPAddr{IP: net.ParseIP(source)}
+		}
+		conn, e := dialer.Dial("udp", addr)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, e = conn.Write([]byte("wukong-udp-test")); e != nil {
+			t.Fatal(e)
+		}
+		buf := make([]byte, 100)
+		n, e := conn.Read(buf)
+		if op == "udp-blocked" {
+			if e == nil {
+				t.Fatal("UDP deny allowed a reply")
+			}
+			return
+		}
+		if e != nil || string(buf[:n]) != "wukong-udp-test" {
+			t.Fatalf("UDP reply: %q %v", buf[:n], e)
+		}
+		return
+	}
 	dialer := net.Dialer{Timeout: 2 * time.Second}
 	if source != "" {
 		dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(source)}
@@ -172,6 +239,33 @@ func TestNativeSecurity(t *testing.T) {
 			t.Fatal(e)
 		}
 	case "firewalld":
+		// First enable from a stopped daemon must return to stopped on timeout.
+		if e := c.service(ctx, "stop", "firewalld"); e != nil {
+			t.Fatal(e)
+		}
+		r := model.SecurityRequest{Operation: "enable"}
+		p, e := c.Preview(ctx, "firewall", r)
+		if e != nil {
+			t.Fatal(e)
+		}
+		r.Revision = p.Revision
+		v, e := c.Apply(ctx, "firewall", r)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if v.Transaction == nil || v.Transaction.Status != "awaiting-confirmation" {
+			t.Fatal(v)
+		}
+		c.Now = func() time.Time { return v.Transaction.Deadline.Add(time.Second) }
+		if e := c.Recover(ctx); e != nil {
+			t.Fatal(e)
+		}
+		c.Now = time.Now
+		f, e := c.Firewall(ctx, "")
+		if e != nil || f.Active {
+			t.Fatalf("first-enable timeout left daemon active: %+v %v", f, e)
+		}
+		t.Log("firewalld first-enable timeout restores original stopped service")
 		if e := c.service(ctx, "start", "firewalld"); e != nil {
 			t.Fatal(e)
 		}
@@ -216,6 +310,8 @@ func TestNativeSecurity(t *testing.T) {
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	nativeConnect(t, "tcp", "10.203.0.1:9443", "")
 	nativeConnect(t, "tcp", "[fd42:203::1]:9443", "")
+	nativeConnect(t, "icmp4", "10.203.0.1", "")
+	nativeConnect(t, "icmp6", "fd42:203::1", "")
 	listener, e := net.Listen("tcp", ":22222")
 	if e != nil {
 		t.Fatal(e)
@@ -301,7 +397,29 @@ func TestNativeSecurity(t *testing.T) {
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.3")
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	// A panel-triggered firewall mutation restores all active jail bans after any reload.
+	udp, e := net.ListenPacket("udp", ":23456")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer udp.Close()
+	go func() {
+		buf := make([]byte, 100)
+		for {
+			n, addr, e := udp.ReadFrom(buf)
+			if e != nil {
+				return
+			}
+			_, _ = udp.WriteTo(buf[:n], addr)
+		}
+	}()
+	nativeConnect(t, "udp-blocked", "10.203.0.1:23456", "")
 	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "add", Zone: f.Zone, Rule: model.SecurityRule{Action: "allow", Protocol: "udp", PortFrom: 23456, Source: "any"}})
+	nativeConnect(t, "udp", "10.203.0.1:23456", "")
+	nativeConnect(t, "udp", "[fd42:203::1]:23456", "")
+	nativeApply(t, c, "firewall", model.SecurityRequest{Operation: "add", Zone: f.Zone, Rule: model.SecurityRule{Action: "deny", Protocol: "udp", PortFrom: 23456, Source: "10.203.0.2/32"}})
+	nativeConnect(t, "udp-blocked", "10.203.0.1:23456", "10.203.0.2")
+	nativeConnect(t, "udp", "10.203.0.1:23456", "10.203.0.4")
+	nativeConnect(t, "udp", "[fd42:203::1]:23456", "")
 	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.2")

@@ -285,7 +285,15 @@ func normalizeRule(r model.SecurityRule) (model.SecurityRule, error) {
 		if p.Bits() == 0 {
 			return r, errors.New("请使用 any 表示任意来源")
 		}
-		r.Source = p.Masked().String()
+		if p.Addr().Is4In6() {
+			return r, errors.New("请使用普通 IPv4 或 IPv6 CIDR")
+		}
+		if p.Bits() == p.Addr().BitLen() {
+			// Native tools canonicalize /32 and /128 to a single address.
+			r.Source = p.Addr().String()
+		} else {
+			r.Source = p.Masked().String()
+		}
 	} else {
 		return r, errors.New("来源必须为 IP 或 CIDR")
 	}

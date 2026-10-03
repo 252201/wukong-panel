@@ -36,6 +36,7 @@ server {
 }
 CONFIG
 if [ -d /run/systemd/system ]; then
+ systemctl stop fail2ban.service 2>/dev/null || true
  if command -v firewall-cmd >/dev/null; then systemctl start firewalld.service; sleep 1; fi
  systemctl stop firewalld.service 2>/dev/null || true
  # The disposable fixture may stop firewalld while PID 1 is still booting.
@@ -54,6 +55,7 @@ UNIT
  systemctl start wukong-test-sshd.service
  systemctl restart nginx.service
 else
+ rc-service fail2ban stop 2>/dev/null || true
  mkdir -p /run/openrc
  touch /run/openrc/softlevel
  rc-service syslog start

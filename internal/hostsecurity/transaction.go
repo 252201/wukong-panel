@@ -325,7 +325,15 @@ func (c *Controller) rollback(ctx context.Context, j *journal) error {
 				return e
 			}
 		}
-		j.Undo = nil
+		// The runtime snapshot replaces individual rule undo operations, but
+		// the original service state must still be restored on first enable.
+		services := []command{}
+		for _, op := range j.Undo {
+			if op.Name == "service-start-firewalld" || op.Name == "service-stop-firewalld" {
+				services = append(services, op)
+			}
+		}
+		j.Undo = services
 	}
 	for i := len(j.Undo) - 1; i >= 0; i-- {
 		op := j.Undo[i]

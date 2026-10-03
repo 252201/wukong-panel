@@ -439,3 +439,48 @@ func TestFailedFirstInstallRollsBackWithoutMissingNativeCommands(t *testing.T) {
 		t.Fatal("temporary package startup guard left behind", e)
 	}
 }
+
+func TestFirewalldICMPGuardsAreProtected(t *testing.T) {
+	for _, protocol := range []string{"icmp", "ipv6-icmp"} {
+		r, ok := parseRich(`rule protocol value="`+protocol+`" accept`, "public")
+		if !ok || !r.Protected || r.Adoptable || r.Protocol != protocol {
+			t.Fatalf("unsafe ICMP guard: %+v", r)
+		}
+	}
+	if _, ok := parseRich(`rule protocol value="tcp" accept`, "public"); ok {
+		t.Fatal("unrestricted external protocol rule recognized as guard")
+	}
+}
+
+func TestFirewalldRuntimeRollbackRestoresStoppedService(t *testing.T) {
+	c := testController(t)
+	c.Lookup = func(name string) bool { return name == "systemctl" }
+	if e := os.MkdirAll(c.path("/run/systemd/system"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	calls := []string{}
+	c.Run = func(_ context.Context, name string, args []string, _ string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return "", nil
+	}
+	j := journal{Kind: "firewall", Backend: "firewalld", Transaction: model.SecurityTransaction{ID: token()}, Runtime: []command{{Name: "firewall-cmd", Args: []string{"--zone=public", "--add-port=5566/tcp"}}}, Undo: []command{{Name: "service-stop-firewalld"}, {Name: "firewall-cmd", Args: []string{"--zone=public", "--remove-port=8080/tcp"}}}}
+	if e := c.rollback(context.Background(), &j); e != nil {
+		t.Fatal(e)
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "systemctl stop firewalld.service") || strings.Contains(joined, "--remove-port=") {
+		t.Fatalf("runtime backup failed to restore original daemon state: %s", joined)
+	}
+}
+
+func TestSingleHostCIDRMatchesNativeAddress(t *testing.T) {
+	for source, want := range map[string]string{"192.0.2.8/32": "192.0.2.8", "2001:db8::8/128": "2001:db8::8"} {
+		r, e := normalizeRule(model.SecurityRule{Action: "deny", Protocol: "udp", PortFrom: 23456, Source: source})
+		if e != nil || r.Source != want {
+			t.Fatalf("CIDR canonicalization: %+v %v", r, e)
+		}
+	}
+	if _, e := normalizeRule(model.SecurityRule{Action: "allow", Protocol: "tcp", PortFrom: 123, Source: "::ffff:192.0.2.8/120"}); e == nil {
+		t.Fatal("ambiguous mapped CIDR accepted")
+	}
+}
