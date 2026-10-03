@@ -927,7 +927,7 @@ func nativeFail2banReset(t *testing.T, c *Controller) {
 	cfg := defaults()
 	body := []byte{}
 	for _, name := range []string{"sshd", "sshd-ddos", "unrelated"} {
-		body = append(body, renderJail(name, cfg, true, "polling", logPath, "nftables-multiport", []int{46961})...)
+		body = append(body, renderJail(name, cfg, true, "polling", logPath, `nftables-multiport[name=`+name+`, port="46961", protocol=tcp]`, []int{46961})...)
 	}
 	if err := atomic(customPath, body, 0600); err != nil {
 		t.Fatal(err)
@@ -941,6 +941,7 @@ func nativeFail2banReset(t *testing.T, c *Controller) {
 	if _, err := c.exec(ctx, "fail2ban-client", "set", "sshd", "banip", "10.203.0.4"); err != nil {
 		t.Fatal(err)
 	}
+	waitNative(t, "reset fixture ban enforcement", func() bool { return c.enforcement(ctx, "sshd", []string{"10.203.0.4"}, []int{46961}) == nil })
 	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.4")
 	beforeBoot := c.bootEnabled(ctx, "fail2ban")
 	req := model.SecurityRequest{Operation: "reinstall", Confirmation: resetConfirmation}
