@@ -54,6 +54,8 @@ type SSHJail struct {
 	Config         SSHProtectionConfig `json:"config"`
 }
 type Fail2banState struct {
+	CanReset    bool                `json:"canReset,omitempty"`
+	ResetReason string              `json:"resetReason,omitempty"`
 	Installed   bool                `json:"installed"`
 	Active      bool                `json:"active"`
 	Writable    bool                `json:"writable"`
@@ -69,6 +71,7 @@ type Fail2banState struct {
 	CheckedAt   time.Time           `json:"checkedAt"`
 }
 type SecurityRequest struct {
+	Confirmation  string              `json:"confirmation,omitempty"`
 	Operation     string              `json:"operation"`
 	Revision      string              `json:"revision,omitempty"`
 	Rule          SecurityRule        `json:"rule"`

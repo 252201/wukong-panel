@@ -79,3 +79,16 @@ sh scripts/test-host-security-native.sh alpine:3.21
 ```
 
 覆盖 TCP/UDP 真实收发和拒绝、ICMP/IPv6 控制通信、原生允许/拒绝与 IPv4/IPv6、第三方规则、持久化、真实 SSH 失败与成功、白名单、SSH 专用封禁、解封、重载后封禁、接管及解除接管、其他 jail 保留、Agent 被杀后的独立恢复和 PID 1 重启后的恢复。systemd 发行版同时验证 journal 和真实 sshd 文件日志，Alpine 验证文件日志。UFW 额外覆盖 IPv4/IPv6 同条件规则互换、CIDR/UDP 范围、替换中途失败，以及防火墙保持启用时完整等待 90 秒、由独立恢复服务还原实际连通性并保留 SSH 封禁。其他超时用例可缩短测试 journal 的期限，重启测试保留完整 90 秒窗口。第二个移除所有 capabilities 的容器验证不可用诊断。Debian 12 额外验证 Root Agent 的真实包安装保持保护停用；Debian 12/13、Ubuntu、Rocky、AlmaLinux、Alpine 纳入 PR CI。
+
+
+## 清理并重新安装 Fail2ban
+
+安全页的“修复与重新安装”提供独立预览。用于多个配置冲突或损坏的发行版软件包安装；不受普通 SSH 接管只读限制。预览显示目标主机、运行配置、清理目录及影响。应用必须使用相同 revision 并输入 `RESET FAIL2BAN`；旧远端 Agent 不具备 `security.fail2ban.reset` 能力时拒绝操作，轻量探针、离线及过期状态仍禁止写入。
+
+- 先建立独立系统恢复任务，保存并校验备份。停止 Fail2ban 后重新核对配置，保存已完成数据库写入的整个 `/var/lib/fail2ban`，备份含文件内容、SHA-256、权限及空目录。备份以 root 权限保留在 Agent 的 `host-security/backup-<transaction>.json`。
+- 清空固定的 `/etc/fail2ban`、`/var/lib/fail2ban`，使用发行版包管理器重新安装 Fail2ban 软件包；删除所有自定义 jail、白名单、过滤器、动作和历史封禁数据库，包含非 SSH 防护。Fail2ban 服务停止时解除它管理的当前封禁。主机防火墙的其他规则、SSH 服务、面板和节点不被重置；SSH 原始登录日志及 Fail2ban 诊断日志保留。
+- 发行版默认文件恢复后，以独立 local 覆盖停用所有发行版 jail，验证配置并保持服务和开机启动停用。用户检查实际 SSH 端口、参数、日志及后端后，可从常规启用流程新建悟空防护。
+- 安装或验证失败、Agent 崩溃或主机重启时，独立恢复任务恢复原配置、数据库、管理归属、服务及开机状态，重新同步原来的当前封禁。软件包升级不自动降级；恢复失败保留 pending journal 并重试，显示具体原因。
+- 安装由后台任务执行，远端沿用串行命令与幂等回执，重装允许最长 9 分钟执行。请求不接受任意路径、软件包、shell 或动作。拒绝符号链接、特殊文件、子目录挂载、超过 64 MiB/4096 项的备份、自定义服务覆盖、外部数据库/运行路径、来源不明的软件包及缺少 `CAP_NET_ADMIN` 的容器。
+
+本功能属于后续开发；未在生产 VPS 执行清理或重新安装。
