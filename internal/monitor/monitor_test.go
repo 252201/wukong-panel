@@ -133,6 +133,39 @@ func TestProcessConfigPath(t *testing.T) {
 	}
 }
 
+func TestProcessSnapshotLabelsPythonSecurityService(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux procfs")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("requires python3")
+	}
+	script := filepath.Join(t.TempDir(), "firewalld")
+	if err = os.WriteFile(script, []byte("import time\ntime.sleep(30)\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(python, "-Es", script)
+	if err = command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = command.Process.Kill(); _ = command.Wait() }()
+	collector := &Collector{}
+	for attempt := 0; attempt < 20; attempt++ {
+		items, _ := collector.processSnapshot(1, nil)
+		for _, item := range items {
+			if item.PID == command.Process.Pid && item.Service == "firewalld" {
+				if !pythonProcess(item.Name) {
+					t.Fatalf("raw interpreter name was replaced: %#v", item)
+				}
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("Python security process was not labeled in the collected snapshot")
+}
+
 func TestProcessSnapshotMapsSingBoxNodeNames(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("requires Linux procfs")

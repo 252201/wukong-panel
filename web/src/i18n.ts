@@ -3,6 +3,17 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  '登录防护服务 · Fail2ban': 'Login protection service · Fail2ban',
+  '登录防护管理工具 · Fail2ban': 'Login protection management tool · Fail2ban',
+  '防火墙服务 · firewalld': 'Firewall service · firewalld',
+  '防火墙管理工具 · firewalld': 'Firewall management tool · firewalld',
+  '防火墙规则管理工具 · UFW': 'Firewall rule management tool · UFW',
+  '防火墙规则管理工具 · nftables': 'Firewall rule management tool · nftables',
+  '防火墙规则管理工具 · iptables': 'Firewall rule management tool · iptables',
+  '防火墙规则管理工具 · ip6tables': 'Firewall rule management tool · ip6tables',
+  '悟空安全自动恢复': 'Wukong security recovery',
+  '悟空防火墙规则加载': 'Wukong firewall rule loading',
+  'UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。': 'UFW / nftables usually have no persistent process. Check the Security page for protection status.',
   '。': '.',
   '悟': 'W',
   '舰': 'F',
