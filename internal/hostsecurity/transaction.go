@@ -35,6 +35,9 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 	if kind != "firewall" && kind != "fail2ban" {
 		return result, errors.New("unknown security resource")
 	}
+	if kind == "fail2ban" && r.Operation == "reinstall" {
+		return c.applyReset(ctx, r)
+	}
 	var p model.SecurityPreview
 	if kind == "firewall" {
 		p, e = c.firewallPreview(ctx, r)
@@ -297,6 +300,9 @@ func (c *Controller) rollback(ctx context.Context, j *journal) error {
 	}
 	if j.Kind != "firewall" && j.Kind != "fail2ban" {
 		return errors.New("invalid journal kind")
+	}
+	if j.Reset {
+		return c.rollbackReset(ctx, j)
 	}
 	for _, f := range j.Files {
 		if f.Exists {

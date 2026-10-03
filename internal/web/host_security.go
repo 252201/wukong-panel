@@ -64,8 +64,8 @@ func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request, session st
 		return
 	}
 	_ = s.store.Audit(session.Username, "security."+kind+"."+req.Operation, "local", "requested through web")
-	if req.Operation == "install" {
-		job, e := s.store.CreateJob("security."+kind+".install", "local")
+	if req.Operation == "install" || kind == "fail2ban" && req.Operation == "reinstall" {
+		job, e := s.store.CreateJob("security."+kind+"."+req.Operation, "local")
 		if e != nil {
 			writeError(w, 500, e.Error())
 			return
@@ -73,7 +73,7 @@ func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request, session st
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 			defer cancel()
-			_ = s.store.UpdateJob(job.ID, "running", 10, "正在安装安全组件", "")
+			_ = s.store.UpdateJob(job.ID, "running", 10, "正在备份、清理或安装安全组件", "")
 			_, e := agent.SecurityApply(ctx, kind, req)
 			if e != nil {
 				_ = s.store.UpdateJob(job.ID, "failed", 100, "安装失败", e.Error())

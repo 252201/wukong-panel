@@ -111,7 +111,7 @@ func TestSecurityFleetCommandMapping(t *testing.T) {
 	for _, test := range []struct {
 		method, path, body, kind string
 		async                    bool
-	}{{"GET", "system/firewall", "", "security.firewall.status", false}, {"POST", "system/firewall/preview", `{"operation":"enable"}`, "security.firewall.preview", false}, {"POST", "system/fail2ban/apply", `{"operation":"install"}`, "security.fail2ban.apply", true}, {"POST", "system/security-transactions/abc/confirm", "{}", "security.transaction.confirm", false}} {
+	}{{"GET", "system/firewall", "", "security.firewall.status", false}, {"POST", "system/firewall/preview", `{"operation":"enable"}`, "security.firewall.preview", false}, {"POST", "system/fail2ban/apply", `{"operation":"install"}`, "security.fail2ban.apply", true}, {"POST", "system/fail2ban/apply", `{"operation":"reinstall","confirmation":"RESET FAIL2BAN"}`, "security.fail2ban.apply", true}, {"POST", "system/security-transactions/abc/confirm", "{}", "security.transaction.confirm", false}} {
 		req := httptest.NewRequest(test.method, "/?zone=public", strings.NewReader(test.body))
 		kind, payload, async, e := fleetCommandForRequest(req, test.path)
 		if e != nil || kind != test.kind || async != test.async || !json.Valid(payload) {
@@ -122,6 +122,46 @@ func TestSecurityFleetCommandMapping(t *testing.T) {
 		req := httptest.NewRequest("POST", "/", strings.NewReader(`{}`))
 		if _, _, _, e := fleetCommandForRequest(req, path); e == nil {
 			t.Fatal("arbitrary security command accepted")
+		}
+	}
+}
+
+func TestFleetFail2banResetRequiresIndependentCapability(t *testing.T) {
+	s, db := fleetWebTestServer(t)
+	for _, test := range []struct {
+		name string
+		caps []string
+		want int
+	}{
+		{"old-security", []string{"security.fail2ban"}, 409},
+		{"new-reset", []string{"security.fail2ban", "security.fail2ban.reset"}, 202},
+		{"reset-probe", []string{"probe", "security.fail2ban", "security.fail2ban.reset"}, 409},
+	} {
+		token := test.name + "-token"
+		if err := db.CreateFleetEnrollmentToken(token, time.Now().Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		host := model.FleetHost{ID: test.name, Name: test.name, Capabilities: test.caps, ProtocolVersion: model.FleetProtocolVersion}
+		if err := db.ConsumeFleetEnrollmentToken(token, host, "credential-"+test.name); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveFleetHeartbeat(context.Background(), host.ID, model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, Capabilities: test.caps, Snapshot: model.FleetSnapshot{Full: true}}); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest("POST", "/", strings.NewReader(`{"operation":"reinstall","revision":"r","confirmation":"RESET FAIL2BAN"}`))
+		req.SetPathValue("hostId", host.ID)
+		req.SetPathValue("resource", "system/fail2ban/apply")
+		rec := httptest.NewRecorder()
+		s.fleetHostGateway(rec, req, store.Session{Username: "admin"})
+		if rec.Code != test.want {
+			t.Fatalf("%s: %d %s", test.name, rec.Code, rec.Body.String())
+		}
+		var count int
+		if err := db.DB.QueryRow("SELECT count(*) FROM fleet_commands WHERE host_id=?", host.ID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if test.want != 202 && count != 0 || test.want == 202 && count != 1 {
+			t.Fatalf("%s commands=%d", test.name, count)
 		}
 	}
 }

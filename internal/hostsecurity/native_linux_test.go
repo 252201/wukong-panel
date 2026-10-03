@@ -363,6 +363,7 @@ func TestNativeSecurity(t *testing.T) {
 		}
 	}
 	nativeConfiguredSSHActivation(t, c, f.Zone)
+	nativeFail2banReset(t, c)
 	// Test SSH protection using real failed authentications and actual network blocks.
 	if e = c.service(ctx, "start", "fail2ban"); e != nil {
 		t.Fatal(e)
@@ -911,4 +912,92 @@ func nativeConfiguredSSHActivation(t *testing.T, c *Controller, zone string) {
 		t.Fatal(e)
 	}
 	t.Log("configured inactive SSH: preview/adopt/start, startup failure rollback, original config retained, actual port 46961 ban/whitelist/unban passed")
+}
+
+func nativeFail2banReset(t *testing.T, c *Controller) {
+	t.Helper()
+	ctx := context.Background()
+	// Two conflicting SSH configs and an unrelated service protection.
+	customPath := "/etc/fail2ban/jail.d/zzzz-native-reset.local"
+	logPath := "/var/log/native-fail2ban-reset.log"
+	if err := os.WriteFile(logPath, []byte("fixture only\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(logPath)
+	cfg := defaults()
+	body := []byte{}
+	for _, name := range []string{"sshd", "sshd-ddos", "unrelated"} {
+		body = append(body, renderJail(name, cfg, true, "polling", logPath, "nftables-multiport", []int{46961})...)
+	}
+	if err := atomic(customPath, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.service(ctx, "start", "fail2ban"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.waitFail2ban(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.exec(ctx, "fail2ban-client", "set", "sshd", "banip", "10.203.0.4"); err != nil {
+		t.Fatal(err)
+	}
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.4")
+	beforeBoot := c.bootEnabled(ctx, "fail2ban")
+	req := model.SecurityRequest{Operation: "reinstall", Confirmation: resetConfirmation}
+	preview, err := c.Preview(ctx, "fail2ban", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Revision = preview.Revision
+	base := c.Run
+	injected := false
+	c.Run = func(ctx context.Context, n string, a []string, in string) (string, error) {
+		args := strings.Join(a, " ")
+		if n == "apt-get" && strings.Contains(args, "--reinstall") || n == "dnf" && strings.HasPrefix(args, "reinstall") || n == "apk" && strings.HasPrefix(args, "fix --reinstall") {
+			injected = true
+			_ = atomic("/etc/fail2ban/partial.local", []byte("partial"), 0600)
+			return "", errors.New("injected package reinstall failure")
+		}
+		return base(ctx, n, a, in)
+	}
+	_, failure := c.Apply(ctx, "fail2ban", req)
+	c.Run = base
+	if !injected || failure == nil || c.pending() != nil || c.fail2banStopped(ctx) || c.bootEnabled(ctx, "fail2ban") != beforeBoot {
+		t.Fatalf("reset failure recovery injected=%v error=%v", injected, failure)
+	}
+	current, err := os.ReadFile(customPath)
+	if err != nil || string(current) != string(body) {
+		t.Fatal("reset did not restore complete config", err)
+	}
+	if _, err = os.Stat("/etc/fail2ban/partial.local"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("partial install survived rollback")
+	}
+	names, err := c.jailNames(ctx)
+	if err != nil || !contains(names, "unrelated") || !contains(names, "sshd-ddos") {
+		t.Fatal("other jails not restored", err)
+	}
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.4")
+	// Stop-triggered unban/checkpoint is captured; original live bans are restored
+	// on failure, while a successful reset removes all of them and the database.
+	nativeApply(t, c, "fail2ban", req)
+	fb, err := c.Fail2ban(ctx)
+	if err != nil || fb.Active || fb.ManagedJail != "" || len(fb.Jails) != 0 || !c.fail2banStopped(ctx) || c.bootEnabled(ctx, "fail2ban") {
+		t.Fatalf("dirty reset state %+v %v", fb, err)
+	}
+	if _, err = os.Stat(customPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("conflicting configs not cleared")
+	}
+	if _, err = os.Stat("/var/lib/fail2ban/fail2ban.sqlite3"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("old ban database remains")
+	}
+	if _, err = os.Stat("/etc/fail2ban/filter.d/sshd.conf"); err != nil {
+		t.Fatal("distribution filter missing", err)
+	}
+	if _, err = os.Stat("/var/log/fail2ban.log"); err != nil {
+		t.Fatal("diagnostic log removed", err)
+	}
+	nativeConnect(t, "tcp", "10.203.0.1:46961", "10.203.0.4")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.4")
+	nativeConnect(t, "tcp", "10.203.0.1:22222", "")
+	t.Log("Fail2ban reset: active conflicting SSH and unrelated jails, actual ban, package failure full rollback, real reinstall, clean database/configs, disabled protection, SSH/panel/firewall preserved")
 }
