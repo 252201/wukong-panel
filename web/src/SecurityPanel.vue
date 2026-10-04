@@ -5,6 +5,7 @@ import { countryFlagURL } from './countryFlags'
 import BanDurationInput from './BanDurationInput.vue'
 import { translateText } from './i18n'
 import { securityStatusCache } from './securityStatus'
+import { afterFirewallRead } from './securityRefresh'
 import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange } from './securityRules'
 const props = defineProps<{hostId: string; hostName: string; online: boolean; compatible: boolean; capabilities: string[]; language: string}>()
 const client = hostSecurityAPI(props.hostId)
@@ -131,7 +132,8 @@ function refresh(skip: ('firewall'|'fail2ban')[] = []): Promise<void> {
   fwVerified.value = true
   if (fw.zone) {zone.value = fw.zone;refreshZone = fw.zone}
  }).catch(e => {if (current()) {fwVerified.value = false;fwError.value = e instanceof Error ? e.message : String(e)}}).finally(() => {if (current()) fwLoading.value = false}) : Promise.resolve()
- const fbTask = fbLoading.value ? securityStatusCache.refresh(props.hostId,'fail2ban','',() => client.fail2ban()).then(fb => {
+ const fbTask = fbLoading.value ? afterFirewallRead(fwTask, () => securityStatusCache.refresh(props.hostId,'fail2ban','',() => client.fail2ban()), current).then(fb => {
+  if (!fb) return
   if (!current()) return
   fail2ban.value = fb
   fbVerified.value = true
@@ -141,7 +143,8 @@ function refresh(skip: ('firewall'|'fail2ban')[] = []): Promise<void> {
    Object.assign(config,existing);whitelist.value = existing.ignoreIPs.join('\n');hydrated = true
   }
  }).catch(e => {if (current()) {fbVerified.value = false;fbError.value = e instanceof Error ? e.message : String(e)}}).finally(() => {if (current()) fbLoading.value = false}) : Promise.resolve()
- // Each resource publishes immediately; the barrier only tracks refresh completion.
+ // Each resource publishes immediately. Start SSH after the firewall read (or
+ // a bounded wait) to avoid CPU contention; either resource can still fail alone.
  refreshTask = Promise.all([fwTask,fbTask]).then(async () => {
   if (current() && job.value) {
    const updated = await client.job(job.value.id)

@@ -428,7 +428,7 @@ async function switchFleetHost(hostId: string) {
   residentialFormHydrated.value = false
   socksFormHydrated.value = false
   if (page.value === 'fleet') navigateTo('overview')
-  await refreshAll()
+  if (page.value !== 'security') await refreshAll()
 }
 
 async function saveFleetController(rotateGlobalToken = false) {
@@ -701,6 +701,8 @@ watch(page, (next, previous) => {
   }
   if (previous === 'settings') {
     settingsDraftDirty.value = false
+  }
+  if (next !== 'security' && next !== 'fleet' && (previous === 'settings' || previous === 'security')) {
     refreshAll().catch(() => {})
   }
 }, { flush: 'sync' })
@@ -930,7 +932,7 @@ async function copy(value: string) { await navigator.clipboard.writeText(value);
 let timer = 0
 let stopObservingTheme = () => {}
 let stopLocalizing = () => {}
-onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet') refreshAll().catch(() => {}) } }, 10_000) })
+onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}) } }, 10_000) })
 onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
