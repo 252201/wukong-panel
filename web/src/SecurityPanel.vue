@@ -268,7 +268,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
     <b v-if="fail2ban?.canActivate">{{t('已安装，SSH 登录防护尚未启用','Installed; SSH login protection is not enabled')}}</b>
     <b v-else-if="externalSSH && fail2ban?.active">{{t('发现已有 SSH 登录防护','Existing SSH login protection detected')}}</b>
     <b v-else-if="fail2ban?.installed && !fail2ban.active">{{t('SSH 登录防护尚未运行','SSH login protection is not running')}}</b>
-    <p>{{t('此功能会检测 SSH 登录失败，达到你设定的次数后，临时阻止该 IP 继续连接 SSH。','This feature detects failed SSH logins and temporarily blocks an IP from SSH after your chosen failure limit.')}}</p>
+    <p>{{t('此功能会检测 SSH 登录失败，达到你设定的次数后，阻止该 IP 继续连接 SSH。','This feature detects failed SSH logins and blocks an IP from SSH after your chosen failure limit.')}}</p>
     <p v-if="fail2ban?.canActivate">{{t('已有一份防护配置。检查下方参数后，点击“预览并启用现有防护”；面板会检查配置、启动防护并负责后续管理。','An existing protection configuration was found. Review the settings below and choose “Preview and enable existing protection”. The panel will validate, start and manage it.')}}</p>
     <p v-else-if="externalSSH && fail2ban?.active">{{t('可将现有防护交由面板管理，继续使用原配置名称，避免重复封禁。预览中会列出参数变更。','Let the panel manage the existing protection using its original name to avoid duplicate bans. Parameter changes appear in the preview.')}}</p>
     <p v-else-if="fbVerified && fail2ban?.installed && !fbWritable">{{t('目前无法安全启用。请根据下方原因处理；不熟悉服务器操作时，可把原因发给服务器管理员协助检查。','Protection cannot be safely enabled yet. Resolve the reason below, or ask your server administrator for help.')}}</p>
