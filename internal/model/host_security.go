@@ -54,23 +54,33 @@ type SSHJail struct {
 	Banned         []string            `json:"banned"`
 	TotalBanned    int                 `json:"totalBanned"`
 	Config         SSHProtectionConfig `json:"config"`
+	Failures       []SSHFailureSource  `json:"failures,omitempty"`
+}
+type SSHFailureSource struct {
+	IP       string    `json:"ip"`
+	Count    int       `json:"count"`
+	LastSeen time.Time `json:"lastSeen"`
 }
 type Fail2banState struct {
-	CanReset    bool                `json:"canReset,omitempty"`
-	ResetReason string              `json:"resetReason,omitempty"`
-	Installed   bool                `json:"installed"`
-	Active      bool                `json:"active"`
-	Writable    bool                `json:"writable"`
-	CanActivate bool                `json:"canActivate,omitempty"`
-	Reason      string              `json:"reason,omitempty"`
-	LogBackend  string              `json:"logBackend"`
-	LogPath     string              `json:"logPath,omitempty"`
-	SSHPorts    []int               `json:"sshPorts"`
-	Jails       []SSHJail           `json:"jails"`
-	Config      SSHProtectionConfig `json:"config"`
-	ManagedJail string              `json:"managedJail,omitempty"`
-	Revision    string              `json:"revision"`
-	CheckedAt   time.Time           `json:"checkedAt"`
+	FailureSourcesAvailable bool                `json:"failureSourcesAvailable,omitempty"`
+	FailureSourcesSince     time.Time           `json:"failureSourcesSince,omitempty"`
+	FailureSourcesLimited   bool                `json:"failureSourcesLimited,omitempty"`
+	FailureSourcesReason    string              `json:"failureSourcesReason,omitempty"`
+	CanReset                bool                `json:"canReset,omitempty"`
+	ResetReason             string              `json:"resetReason,omitempty"`
+	Installed               bool                `json:"installed"`
+	Active                  bool                `json:"active"`
+	Writable                bool                `json:"writable"`
+	CanActivate             bool                `json:"canActivate,omitempty"`
+	Reason                  string              `json:"reason,omitempty"`
+	LogBackend              string              `json:"logBackend"`
+	LogPath                 string              `json:"logPath,omitempty"`
+	SSHPorts                []int               `json:"sshPorts"`
+	Jails                   []SSHJail           `json:"jails"`
+	Config                  SSHProtectionConfig `json:"config"`
+	ManagedJail             string              `json:"managedJail,omitempty"`
+	Revision                string              `json:"revision"`
+	CheckedAt               time.Time           `json:"checkedAt"`
 }
 type SecurityRequest struct {
 	Confirmation  string              `json:"confirmation,omitempty"`
