@@ -402,6 +402,7 @@ func TestNativeSecurity(t *testing.T) {
 		t.Fatalf("SSH prerequisites %+v", fb)
 	}
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "enable", Config: cfg, Zone: f.Zone})
+	nativeFail2banReadParity(t, c)
 	fb, e = c.Fail2ban(ctx)
 	if e != nil || !fb.Active {
 		t.Fatalf("jail %+v %v", fb, e)
@@ -631,6 +632,37 @@ func TestNativeSecurity(t *testing.T) {
 	}
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.4")
 	t.Logf("PASS %s: IPv4/IPv6 allow/deny, protected ports, existing rules, persistence, SSH-only bans, whitelist, unban, independent 90s recovery", backend)
+}
+
+// Exercise installed distro modules and preserve ownership hashes created by
+// older Agents using the CLI. This runs once in each native security scenario.
+func nativeFail2banReadParity(t *testing.T, c *Controller) {
+	t.Helper()
+	ctx := context.Background()
+	reader := newFail2banReader(c)
+	reader.prefetch(ctx, fail2banJailReads("wukong-sshd"))
+	if len(reader.values) == 0 {
+		t.Log("Fail2ban batch modules unavailable; using compatible CLI fallback")
+		return
+	}
+	for key, value := range reader.values {
+		args := strings.Split(key, "\x00")
+		if args[0] == "status" { // live failure counters may change between reads
+			continue
+		}
+		out, err := c.exec(ctx, "fail2ban-client", args...)
+		if err != nil || out != value {
+			t.Fatalf("batch formatting differs from installed CLI: %v %v", args, err)
+		}
+	}
+	batch, err := reader.actionHash(ctx, "wukong-sshd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli, err := newFail2banReader(c).actionHash(ctx, "wukong-sshd")
+	if err != nil || batch != cli {
+		t.Fatal("installed client action fingerprint changed", err)
+	}
 }
 
 func nativeUFWLegacyRules(t *testing.T, c *Controller) {

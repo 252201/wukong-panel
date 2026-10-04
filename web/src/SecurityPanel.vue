@@ -113,7 +113,7 @@ function changeZone() {
  firewall.value = securityStatusCache.read(props.hostId,'firewall',zone.value)
  void refresh()
 }
-function refresh(): Promise<void> {
+function refresh(skip: ('firewall'|'fail2ban')[] = []): Promise<void> {
  if (!alive) return Promise.resolve()
  if (refreshTask && refreshZone === zone.value) return refreshTask
  const version = ++refreshVersion
@@ -121,17 +121,17 @@ function refresh(): Promise<void> {
  refreshZone = requestedZone
  const current = () => alive && version === refreshVersion
  refreshing.value = true
- fwLoading.value = support('firewall')
- fbLoading.value = support('fail2ban')
+ fwLoading.value = support('firewall') && !skip.includes('firewall')
+ fbLoading.value = support('fail2ban') && !skip.includes('fail2ban')
  fwError.value = ''; fbError.value = ''
- const fwTask = support('firewall') ? securityStatusCache.refresh(props.hostId,'firewall',requestedZone,() => client.firewall(requestedZone)).then(fw => {
+ const fwTask = fwLoading.value ? securityStatusCache.refresh(props.hostId,'firewall',requestedZone,() => client.firewall(requestedZone)).then(fw => {
   if (!current()) return
   if (fw.revision !== firewall.value?.revision) selectedRules.value = []
   firewall.value = fw
   fwVerified.value = true
   if (fw.zone) {zone.value = fw.zone;refreshZone = fw.zone}
  }).catch(e => {if (current()) {fwVerified.value = false;fwError.value = e instanceof Error ? e.message : String(e)}}).finally(() => {if (current()) fwLoading.value = false}) : Promise.resolve()
- const fbTask = support('fail2ban') ? securityStatusCache.refresh(props.hostId,'fail2ban','',() => client.fail2ban()).then(fb => {
+ const fbTask = fbLoading.value ? securityStatusCache.refresh(props.hostId,'fail2ban','',() => client.fail2ban()).then(fb => {
   if (!current()) return
   fail2ban.value = fb
   fbVerified.value = true
@@ -173,6 +173,7 @@ async function stage(kind: 'firewall'|'fail2ban', request: SecurityRequest) {
 async function apply() {
  const staged = pending.value
  if (!staged || !requestReady(staged.kind) || staged.request.operation === 'reinstall' && (!resetWritable.value || resetConfirmation.value !== 'RESET FAIL2BAN')) return
+ const previousFirewall = fwVerified.value ? firewall.value : null
  busy.value = true;error.value = ''
  try {
   invalidateStatus()
@@ -180,10 +181,28 @@ async function apply() {
   if (!alive) return
   pending.value = null
   selectedRules.value = []
-  if (result.firewall) {firewall.value = result.firewall;fwVerified.value = true}
-  if (result.fail2ban) {fail2ban.value = result.fail2ban;fbVerified.value = true}
+  if (result.firewall) {
+   firewall.value = result.firewall;fwVerified.value = true
+   securityStatusCache.publish(props.hostId,'firewall',result.firewall.zone || zone.value,result.firewall)
+  }
+  if (result.fail2ban) {
+   fail2ban.value = result.fail2ban;fbVerified.value = true
+   securityStatusCache.publish(props.hostId,'fail2ban','',result.fail2ban)
+   loadLocations()
+  }
   if (result.jobId) job.value = {id:result.jobId,status:'running',progress:0,message:t('正在安装','Installing'),kind:'security.install',target:props.hostName,error:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}
-  await refresh()
+  // A writable SSH result has already passed post-write verification. Older
+  // Agents return a self-pending sample, so retain the full refresh for them.
+  if (staged.kind === 'fail2ban' && result.fail2ban?.writable && !result.jobId) {
+   // Keep the already verified firewall sample while its background read is
+   // running. Its original timestamp still expires, and previews check live.
+   if (previousFirewall) {
+    firewall.value = previousFirewall;fwVerified.value = true
+    securityStatusCache.publish(props.hostId,'firewall',previousFirewall.zone || zone.value,previousFirewall)
+   }
+   void refresh(['fail2ban'])
+  }
+  else await refresh()
  } catch (e) {if (alive) {error.value = e instanceof Error ? e.message : String(e);pending.value = null;await refresh()}}
  finally {busy.value = false}
 }
@@ -206,7 +225,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
 
 <template>
  <div class="page-content security-page">
-  <div class="page-intro"><div><p>HOST SECURITY</p><h2>{{t('主机安全','Host security')}}</h2><small>{{hostName}}</small></div><button class="secondary" :disabled="refreshing || busy" @click="refresh">{{t('刷新状态','Refresh')}}</button></div>
+  <div class="page-intro"><div><p>HOST SECURITY</p><h2>{{t('主机安全','Host security')}}</h2><small>{{hostName}}</small></div><button class="secondary" :disabled="refreshing || busy" @click="refresh()">{{t('刷新状态','Refresh')}}</button></div>
   <p v-if="!online || !compatible" class="security-warning">{{t('此主机离线或协议不兼容；只能查看最后状态，已禁用操作。','This host is offline or incompatible. Displayed snapshots are historical; actions are disabled.')}}</p>
   <p v-if="error" role="alert" class="security-warning">{{error}}</p>
   <section v-if="job" class="panel-card security-notice"><b>{{t('安全组件安装','Security component installation')}}</b><p>{{job.message}} · {{job.progress}}%</p><small>{{t('进度和错误同时记录在任务日志。','Progress and errors are also recorded in Jobs.')}}</small></section>

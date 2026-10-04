@@ -18,6 +18,13 @@ export function createSecurityStatusCache(limit = 32) {
    : entries.get(keyFor(host,kind,zone))
   return entry?.value ? copy(entry.value as SecurityStates[K]) : null
  }
+ function publish<K extends SecurityKind>(host: string, kind: K, zone: string, value: SecurityStates[K]) {
+  const key = keyFor(host,kind,zone)
+  // Replace the entry so an older in-flight read cannot overwrite the result.
+  entries.delete(key)
+  entries.set(key,{host,kind,value:copy(value)})
+  while (entries.size > limit) entries.delete(entries.keys().next().value!)
+ }
  function refresh<K extends SecurityKind>(host: string, kind: K, zone: string, request: () => Promise<SecurityStates[K]>): Promise<SecurityStates[K]> {
   const key = keyFor(host,kind,zone)
   let entry = entries.get(key)
@@ -35,6 +42,6 @@ export function createSecurityStatusCache(limit = 32) {
   }).finally(() => {current.pending = undefined})
   return current.pending.then(value => copy(value as SecurityStates[K]))
  }
- return {read,refresh,clear}
+ return {read,refresh,publish,clear}
 }
 export const securityStatusCache = createSecurityStatusCache()
