@@ -15,7 +15,6 @@ const options = computed(() => banDurationPresets.filter(value => value !== -1 |
 const available = (value: number) => value !== -1 || props.permanentSupported
 // An old Agent may report an existing permanent setting; display it, but require a timed replacement.
 const parsed = computed(() => parseBanDuration(text.value, props.permanentSupported))
-const hint = computed(() => t('可输入自定义时长，如 90 分钟；纯数字按秒计算（60 秒至 30 天）。', 'Enter a custom duration, e.g. 90 minutes; bare numbers mean seconds (60 seconds to 30 days).'))
 function validate() {
  input.value?.setCustomValidity(parsed.value === null ? t('请选择时长或输入 60 秒至 30 天的自定义时长。', 'Choose a duration or enter a custom duration from 60 seconds to 30 days.') : '')
 }
@@ -83,7 +82,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
   <div class="duration-control">
    <input :id="id" ref="input" :value="text" type="text" role="combobox" required autocomplete="off" spellcheck="false"
     aria-autocomplete="none" aria-haspopup="listbox" :aria-expanded="open" :aria-controls="`${id}-options`"
-    :aria-activedescendant="open && active >= 0 ? `${id}-option-${active}` : undefined" :aria-describedby="`${id}-hint`"
+    :aria-activedescendant="open && active >= 0 ? `${id}-option-${active}` : undefined"
     :placeholder="t('选择或输入时长','Choose or enter a duration')" @input="edit" @keydown="keydown" @blur="blur">
    <button type="button" class="duration-toggle" tabindex="-1" :aria-label="t('选择封禁时长','Choose ban duration')" :aria-expanded="open"
     @pointerdown.prevent @click="input?.focus(); open ? open = false : show()"><span aria-hidden="true">⌄</span></button>
@@ -93,7 +92,6 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
     <div :id="`${id}-option-${options.length}`" role="option" :aria-selected="false" :class="{active:active === options.length}" @pointerdown.prevent @click="choose(options.length)">{{t('自定义时长…','Custom duration…')}}</div>
    </div>
   </div>
-  <small :id="`${id}-hint`">{{hint}}</small>
   <small v-if="!permanentSupported">{{t('此 Agent 暂不支持永久封禁，请更新完整面板。','Update the full panel Agent to support permanent bans.')}}</small>
  </div>
 </template>
