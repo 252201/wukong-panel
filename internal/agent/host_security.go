@@ -34,6 +34,9 @@ func (m *Manager) SecurityApply(ctx context.Context, kind string, r model.Securi
 	result, e := m.securityController().Apply(ctx, kind, r)
 	if m.store != nil {
 		detail := r.Operation
+		if kind == "fail2ban" && (r.Operation == "ban" || r.Operation == "unban") {
+			detail += " jail=" + r.Jail + " ip=" + r.IP
+		}
 		if e != nil {
 			detail += " failed: " + e.Error()
 		}

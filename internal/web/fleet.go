@@ -737,6 +737,14 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 			writeError(w, 400, "invalid security request")
 			return
 		}
+		if (request.Operation == "enable" || request.Operation == "configure" || request.Operation == "adopt") && request.Config.BanTime == -1 && !fleetHasCapability(host, "security.fail2ban.permanent") {
+			writeError(w, 409, "远端 Agent 不支持永久封禁，请更新完整面板")
+			return
+		}
+		if request.Operation == "ban" && !fleetHasCapability(host, "security.fail2ban.ban") {
+			writeError(w, 409, "远端 Agent 不支持手动封禁，请更新完整面板")
+			return
+		}
 		if request.Operation == "reinstall" && !fleetHasCapability(host, "security.fail2ban.reset") {
 			writeError(w, 409, "远端 Agent 不支持清理重装，请更新完整面板")
 			return
@@ -753,7 +761,14 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 	}
-	command, job, err := s.queueFleetCommand(host, kind, payload, session.Username, async)
+	createJob := async
+	if kind == "security.fail2ban.apply" {
+		var request model.SecurityRequest
+		if json.Unmarshal(payload, &request) == nil && (request.Operation == "ban" || request.Operation == "unban") {
+			createJob = true
+		}
+	}
+	command, job, err := s.queueFleetCommand(host, kind, payload, session.Username, createJob)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -947,7 +962,14 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 	if job.ID != "" {
 		_ = s.store.UpdateJob(job.ID, "running", 10, "等待远端 Agent", "")
 	}
-	_ = s.store.Audit(actor, "fleet.command.queue", host.ID, kind+" "+command.ID)
+	detail := kind + " " + command.ID
+	if kind == "security.fail2ban.apply" {
+		var request model.SecurityRequest
+		if json.Unmarshal(payload, &request) == nil {
+			detail += securityIPOperationDetail(request)
+		}
+	}
+	_ = s.store.Audit(actor, "fleet.command.queue", host.ID, detail)
 	return command, job, nil
 }
 

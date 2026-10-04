@@ -467,10 +467,32 @@ func TestNativeSecurity(t *testing.T) {
 	}
 	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
 	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.2")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "ban", Jail: "wukong-sshd", IP: "10.203.0.2"})
+	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
+	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.2")
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "unban", IP: "10.203.0.2"})
+	nativeConnect(t, "ssh-ok", "10.203.0.1:46961", "10.203.0.2")
 	// IPv6 addresses are parsed, listed and enforced independently of IPv4.
-	if _, e = c.exec(ctx, "fail2ban-client", "set", "wukong-sshd", "banip", "fd42:203::2"); e != nil {
-		t.Fatal(e)
+	nativeConnect(t, "ssh-fail", "[fd42:203::1]:46961", "")
+	waitNative(t, "IPv6 failure source", func() bool {
+		f, _ := c.Fail2ban(ctx)
+		for _, j := range f.Jails {
+			for _, source := range j.Failures {
+				if source.IP == "fd42:203::2" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	cfg.BanTime = -1
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "configure", Config: cfg, Zone: f.Zone})
+	nativeApply(t, c, "fail2ban", model.SecurityRequest{Operation: "ban", Jail: "wukong-sshd", IP: "fd42:203::2"})
+	effective, e := c.effectiveConfig(ctx, "wukong-sshd")
+	if e != nil || effective.BanTime != -1 {
+		t.Fatalf("permanent duration %+v %v", effective, e)
 	}
+
 	waitNative(t, "IPv6 enforcement", func() bool {
 		out, _ := c.exec(ctx, "fail2ban-client", "status", "wukong-sshd")
 		return strings.Contains(out, "fd42:203::2")

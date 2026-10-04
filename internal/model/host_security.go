@@ -62,6 +62,8 @@ type SSHFailureSource struct {
 	LastSeen time.Time `json:"lastSeen"`
 }
 type Fail2banState struct {
+	SupportsPermanentBan    bool                `json:"supportsPermanentBan,omitempty"`
+	SupportsManualBan       bool                `json:"supportsManualBan,omitempty"`
 	FailureSourcesAvailable bool                `json:"failureSourcesAvailable,omitempty"`
 	FailureSourcesSince     time.Time           `json:"failureSourcesSince,omitempty"`
 	FailureSourcesLimited   bool                `json:"failureSourcesLimited,omitempty"`
