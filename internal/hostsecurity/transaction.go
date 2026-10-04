@@ -233,7 +233,11 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 		}
 		result.Firewall = &f
 	} else {
-		f, e := c.Fail2ban(ctx)
+		verifiedTransaction := ""
+		if !p.NeedsConfirmation {
+			verifiedTransaction = j.Transaction.ID
+		}
+		f, e := c.fail2ban(ctx, verifiedTransaction)
 		if e != nil {
 			return result, e
 		}

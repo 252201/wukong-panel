@@ -93,12 +93,22 @@ func parsedIPs(s string) []string {
 	return r
 }
 func (c *Controller) effectiveConfig(ctx context.Context, name string) (model.SSHProtectionConfig, error) {
+	reader := newFail2banReader(c)
+	commands := [][]string{}
+	for _, key := range []string{"maxretry", "findtime", "bantime", "ignoreip"} {
+		commands = append(commands, []string{"get", name, key})
+	}
+	reader.prefetch(ctx, commands)
+	return reader.effectiveConfig(ctx, name)
+}
+
+func (reader *fail2banReader) effectiveConfig(ctx context.Context, name string) (model.SSHProtectionConfig, error) {
 	r := defaults()
 	for _, f := range []struct {
 		key string
 		dst *int
 	}{{"maxretry", &r.MaxRetry}, {"findtime", &r.FindTime}, {"bantime", &r.BanTime}} {
-		s, e := c.exec(ctx, "fail2ban-client", "get", name, f.key)
+		s, e := reader.exec(ctx, "get", name, f.key)
 		if e != nil {
 			return r, e
 		}
@@ -112,7 +122,7 @@ func (c *Controller) effectiveConfig(ctx context.Context, name string) (model.SS
 		}
 		*f.dst = int(v)
 	}
-	s, e := c.exec(ctx, "fail2ban-client", "get", name, "ignoreip")
+	s, e := reader.exec(ctx, "get", name, "ignoreip")
 	if e != nil {
 		return r, e
 	}
@@ -129,6 +139,12 @@ func (c *Controller) effectiveConfig(ctx context.Context, name string) (model.SS
 	return r, nil
 }
 func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) {
+	return c.fail2ban(ctx, "")
+}
+
+// The transaction's own post-write verification can return a usable sample.
+// It is only published after finish succeeds; all other pending changes block.
+func (c *Controller) fail2ban(ctx context.Context, verifiedTransaction string) (model.Fail2banState, error) {
 	s, e := c.state()
 	if e != nil {
 		return model.Fail2banState{}, e
@@ -162,6 +178,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		r.Revision = c.revision(s, false)
 		return r, nil
 	}
+	reader := newFail2banReader(c)
 	names, err := c.jailNames(ctx)
 	if err != nil {
 		r.Reason = "Fail2ban 服务未运行或无法连接"
@@ -195,17 +212,22 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 			}
 		}
 	} else {
+		commands := [][]string{}
 		for _, name := range names {
-			journal, _ := c.exec(ctx, "fail2ban-client", "get", name, "journalmatch")
-			logs, _ := c.exec(ctx, "fail2ban-client", "get", name, "logpath")
+			commands = append(commands, fail2banJailReads(name)...)
+		}
+		reader.prefetch(ctx, commands)
+		for _, name := range names {
+			journal, _ := reader.exec(ctx, "get", name, "journalmatch")
+			logs, _ := reader.exec(ctx, "get", name, "logpath")
 			if !strings.Contains(strings.ToLower(name), "ssh") && !strings.Contains(journal, "sshd") && !strings.Contains(logs, "auth.log") && !strings.Contains(logs, "/secure") {
 				continue
 			}
-			out, e := c.exec(ctx, "fail2ban-client", "status", name)
+			out, e := reader.exec(ctx, "status", name)
 			if e != nil {
 				return r, e
 			}
-			cfg, e := c.effectiveConfig(ctx, name)
+			cfg, e := reader.effectiveConfig(ctx, name)
 			if e != nil {
 				r.Reason = "无法读取 SSH jail 的有效配置：" + e.Error()
 				continue
@@ -261,7 +283,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 				}
 			}
 			if j.Managed && s.ActionHash != "" {
-				hash, e := c.actionHash(ctx, s.Jail)
+				hash, e := reader.actionHash(ctx, s.Jail)
 				raw = append(raw, hash)
 				if e != nil || hash != s.ActionHash {
 					r.Writable = false
@@ -292,7 +314,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 		}
 	}
 
-	if c.pending() != nil {
+	if pending := c.pending(); pending != nil && (verifiedTransaction == "" || pending.ID != verifiedTransaction) {
 		r.Writable = false
 		r.Reason = "上次安全变更尚待确认或恢复"
 	}
@@ -746,11 +768,7 @@ func joinPorts(ports []int) string {
 	return strings.Join(s, ",")
 }
 
-func (c *Controller) actionHash(ctx context.Context, name string) (string, error) {
-	out, e := c.exec(ctx, "fail2ban-client", "get", name, "actions")
-	if e != nil {
-		return "", e
-	}
+func fail2banActionNames(out string) []string {
 	action := ""
 	for _, candidate := range []string{"iptables-multiport", "nftables-multiport", "firewallcmd-rich-rules"} {
 		if strings.Contains(out, candidate) {
@@ -759,29 +777,50 @@ func (c *Controller) actionHash(ctx context.Context, name string) (string, error
 		}
 	}
 	if action == "" {
-		return "", errors.New("未识别到受支持的 SSH 封禁动作")
+		return nil
 	}
-
-	parts := []string{out}
 	names := []string{action}
 	for _, name := range strings.Fields(out) {
 		if regexp.MustCompile(`^wk-ssh-[0-9]{1,5}$`).MatchString(name) {
 			names = append(names, name)
 		}
 	}
+	return names
+}
+
+func (c *Controller) actionHash(ctx context.Context, name string) (string, error) {
+	reader := newFail2banReader(c)
+	commands := [][]string{}
+	for _, key := range []string{"actions", "failregex", "ignoreregex", "ignoreip", "logpath", "journalmatch"} {
+		commands = append(commands, []string{"get", name, key})
+	}
+	reader.prefetch(ctx, commands)
+	return reader.actionHash(ctx, name)
+}
+
+func (reader *fail2banReader) actionHash(ctx context.Context, name string) (string, error) {
+	out, e := reader.exec(ctx, "get", name, "actions")
+	if e != nil {
+		return "", e
+	}
+	names := fail2banActionNames(out)
+	if len(names) == 0 {
+		return "", errors.New("未识别到受支持的 SSH 封禁动作")
+	}
+	parts := []string{out}
 	for _, actionName := range names {
-		start, e := c.exec(ctx, "fail2ban-client", "get", name, "action", actionName, "actionstart")
+		start, e := reader.exec(ctx, "get", name, "action", actionName, "actionstart")
 		if e != nil {
 			return "", e
 		}
-		ban, e := c.exec(ctx, "fail2ban-client", "get", name, "action", actionName, "actionban")
+		ban, e := reader.exec(ctx, "get", name, "action", actionName, "actionban")
 		if e != nil {
 			return "", e
 		}
 		parts = append(parts, actionName, start, ban)
 	}
 	for _, key := range []string{"failregex", "ignoreregex", "ignoreip", "logpath", "journalmatch"} {
-		v, err := c.exec(ctx, "fail2ban-client", "get", name, key)
+		v, err := reader.exec(ctx, "get", name, key)
 		if err != nil && key != "logpath" && key != "journalmatch" {
 			return "", err
 		}

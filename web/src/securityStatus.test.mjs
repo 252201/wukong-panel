@@ -78,3 +78,20 @@ test('memory use is bounded across fleet hosts',async()=>{
  assert.equal(cache.read('ac','firewall'),null)
  assert.equal(cache.read('qw','firewall').revision,'qw')
 })
+
+
+test('verified apply results replace old in-flight reads without another request',async()=>{
+ const cache=createSecurityStatusCache();const old=deferred();let calls=0
+ const pending=cache.refresh('ac','fail2ban','',()=>{calls++;return old.promise})
+ await Promise.resolve()
+ const saved=sample('saved');cache.publish('ac','fail2ban','',saved)
+ saved.rules[0].id='changed'
+ assert.equal(cache.read('ac','fail2ban').rules[0].id,'saved')
+ old.resolve(sample('before-save'));await pending
+ assert.equal(calls,1)
+ assert.equal(cache.read('ac','fail2ban').revision,'saved')
+ assert.equal(cache.read('qw','fail2ban'),null)
+ await cache.refresh('ac','fail2ban','',async()=>{calls++;return sample('next-live-sample')})
+ assert.equal(calls,2)
+ assert.equal(cache.read('ac','fail2ban').revision,'next-live-sample')
+})
