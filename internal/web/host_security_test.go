@@ -55,12 +55,18 @@ func TestHostSecurityAuthAndCSRF(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, kind := range []string{"firewall", "fail2ban"} {
+	for _, operation := range []struct{ kind, payload string }{
+		{"firewall", `{"operation":"disable","revision":"r"}`},
+		{"fail2ban", `{"operation":"disable","revision":"r"}`},
+		{"fail2ban", `{"operation":"ban","jail":"wukong-sshd","ip":"8.8.8.8","revision":"r"}`},
+		{"fail2ban", `{"operation":"unban","jail":"wukong-sshd","ip":"8.8.8.8","revision":"r"}`},
+	} {
+		kind := operation.kind
 		for _, test := range []struct {
 			cookie, csrf bool
 			want         int
 		}{{false, false, 401}, {true, false, 403}, {true, true, 200}} {
-			req := httptest.NewRequest("POST", "/api/v1/system/"+kind+"/apply", strings.NewReader(`{"operation":"disable","revision":"r"}`))
+			req := httptest.NewRequest("POST", "/api/v1/system/"+kind+"/apply", strings.NewReader(operation.payload))
 			if test.cookie {
 				req.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
 			}
@@ -74,9 +80,23 @@ func TestHostSecurityAuthAndCSRF(t *testing.T) {
 			}
 		}
 	}
-	if agent.applied != 2 {
+	if agent.applied != 4 {
 		t.Fatalf("unauthorized mutation calls %d", agent.applied)
 	}
+	var count int
+	if e := db.DB.QueryRow("SELECT count(*) FROM audit_logs WHERE action='security.fail2ban.ban' AND detail LIKE '%8.8.8.8%'").Scan(&count); e != nil || count != 1 {
+		t.Fatal("missing target IP in audit", count, e)
+	}
+	jobs, e := db.Jobs(10)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, j := range jobs {
+		if j.Kind == "security.fail2ban.ban" && !strings.Contains(j.Message, "8.8.8.8") {
+			t.Fatal("missing target IP in job", j)
+		}
+	}
+
 }
 func TestFleetSecurityRequiresCapabilityAndProbeCannotSpoof(t *testing.T) {
 	s, db := fleetWebTestServer(t)
@@ -298,6 +318,192 @@ func TestSecurityIPLocationRequiresLoginAndValidIP(t *testing.T) {
 		}
 		if test.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"status":"private"`) {
 			t.Fatalf("unexpected location %s", rec.Body.String())
+		}
+	}
+}
+
+func TestFleetManualBanCapabilityAndHostIsolation(t *testing.T) {
+	for _, action := range []string{"preview", "apply"} {
+		for _, tc := range []struct {
+			name   string
+			caps   []string
+			online bool
+			want   int
+		}{
+			{"old", []string{"security.fail2ban"}, true, 409},
+			{"probe", []string{"probe", "security.fail2ban", "security.fail2ban.ban"}, true, 409},
+			{"offline", []string{"security.fail2ban", "security.fail2ban.ban"}, false, 409},
+			{"new", []string{"security.fail2ban", "security.fail2ban.ban"}, true, 200},
+		} {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				s, db := fleetWebTestServer(t)
+				if e := db.CreateFleetEnrollmentToken("batch-token", time.Now().Add(time.Minute)); e != nil {
+					t.Fatal(e)
+				}
+				host := model.FleetHost{ID: "target", Name: tc.name, Capabilities: tc.caps, ProtocolVersion: model.FleetProtocolVersion}
+				if e := db.ConsumeFleetEnrollmentToken("batch-token", host, "credential"); e != nil {
+					t.Fatal(e)
+				}
+				if tc.online {
+					if e := db.SaveFleetHeartbeat(context.Background(), host.ID, model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, Capabilities: tc.caps, Snapshot: model.FleetSnapshot{Full: true}}); e != nil {
+						t.Fatal(e)
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				done := make(chan error, 1)
+				if tc.want == 200 {
+					go func() {
+						for {
+							record, e := db.NextFleetCommand("target")
+							if e == nil {
+								raw, e := s.fleetVault.Decrypt(record.PayloadCipher)
+								if e != nil {
+									done <- e
+									return
+								}
+								var req model.SecurityRequest
+								if e = json.Unmarshal([]byte(raw), &req); e != nil {
+									done <- e
+									return
+								}
+								if req.Operation != "ban" || req.Jail != "wukong-sshd" || req.IP != "8.8.8.8" {
+									done <- fmt.Errorf("lost batch payload: %s", raw)
+									return
+								}
+								cipher, e := s.fleetVault.Encrypt(`{"revision":"r","changes":[]}`)
+								if e == nil {
+									_, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
+								}
+								done <- e
+								return
+							}
+							select {
+							case <-ctx.Done():
+								done <- ctx.Err()
+								return
+							case <-time.After(10 * time.Millisecond):
+							}
+						}
+					}()
+				}
+				req := httptest.NewRequest("POST", "/", strings.NewReader(`{"operation":"ban","jail":"wukong-sshd","ip":"8.8.8.8","revision":"r"}`)).WithContext(ctx)
+				req.SetPathValue("hostId", "target")
+				req.SetPathValue("resource", "system/fail2ban/"+action)
+				rec := httptest.NewRecorder()
+				s.fleetHostGateway(rec, req, store.Session{Username: "admin"})
+				if rec.Code != tc.want {
+					t.Fatalf("%d %s", rec.Code, rec.Body.String())
+				}
+				if tc.want == 200 {
+					if e := <-done; e != nil {
+						t.Fatal(e)
+					}
+				}
+				var count int
+				if e := db.DB.QueryRow("SELECT count(*) FROM fleet_commands").Scan(&count); e != nil {
+					t.Fatal(e)
+				}
+				if tc.want == 200 && count != 1 || tc.want != 200 && count != 0 {
+					t.Fatal("unexpected commands", count)
+				}
+				if _, e := db.NextFleetCommand("other-host"); e == nil {
+					t.Fatal("batch delivered to another host")
+				}
+			})
+		}
+	}
+}
+
+func TestFleetPermanentBanCapabilityAndHostIsolation(t *testing.T) {
+	for _, action := range []string{"preview", "apply"} {
+		for _, tc := range []struct {
+			name   string
+			caps   []string
+			online bool
+			want   int
+		}{
+			{"old", []string{"security.fail2ban"}, true, 409},
+			{"probe", []string{"probe", "security.fail2ban", "security.fail2ban.permanent"}, true, 409},
+			{"offline", []string{"security.fail2ban", "security.fail2ban.permanent"}, false, 409},
+			{"new", []string{"security.fail2ban", "security.fail2ban.permanent"}, true, 200},
+		} {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				s, db := fleetWebTestServer(t)
+				if e := db.CreateFleetEnrollmentToken("batch-token", time.Now().Add(time.Minute)); e != nil {
+					t.Fatal(e)
+				}
+				host := model.FleetHost{ID: "target", Name: tc.name, Capabilities: tc.caps, ProtocolVersion: model.FleetProtocolVersion}
+				if e := db.ConsumeFleetEnrollmentToken("batch-token", host, "credential"); e != nil {
+					t.Fatal(e)
+				}
+				if tc.online {
+					if e := db.SaveFleetHeartbeat(context.Background(), host.ID, model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, Capabilities: tc.caps, Snapshot: model.FleetSnapshot{Full: true}}); e != nil {
+						t.Fatal(e)
+					}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				done := make(chan error, 1)
+				if tc.want == 200 {
+					go func() {
+						for {
+							record, e := db.NextFleetCommand("target")
+							if e == nil {
+								raw, e := s.fleetVault.Decrypt(record.PayloadCipher)
+								if e != nil {
+									done <- e
+									return
+								}
+								var req model.SecurityRequest
+								if e = json.Unmarshal([]byte(raw), &req); e != nil {
+									done <- e
+									return
+								}
+								if req.Operation != "configure" || req.Config.BanTime != -1 {
+									done <- fmt.Errorf("lost batch payload: %s", raw)
+									return
+								}
+								cipher, e := s.fleetVault.Encrypt(`{"revision":"r","changes":[]}`)
+								if e == nil {
+									_, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
+								}
+								done <- e
+								return
+							}
+							select {
+							case <-ctx.Done():
+								done <- ctx.Err()
+								return
+							case <-time.After(10 * time.Millisecond):
+							}
+						}
+					}()
+				}
+				req := httptest.NewRequest("POST", "/", strings.NewReader(`{"operation":"configure","config":{"banTime":-1},"revision":"r"}`)).WithContext(ctx)
+				req.SetPathValue("hostId", "target")
+				req.SetPathValue("resource", "system/fail2ban/"+action)
+				rec := httptest.NewRecorder()
+				s.fleetHostGateway(rec, req, store.Session{Username: "admin"})
+				if rec.Code != tc.want {
+					t.Fatalf("%d %s", rec.Code, rec.Body.String())
+				}
+				if tc.want == 200 {
+					if e := <-done; e != nil {
+						t.Fatal(e)
+					}
+				}
+				var count int
+				if e := db.DB.QueryRow("SELECT count(*) FROM fleet_commands").Scan(&count); e != nil {
+					t.Fatal(e)
+				}
+				if tc.want == 200 && count != 1 || tc.want != 200 && count != 0 {
+					t.Fatal("unexpected commands", count)
+				}
+				if _, e := db.NextFleetCommand("other-host"); e == nil {
+					t.Fatal("batch delivered to another host")
+				}
+			})
 		}
 	}
 }

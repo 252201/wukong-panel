@@ -18,8 +18,8 @@ func defaults() model.SSHProtectionConfig {
 	return model.SSHProtectionConfig{MaxRetry: 5, FindTime: 600, BanTime: 3600, Mode: "normal", IgnoreIPs: []string{}}
 }
 func validateConfig(r model.SSHProtectionConfig) (model.SSHProtectionConfig, error) {
-	if r.MaxRetry < 1 || r.MaxRetry > 100 || r.FindTime < 60 || r.FindTime > 604800 || r.BanTime < 60 || r.BanTime > 2592000 {
-		return r, errors.New("失败次数为 1–100，窗口为 60–604800 秒，封禁为 60–2592000 秒")
+	if r.MaxRetry < 1 || r.MaxRetry > 100 || r.FindTime < 60 || r.FindTime > 604800 || (r.BanTime != -1 && (r.BanTime < 60 || r.BanTime > 2592000)) {
+		return r, errors.New("失败次数为 1–100，窗口为 60–604800 秒，封禁为 60–2592000 秒或永久（-1）")
 	}
 	if !contains([]string{"normal", "ddos", "extra", "aggressive"}, r.Mode) {
 		return r, errors.New("SSH 检测模式无效")
@@ -133,7 +133,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 	if e != nil {
 		return model.Fail2banState{}, e
 	}
-	r := model.Fail2banState{Installed: c.Lookup("fail2ban-client"), CheckedAt: c.Now(), Jails: []model.SSHJail{}, Config: s.Config, ManagedJail: s.Jail, SSHPorts: []int{}}
+	r := model.Fail2banState{SupportsManualBan: true, SupportsPermanentBan: true, Installed: c.Lookup("fail2ban-client"), CheckedAt: c.Now(), Jails: []model.SSHJail{}, Config: s.Config, ManagedJail: s.Jail, SSHPorts: []int{}}
 	if c.Lookup("fail2ban-client") {
 		if e := c.resetGuard(ctx); e != nil {
 			r.ResetReason = e.Error()
@@ -344,6 +344,14 @@ func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequ
 		return p, errors.New("请先确认接管 SSH jail")
 	}
 	switch req.Operation {
+	case "ban":
+		a, err := c.manualBanTarget(ctx, f, req)
+		if err != nil {
+			return p, err
+		}
+		p.Revision = c.revision(f.Revision, "ban", req.Jail, a.String())
+		p.Changes = []string{"手动封禁 " + a.String()}
+		p.Warnings = []string{fmt.Sprintf("仅阻止此 IP 连接 SSH TCP 端口 %s；沿用当前封禁时长 %s，可手动解除封禁", joinPorts(f.SSHPorts), banDuration(f.Config.BanTime))}
 	case "enable", "configure", "adopt":
 		cfg, e := validateConfig(req.Config)
 		if e != nil {
@@ -382,7 +390,7 @@ func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequ
 		if fw.Backend == "firewalld" && len(fw.Zones) > 1 {
 			return p, errors.New("多个区域生效时，请在主机确认 SSH 所属区域后配置")
 		}
-		p.Changes = []string{fmt.Sprintf("SSH：%d 次 / %d 秒，封禁 %d 秒，模式 %s；白名单 %s", cfg.MaxRetry, cfg.FindTime, cfg.BanTime, cfg.Mode, strings.Join(cfg.IgnoreIPs, ", "))}
+		p.Changes = []string{fmt.Sprintf("SSH：%d 次 / %d 秒，封禁 %s，模式 %s；白名单 %s", cfg.MaxRetry, cfg.FindTime, banDuration(cfg.BanTime), cfg.Mode, strings.Join(cfg.IgnoreIPs, ", "))}
 		p.Warnings = []string{"仅防护实际 SSH TCP 端口；白名单不会自动使用浏览器或中央主机地址"}
 		if req.Operation == "adopt" {
 			p.Changes = append([]string{"将已有 SSH 登录防护（配置名称：" + req.Jail + "）交由面板管理，保留原配置文件，使用本次预览参数"}, p.Changes...)
@@ -398,6 +406,9 @@ func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequ
 	case "reload":
 		p.Changes = []string{"仅重载 " + f.ManagedJail + " 并恢复当前封禁"}
 	case "unban":
+		if req.Jail != "" && req.Jail != f.ManagedJail {
+			return p, errors.New("只能操作面板管理的 SSH 防护")
+		}
 		a, e := netip.ParseAddr(req.IP)
 		if e != nil || a.Zone() != "" {
 			return p, errors.New("解封需要有效单个 IP")
@@ -495,10 +506,36 @@ func renderJail(name string, cfg model.SSHProtectionConfig, enabled bool, backen
 	return []byte(s)
 }
 func (c *Controller) applyFail2ban(ctx context.Context, r model.SecurityRequest, j *journal, s *state) error {
+	if r.Operation == "ban" {
+		a, e := c.banSafety(ctx, r.IP, s.Jail)
+		if e != nil {
+			return e
+		}
+		out, e := c.exec(ctx, "fail2ban-client", "status", s.Jail)
+		if e != nil {
+			return e
+		}
+		if contains(parsedIPs(field(out, "Banned IP list")), a.String()) {
+			return errors.New("此 IP 已被封禁，请刷新状态")
+		}
+		j.BanStarted = true
+		if e = c.save("pending.json", j); e != nil {
+			j.BanStarted = false
+			return e
+		}
+		_, e = c.exec(ctx, "fail2ban-client", "set", s.Jail, "banip", a.String())
+		if e != nil {
+			return e
+		}
+		return c.verifyManualBan(ctx, s.Jail, a.String(), true)
+	}
 	if r.Operation == "unban" {
 		a, _ := netip.ParseAddr(r.IP)
 		_, e := c.exec(ctx, "fail2ban-client", "set", s.Jail, "unbanip", a.Unmap().String())
-		return e
+		if e != nil {
+			return e
+		}
+		return c.verifyManualBan(ctx, s.Jail, a.Unmap().String(), false)
 	}
 	if r.Operation == "reload" {
 		if _, e := c.exec(ctx, "fail2ban-client", "reload", "--restart", "--if-exists", s.Jail); e != nil {

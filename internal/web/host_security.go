@@ -5,6 +5,7 @@ import (
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/store"
 	"net/http"
+	"net/netip"
 	"time"
 )
 
@@ -63,7 +64,11 @@ func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request, session st
 		writeError(w, 404, "unknown security action")
 		return
 	}
-	_ = s.store.Audit(session.Username, "security."+kind+"."+req.Operation, "local", "requested through web")
+	detail := "requested through web"
+	if kind == "fail2ban" && (req.Operation == "ban" || req.Operation == "unban") {
+		detail += " jail=" + req.Jail + " ip=" + req.IP
+	}
+	_ = s.store.Audit(session.Username, "security."+kind+"."+req.Operation, "local", detail)
 	if req.Operation == "install" || kind == "fail2ban" && req.Operation == "reinstall" {
 		job, e := s.store.CreateJob("security."+kind+"."+req.Operation, "local")
 		if e != nil {
@@ -89,12 +94,12 @@ func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request, session st
 		writeError(w, 500, e.Error())
 		return
 	}
-	_ = s.store.UpdateJob(job.ID, "running", 10, "执行安全变更", "")
+	_ = s.store.UpdateJob(job.ID, "running", 10, "执行安全变更"+securityIPOperationDetail(req), "")
 	v, e := agent.SecurityApply(r.Context(), kind, req)
 	if e != nil {
-		_ = s.store.UpdateJob(job.ID, "failed", 100, "安全变更失败", e.Error())
+		_ = s.store.UpdateJob(job.ID, "failed", 100, "安全变更失败"+securityIPOperationDetail(req), e.Error())
 	} else {
-		_ = s.store.UpdateJob(job.ID, "success", 100, "安全变更完成", "")
+		_ = s.store.UpdateJob(job.ID, "success", 100, "安全变更完成"+securityIPOperationDetail(req), "")
 	}
 	if e != nil {
 		writeError(w, 400, e.Error())
@@ -143,4 +148,19 @@ func requiredSecurityCapability(resource string) string {
 		return "security.firewall"
 	}
 	return ""
+}
+
+func securityIPOperationDetail(req model.SecurityRequest) string {
+	if req.Operation != "ban" && req.Operation != "unban" {
+		return ""
+	}
+	addr, err := netip.ParseAddr(req.IP)
+	if err != nil || addr.Zone() != "" {
+		return ""
+	}
+	operation := "手动封禁"
+	if req.Operation == "unban" {
+		operation = "解除封禁"
+	}
+	return "：" + operation + " " + addr.Unmap().String() + "（SSH）"
 }

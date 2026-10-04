@@ -72,6 +72,10 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 	}
 	if kind == "fail2ban" {
 		j.Target = s.Jail
+		if r.Operation == "ban" {
+			a, _ := manualBanAddress(r.IP)
+			j.BanIP = a.String()
+		}
 		if r.Operation == "adopt" {
 			j.Target = r.Jail
 		}
@@ -116,6 +120,15 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 	}
 	if kind == "firewall" && (r.Operation == "batch-adopt" || r.Operation == "batch-delete") {
 		current, e := c.Firewall(ctx, r.Zone)
+		if e != nil {
+			return result, e
+		}
+		if current.Revision != r.Revision {
+			return result, errors.New("状态已变化，请重新预览")
+		}
+	}
+	if kind == "fail2ban" && r.Operation == "ban" {
+		current, e := c.fail2banPreview(ctx, r)
 		if e != nil {
 			return result, e
 		}
@@ -339,6 +352,22 @@ func (c *Controller) rollback(ctx context.Context, j *journal) error {
 	}
 	if j.Reset {
 		return c.rollbackReset(ctx, j)
+	}
+	if j.BanIP != "" {
+		if !j.BanStarted {
+			j.Transaction.Status = "rolled-back"
+			return c.finish(j)
+		}
+		// Undo only this new ban. Restarting a jail would clear counters and
+		// bans added independently while the transaction was in progress.
+		if _, e := c.exec(ctx, "fail2ban-client", "set", j.Target, "unbanip", j.BanIP); e != nil {
+			return e
+		}
+		if e := c.verifyManualBan(ctx, j.Target, j.BanIP, false); e != nil {
+			return e
+		}
+		j.Transaction.Status = "rolled-back"
+		return c.finish(j)
 	}
 	for _, f := range j.Files {
 		if f.Exists {

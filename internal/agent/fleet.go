@@ -29,7 +29,7 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"security.firewall", "security.firewall.batch", "security.fail2ban", "security.fail2ban.reset", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
+	"security.firewall", "security.firewall.batch", "security.fail2ban", "security.fail2ban.reset", "security.fail2ban.ban", "security.fail2ban.permanent", "residential-exit", "socks-exit", "sing-box-migration", "subscription-render",
 }
 
 type FleetClientConfig struct {

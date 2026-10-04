@@ -35,6 +35,7 @@ type Controller struct {
 	Arm            func(context.Context) error
 	RecoveryBinary string
 	NoJournal      bool
+	LocalAddresses func() ([]netip.Addr, error)
 }
 type command struct {
 	Name  string
@@ -79,6 +80,8 @@ type journal struct {
 	Target       string
 	BootEnabled  map[string]bool
 	Install      bool
+	BanIP        string
+	BanStarted   bool
 }
 
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -262,6 +265,15 @@ func allowedPath(p string) bool {
 	return p == "/etc/systemd/system/wukong-firewall.service" || p == "/etc/init.d/wukong-firewall" || p == "/usr/sbin/policy-rc.d" || p == nftPath || p == "/etc/nftables.conf" || p == "/etc/nftables.nft" || p == jailPath || p == "/etc/ufw/user.rules" || p == "/etc/ufw/user6.rules" || p == "/etc/ufw/ufw.conf" || p == "/etc/default/ufw" || regexp.MustCompile(`^/etc/firewalld/zones/[A-Za-z0-9_-]+\.xml$`).MatchString(p)
 }
 func (c *Controller) validateBackup(j journal) error {
+	if j.BanStarted && j.BanIP == "" {
+		return errors.New("invalid manual ban journal")
+	}
+	if j.BanIP != "" {
+		a, err := manualBanAddress(j.BanIP)
+		if err != nil || a.String() != j.BanIP || j.Kind != "fail2ban" || j.Reset || !nameRE.MatchString(j.Target) || j.Target != j.Before.Jail || contains(j.Bans[j.Target], j.BanIP) {
+			return errors.New("invalid manual ban journal")
+		}
+	}
 	if j.Reset {
 		if j.Kind != "fail2ban" {
 			return errors.New("invalid reset journal")
