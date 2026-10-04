@@ -298,6 +298,7 @@ func (c *Controller) Fail2ban(ctx context.Context) (model.Fail2banState, error) 
 	}
 	r.CanActivate = canActivate && r.Writable
 	r.Revision = c.revision(s, raw, r.LogBackend, r.LogPath, r.SSHPorts, err == nil)
+	c.failureSources(ctx, &r)
 	return r, nil
 }
 func (c *Controller) fail2banPreview(ctx context.Context, req model.SecurityRequest) (model.SecurityPreview, error) {
