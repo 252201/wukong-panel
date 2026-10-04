@@ -414,6 +414,18 @@ func TestNativeSecurity(t *testing.T) {
 		v, _ := c.Fail2ban(ctx)
 		return len(v.Jails) > 0 && contains(v.Jails[0].Banned, "10.203.0.2")
 	})
+	waitNative(t, "real SSH failure source", func() bool {
+		v, _ := c.Fail2ban(ctx)
+		if !v.FailureSourcesAvailable || len(v.Jails) == 0 {
+			return false
+		}
+		for _, source := range v.Jails[0].Failures {
+			if source.IP == "10.203.0.2" && source.Count > 0 {
+				return true
+			}
+		}
+		return false
+	})
 	nativeConnect(t, "blocked", "10.203.0.1:46961", "10.203.0.2")
 	nativeConnect(t, "tcp", "10.203.0.1:9443", "10.203.0.2")
 	nativeConnect(t, "tcp", "10.203.0.1:22222", "10.203.0.2")

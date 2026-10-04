@@ -20,6 +20,7 @@ import (
 
 	"github.com/252201/wukong-panel/internal/config"
 	"github.com/252201/wukong-panel/internal/hostlocation"
+	"github.com/252201/wukong-panel/internal/iplocation"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
@@ -69,6 +70,7 @@ type Server struct {
 	fleetVaultErr    error
 	fleetProbeClient *http.Client
 	hostLocation     *hostlocation.Detector
+	ipLocations      *iplocation.Resolver
 	limiterMu        sync.Mutex
 	loginAttempts    map[string][]time.Time
 	fleetRequests    map[string][]time.Time
@@ -88,7 +90,8 @@ func New(cfg config.Config, s *store.Store, agent AgentAPI, version string) *Ser
 	}
 	return &Server{
 		cfg: cfg, store: s, agent: agent, version: version,
-		fleetVault: vault, fleetVaultErr: vaultErr,
+		ipLocations: iplocation.New(),
+		fleetVault:  vault, fleetVaultErr: vaultErr,
 		fleetProbeClient: &http.Client{
 			Timeout: 15 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -125,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/imports/scan", s.auth(s.scan, false))
 	mux.HandleFunc("POST /api/v1/imports/{id}/delete", s.auth(s.deleteCandidate, true))
 	mux.HandleFunc("GET /api/v1/system/{kind}", s.auth(s.hostSecurity, false))
+	mux.HandleFunc("GET /api/v1/system/ip-location", s.auth(s.securityIPLocation, false))
 	mux.HandleFunc("POST /api/v1/system/{kind}/{action}", s.auth(s.hostSecurity, true))
 	mux.HandleFunc("GET /api/v1/system/security-transactions/{id}", s.auth(s.hostSecurityTransaction, false))
 	mux.HandleFunc("POST /api/v1/system/security-transactions/{id}/confirm", s.auth(s.hostSecurityTransaction, true))

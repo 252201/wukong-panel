@@ -259,3 +259,45 @@ func TestFleetFirewallBatchCapabilityAndHostIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityIPLocationRequiresLoginAndValidIP(t *testing.T) {
+	s, db := fleetWebTestServer(t)
+	if _, _, err := db.EnsureAdmin(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec("UPDATE users SET must_change=0"); err != nil {
+		t.Fatal(err)
+	}
+	var userID int64
+	if err := db.DB.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	session, err := db.CreateSession(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		ip    string
+		login bool
+		want  int
+	}{
+		{"127.0.0.1", false, http.StatusUnauthorized},
+		{"127.0.0.1", true, http.StatusOK},
+		{"10.0.0.1", true, http.StatusOK},
+		{"8.8.8.8%3Btouch", true, http.StatusBadRequest},
+		{"https://example.com", true, http.StatusBadRequest},
+	} {
+		req := httptest.NewRequest("GET", "/api/v1/system/ip-location?ip="+test.ip, nil)
+		if test.login {
+			req.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
+		}
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != test.want {
+			t.Fatalf("%s login=%v: %d %s", test.ip, test.login, rec.Code, rec.Body.String())
+		}
+		if test.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"status":"private"`) {
+			t.Fatalf("unexpected location %s", rec.Body.String())
+		}
+	}
+}

@@ -3,6 +3,13 @@ export type Locale = 'zh-CN' | 'en-US'
 export const LANGUAGE_STORAGE_KEY = 'wukong-panel.language'
 
 const english: Record<string, string> = {
+  '无法读取 Fail2ban 失败来源日志': 'Cannot read Fail2ban failure-source logs',
+  'Fail2ban 失败来源日志不可读': 'Fail2ban failure-source log file is unreadable',
+  '失败来源日志未写入可读取的文件或 journal': 'Failure-source logs are not written to a readable file or journal',
+  'Fail2ban journal 失败来源不可读': 'Fail2ban failure-source journal is unreadable',
+  'Fail2ban journal 记录格式无法识别': 'Unsupported Fail2ban journal record format',
+  'Fail2ban journal 记录超过读取限制': 'Fail2ban journal records exceed the read limit',
+  '当前 Fail2ban 日志位置暂不支持失败来源展示': 'The current Fail2ban log destination does not support failure-source display',
   '按 CPU 排序': 'Sort by CPU',
   '按内存排序': 'Sort by memory',
   '排序范围为已采集的进程，采样保留 CPU 与内存占用最高的进程。': 'Sorting covers sampled processes, retaining the highest CPU and memory consumers.',
