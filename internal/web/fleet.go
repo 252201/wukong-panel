@@ -705,6 +705,10 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		return
 	}
 	resource := strings.Trim(r.PathValue("resource"), "/")
+	if (resource == "system/cloudflared" || strings.HasPrefix(resource, "system/cloudflared/")) && !fleetHasCapability(host, "cloudflared.update") {
+		writeError(w, 409, "Remote Agent does not support cloudflared updates")
+		return
+	}
 	if cap := requiredSecurityCapability(resource); cap != "" && !fleetHasCapability(host, cap) {
 		writeError(w, 409, "远端 Agent 不支持此安全功能，请更新完整面板")
 		return
@@ -869,6 +873,19 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 	}
 	parts := strings.Split(resource, "/")
 	switch {
+	case resource == "system/cloudflared" && r.Method == http.MethodGet:
+		return "cloudflared.status", json.RawMessage(`{"operation":"status"}`), false, nil
+	case len(parts) == 3 && parts[0] == "system" && parts[1] == "cloudflared" && r.Method == http.MethodPost:
+		if parts[2] != "check" && parts[2] != "settings" && parts[2] != "update" {
+			return "", nil, false, errors.New("unknown cloudflared action")
+		}
+		var req model.CloudflaredRequest
+		if json.Unmarshal(body, &req) != nil {
+			return "", nil, false, errors.New("invalid cloudflared request")
+		}
+		req.Operation = parts[2]
+		payload, _ := json.Marshal(req)
+		return "cloudflared." + parts[2], payload, parts[2] == "update", nil
 	case r.Method == http.MethodGet && (resource == "system/firewall" || resource == "system/fail2ban"):
 		payload, _ := json.Marshal(model.SecurityRequest{Zone: r.URL.Query().Get("zone")})
 		return "security." + parts[1] + ".status", payload, false, nil
@@ -949,6 +966,9 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 		}
 	}
 	ttl := 2 * time.Minute
+	if strings.HasPrefix(kind, "cloudflared.") && createJob {
+		ttl = 5 * time.Minute
+	}
 	if createJob && strings.HasPrefix(kind, "security.") {
 		ttl = 9 * time.Minute
 	}

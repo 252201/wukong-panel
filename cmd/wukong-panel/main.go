@@ -111,6 +111,10 @@ func (d directAgent) SecurityTransaction(ctx context.Context, id string) (model.
 	return d.manager.SecurityTransaction(ctx, id)
 }
 
+func (d directAgent) Cloudflared(ctx context.Context, r model.CloudflaredRequest) (model.CloudflaredState, error) {
+	return d.manager.Cloudflared(ctx, r)
+}
+
 func main() {
 	cfg := config.Parse(version)
 	if cfg.Command == "security-recovery" || cfg.Command == "security-firewall" {

@@ -2,16 +2,11 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,107 +15,29 @@ import (
 	"github.com/252201/wukong-panel/internal/model"
 )
 
-const (
-	cloudflaredVersion      = "2026.7.1"
-	cloudflaredTokenFileMin = "2025.4.0"
-)
+const cloudflaredTokenFileMin = "2025.4.0"
 
-type cloudflaredAssetInfo struct {
-	Name   string
-	SHA256 string
-}
-
-var (
-	cloudflaredInstallMu sync.Mutex
-	cloudflaredAssets    = map[string]cloudflaredAssetInfo{
-		"amd64": {Name: "cloudflared-linux-amd64", SHA256: "79a0ade7fc854f62c1aaef48424d9d979e8c2fcd039189d24db82b84cd146be1"},
-		"arm64": {Name: "cloudflared-linux-arm64", SHA256: "18f2c9bfc7a67a971bd96f1a5a1935def3c1e52aa386626f1566f04e9b5478d6"},
-	}
-)
-
-func cloudflaredAsset(architecture string) (cloudflaredAssetInfo, error) {
-	asset, ok := cloudflaredAssets[architecture]
-	if !ok {
-		return cloudflaredAssetInfo{}, fmt.Errorf("cloudflared automatic installation does not support architecture %s", architecture)
-	}
-	return asset, nil
-}
+var cloudflaredInstallMu sync.Mutex
 
 func (m *Manager) ensureCloudflared(ctx context.Context) (string, error) {
-	path := strings.TrimSpace(m.cfg.CloudflaredBin)
-	if path == "" {
-		path = "/usr/local/bin/cloudflared"
+	if err := m.cloudflaredUpdater().Recover(ctx); err != nil {
+		return "", err
 	}
+	path := m.cloudflaredUpdater().Binary
 	if err := validateCloudflaredRuntime(ctx, path); err == nil {
 		return path, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("cloudflared binary is unusable: %w", err)
 	}
-
 	cloudflaredInstallMu.Lock()
 	defer cloudflaredInstallMu.Unlock()
 	if err := validateCloudflaredRuntime(ctx, path); err == nil {
 		return path, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("cloudflared binary is unusable: %w", err)
-	}
-	asset, err := cloudflaredAsset(runtime.GOARCH)
-	if err != nil {
 		return "", err
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := m.cloudflaredUpdater().Install(ctx); err != nil {
 		return "", err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".cloudflared-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-
-	url := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/%s", cloudflaredVersion, asset.Name)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		_ = temporary.Close()
-		return "", err
-	}
-	request.Header.Set("User-Agent", "wukong-panel/cloudflared-installer")
-	client := &http.Client{Timeout: 3 * time.Minute}
-	response, err := client.Do(request)
-	if err != nil {
-		_ = temporary.Close()
-		return "", fmt.Errorf("download cloudflared %s: %w", cloudflaredVersion, err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		_ = temporary.Close()
-		return "", fmt.Errorf("download cloudflared %s: HTTP %d", cloudflaredVersion, response.StatusCode)
-	}
-	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(response.Body, 128<<20))
-	closeErr := temporary.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	if closeErr != nil {
-		return "", closeErr
-	}
-	if written == 0 || written >= 128<<20 {
-		return "", errors.New("downloaded cloudflared binary has an invalid size")
-	}
-	actual := hex.EncodeToString(hash.Sum(nil))
-	if actual != asset.SHA256 {
-		return "", fmt.Errorf("cloudflared SHA-256 mismatch: got %s", actual)
-	}
-	if err = os.Chmod(temporaryPath, 0o755); err != nil {
-		return "", err
-	}
-	if err = os.Rename(temporaryPath, path); err != nil {
-		return "", err
-	}
-	if err = validateCloudflaredRuntime(ctx, path); err != nil {
-		_ = os.Remove(path)
-		return "", fmt.Errorf("installed cloudflared failed validation: %w", err)
 	}
 	return path, nil
 }

@@ -8,21 +8,6 @@ import (
 	"github.com/252201/wukong-panel/internal/model"
 )
 
-func TestCloudflaredPinnedAssets(t *testing.T) {
-	for _, architecture := range []string{"amd64", "arm64"} {
-		asset, err := cloudflaredAsset(architecture)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.HasPrefix(asset.Name, "cloudflared-linux-") || len(asset.SHA256) != 64 {
-			t.Fatalf("invalid pinned asset for %s: %#v", architecture, asset)
-		}
-	}
-	if _, err := cloudflaredAsset("386"); err == nil {
-		t.Fatal("unsupported cloudflared architecture accepted")
-	}
-}
-
 func TestCloudflaredTokenFileVersionGate(t *testing.T) {
 	for _, output := range []string{
 		"cloudflared version 2025.4.0 (built 2025-04-08)",

@@ -47,6 +47,18 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 		return err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /cloudflared", s.authorize(func(w http.ResponseWriter, r *http.Request) {
+		var req model.CloudflaredRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		v, e := s.manager.Cloudflared(r.Context(), req)
+		if e != nil {
+			writeError(w, 400, e.Error())
+			return
+		}
+		writeJSON(w, 200, v)
+	}))
 	mux.HandleFunc("GET /health", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.manager.Version(r.Context())})
 	}))
