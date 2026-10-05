@@ -89,8 +89,52 @@ const updateMessages: Record<string, readonly [string, string]> = {
     'The latest release requires a newer panel compatibility profile that this Wukong version cannot safely migrate or verify. Upgrade the Wukong panel/Agent, then check again.',
   ],
 }
+const tunnelUpdateMessages: Record<string, readonly [string, string]> = {
+  'managed service is not running the configured binary': [
+    '无法确认至少一个悟空托管的 Cloudflare Tunnel 服务正在运行面板配置的 cloudflared 程序，因此为避免替换错误程序或影响其他服务，已禁止升级。若主机使用 Alpine/OpenRC，旧版 Agent 可能把 musl 加载器误认为 cloudflared；请先升级到包含 OpenRC 检测修复的悟空版本，再重新检查。其他系统请核对 Tunnel 服务启动命令是否指向面板配置的 cloudflared 路径。',
+    'At least one Wukong-managed Cloudflare Tunnel service could not be verified as running the configured cloudflared binary, so the update was blocked to avoid replacing the wrong executable or affecting another service. On Alpine/OpenRC, an older Agent may mistake the musl loader for cloudflared; upgrade to a Wukong version with the OpenRC detection fix, then check again. On other systems, verify that the Tunnel service command points to the cloudflared path configured by the panel.',
+  ],
+  'unsupported connector service identity': [
+    '至少一个悟空托管的 Tunnel 节点使用了无效的服务标识，或未使用受支持的 systemd/OpenRC 管理方式。更新器无法确认该服务并安全重启，因此已阻止升级。请检查该 Tunnel 节点的服务登记。',
+    'At least one Wukong-managed Tunnel node has an invalid service identity or uses an unsupported service manager. The updater cannot verify and safely restart it, so the update was blocked. Check the Tunnel node’s service registration.',
+  ],
+  'conflicting connector service managers': [
+    '同一个 Cloudflare Tunnel 服务被登记为不同的服务管理器。为避免停止或重启错误的服务，更新已被阻止。请修正 Tunnel 节点的服务登记，使该服务只对应一个管理器后重试。',
+    'The same Cloudflare Tunnel service is registered under different service managers. The update was blocked to avoid stopping or restarting the wrong service. Correct the Tunnel node registration so the service has one manager, then retry.',
+  ],
+  'no Wukong-managed Tunnel connectors': [
+    '当前没有由悟空管理的 Cloudflare Tunnel 节点。更新器只会更新并重启悟空登记的 Tunnel 服务，因此目前无法升级 cloudflared。请先在悟空中创建或接管 Tunnel 节点。',
+    'There are no Cloudflare Tunnel nodes managed by Wukong. The updater only updates and restarts Tunnel services registered with Wukong, so cloudflared cannot be updated yet. Create or import a Tunnel node in Wukong first.',
+  ],
+  'runtime binary is also used by an unmanaged process': [
+    '检测到悟空托管的 Tunnel 服务以外的进程也在使用这份 cloudflared 程序。替换它可能影响该进程，因此更新已被阻止。请先确认并停止或迁移该外部进程，再重新检查。',
+    'A process outside the Wukong-managed Tunnel services is also using this cloudflared binary. Replacing it could affect that process, so the update was blocked. Identify and stop or migrate the external process, then check again.',
+  ],
+  'runtime service is using a different executable; restart it before updating': [
+    '运行中的 Tunnel 服务使用的不是面板配置的 cloudflared 程序。为避免升级错误文件，更新已被阻止。请先用面板配置的程序重启 Tunnel 服务，再重新检查。',
+    'A running Tunnel service is using a different cloudflared executable from the one configured by the panel. The update was blocked to avoid updating the wrong file. Restart the Tunnel service with the configured executable, then check again.',
+  ],
+  'cannot parse cloudflared version': [
+    '无法从当前 cloudflared 程序读取版本号，因此不能确认升级目标和版本顺序，更新已被阻止。请检查该程序是否为有效的 cloudflared 可执行文件。',
+    'The current cloudflared version could not be read, so the updater cannot verify the target or version order. The update was blocked. Check that the executable is a valid cloudflared binary.',
+  ],
+  'external connector change prevents automatic rollback': [
+    '更新期间检测到 Cloudflare Tunnel 程序或服务被其他操作修改。为避免覆盖外部变更，自动回滚已停止；请先核对当前程序版本和 Tunnel 服务状态，再手动重新检查更新。',
+    'The cloudflared binary or Tunnel services changed outside the update process. Automatic rollback was stopped to avoid overwriting that change. Verify the current binary version and Tunnel service state before checking again.',
+  ],
+  'connector binary changed during download': [
+    '下载更新期间，cloudflared 程序被其他操作替换或修改。为避免覆盖该变更，更新已中止；请重新检查当前版本后再试。',
+    'The cloudflared binary was replaced or modified while the update was downloading. The update was stopped to avoid overwriting that change. Check the current version again before retrying.',
+  ],
+  'connector services changed during download': [
+    '下载更新期间，Tunnel 服务登记或运行状态发生变化。为避免重启错误的服务，更新已中止；请重新检查 Tunnel 服务后再试。',
+    'Tunnel service registration or status changed while the update was downloading. The update was stopped to avoid restarting the wrong service. Check the Tunnel services again before retrying.',
+  ],
+}
 const updateMessage = (raw?: string) => {
   if (!raw) return raw
+  const tunnelExact = isTunnel.value ? tunnelUpdateMessages[raw] : undefined
+  if (tunnelExact) return t(tunnelExact[0], tunnelExact[1])
   const exact = updateMessages[raw]
   if (exact) return t(exact[0].replaceAll('sing-box', binaryName.value), exact[1].replaceAll('sing-box', binaryName.value))
   const migration = raw.match(/^configuration (.+) requires manual migration$/)
