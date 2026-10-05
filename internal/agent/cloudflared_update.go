@@ -183,16 +183,33 @@ func (m *Manager) checkManagedRuntimeProcesses(binary string, services []compone
 	procs, _ := filepath.Glob("/proc/[0-9]*/exe")
 	for _, p := range procs {
 		exe, err := os.Readlink(p)
-		if err != nil || strings.TrimSuffix(exe, " (deleted)") != binary {
+		if err != nil {
 			continue
 		}
-		processBinary, e := os.Stat(p)
-		if e != nil || !os.SameFile(live, processBinary) {
-			return errors.New("runtime service is using a different executable; restart it before updating")
+		pidDir := filepath.Dir(p)
+		pid := filepath.Base(pidDir)
+		isConfiguredPath := strings.TrimSuffix(exe, " (deleted)") == binary
+		usesConfiguredBinary := false
+		if isConfiguredPath {
+			processBinary, statErr := os.Stat(p)
+			if statErr != nil || !os.SameFile(live, processBinary) {
+				return errors.New("runtime service is using a different executable; restart it before updating")
+			}
+			usesConfiguredBinary = true
+		} else if runtime.GOOS == "linux" && runtimeProcessHasArg(pidDir, binary) {
+			mapped, sameFile := runtimeProcessMapsBinary(pidDir, binary, live)
+			if mapped {
+				if !sameFile {
+					return errors.New("runtime service is using a different executable; restart it before updating")
+				}
+				usesConfiguredBinary = true
+			}
 		}
-		pid := filepath.Base(filepath.Dir(p))
+		if !usesConfiguredBinary {
+			continue
+		}
 		owned := false
-		group, _ := os.ReadFile(filepath.Join(filepath.Dir(p), "cgroup"))
+		group, _ := os.ReadFile(filepath.Join(pidDir, "cgroup"))
 		for _, s := range services {
 			if s.Manager == "systemd" {
 				for _, line := range strings.Split(string(group), "\n") {

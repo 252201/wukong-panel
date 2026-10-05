@@ -5,6 +5,7 @@ import { componentUpdateAPI, type ComponentUpdateState, type Job } from './api'
 const props = defineProps<{ component: 'cloudflared' | 'sing-box'; hostId: string; online: boolean; compatible: boolean; capabilities: string[]; language: string }>()
 const isTunnel = computed(() => props.component === 'cloudflared')
 const title = computed(() => isTunnel.value ? 'Cloudflare Tunnel' : 'sing-box')
+const binaryName = computed(() => isTunnel.value ? 'cloudflared' : 'sing-box')
 const client = componentUpdateAPI(props.hostId, props.component)
 const t = (zh: string, en: string) => props.language === 'en-US' ? en : zh
 const supported = computed(() => props.hostId === 'local' || props.capabilities.includes(`${props.component}.update`))
@@ -18,7 +19,138 @@ let alive = true
 let timer: ReturnType<typeof setTimeout> | undefined
 const writable = computed(() => available.value && !!state.value?.writable && !busy.value && !jobRunning.value)
 const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
-const reasonText = computed(() => state.value?.reason === 'latest release requires a newer panel compatibility profile' ? t('该版本超出当前面板支持的配置范围，请先升级面板。', 'This release requires a newer panel compatibility profile. Upgrade the panel first.') : state.value?.reason)
+const updateMessages: Record<string, readonly [string, string]> = {
+  'managed service is not running the configured binary': [
+    '无法确认至少一个悟空登记的 sing-box 服务正在运行面板配置的二进制文件，因此为避免替换错误程序或影响其他服务，已禁止升级。若主机使用 Alpine/OpenRC，旧版 Agent 可能把 musl 加载器误认为 sing-box；请先升级到包含 OpenRC 检测修复的悟空版本，再重新检查。其他系统请核对服务启动命令是否指向面板配置的 sing-box 路径。',
+    'At least one Wukong-managed sing-box service could not be verified as running the configured binary, so the update was blocked to avoid replacing the wrong executable or affecting another service. On Alpine/OpenRC, an older Agent may mistake the musl loader for sing-box; upgrade to a Wukong version with the OpenRC detection fix, then check again. On other systems, verify that the service command points to the sing-box path configured by the panel.',
+  ],
+  'unmanaged configuration prevents runtime updates': [
+    'sing-box 配置目录中存在未登记到悟空面板的配置文件。升级器无法确认它是否兼容新版本，因此已阻止升级。请先在悟空中接管对应节点，或确认文件无用后自行移除，再重新检查。',
+    'The sing-box configuration directory contains a file not registered with Wukong. The updater cannot verify that it is compatible with the new version, so the update was blocked. Import the corresponding node into Wukong, or remove the file yourself if it is unused, then check again.',
+  ],
+  'unmanaged nodes prevent runtime updates': [
+    '存在未由悟空管理的 sing-box 节点。升级器无法迁移并验证这些节点的配置，因此已阻止升级。请先接管这些节点，或在确认不再使用后移除，再重新检查。',
+    'One or more sing-box nodes are not managed by Wukong. The updater cannot migrate and verify their configurations, so the update was blocked. Import those nodes into Wukong, or remove them if they are no longer used, then check again.',
+  ],
+  'node configuration is outside the managed directory': [
+    '至少一个节点的配置文件不在悟空管理的配置目录内。升级器只会迁移和备份管理目录中的配置，为避免遗漏或改动外部文件，已阻止升级。请将节点配置迁入面板管理目录并重新登记，或改用其他方式维护该节点。',
+    'At least one node configuration is outside Wukong’s managed configuration directory. The updater only migrates and backs up files in that directory, so it blocked the update to avoid missing or changing external files. Move and register the configuration under the managed directory, or maintain that node separately.',
+  ],
+  'configuration directory must be absolute': [
+    '悟空的 sing-box 配置目录不是绝对路径，无法安全定位和备份节点配置，因此已阻止升级。请修正 Agent 的配置目录设置后重试。',
+    'Wukong’s sing-box configuration directory is not an absolute path, so node configurations cannot be located and backed up safely. The update was blocked. Correct the Agent configuration and try again.',
+  ],
+  'configuration must be a regular file without group/world write access': [
+    '节点配置不是普通文件，或允许同组/其他用户写入。为避免升级时使用可被替换或篡改的配置，已阻止升级。请检查文件类型和权限，确保只有所有者可以写入后重试。',
+    'A node configuration is not a regular file or is writable by its group or other users. The update was blocked to prevent using a replaceable or modified configuration. Check the file type and permissions, and allow writes only by the owner before retrying.',
+  ],
+  'managed configuration is missing': [
+    '悟空登记的节点配置文件缺失。升级器无法为该节点备份和迁移配置，因此已阻止升级。请恢复配置文件或修正节点登记后重新检查。',
+    'A configuration registered to a Wukong node is missing. The updater cannot back up and migrate that node, so the update was blocked. Restore the file or correct the node registration, then check again.',
+  ],
+  'unsupported managed runtime service': [
+    '至少一个节点使用了悟空更新器不支持的服务名称或服务管理方式，因此无法安全停止、升级并恢复节点，更新已被阻止。请检查节点的 systemd/OpenRC 服务登记。',
+    'At least one node uses a service name or service manager that the Wukong updater does not support. It cannot safely stop, update, and restore the node, so the update was blocked. Check the node’s systemd/OpenRC service registration.',
+  ],
+  'conflicting runtime service managers': [
+    '同一个 sing-box 服务被登记为多个不同的服务管理器。为避免操作错误的服务，更新已被阻止。请修正节点服务登记，使每个服务只对应一个管理器后重试。',
+    'The same sing-box service is registered under more than one service manager. The update was blocked to avoid operating on the wrong service. Correct the node registration so each service has one manager, then retry.',
+  ],
+  'runtime binary is also used by an unmanaged process': [
+    '检测到悟空托管服务以外的进程也在使用这份 sing-box 二进制文件。替换它可能影响该进程，因此更新已被阻止。请先确认并停止或迁移该外部进程，再重新检查。',
+    'A process outside the Wukong-managed services is also using this sing-box binary. Replacing it could affect that process, so the update was blocked. Identify and stop or migrate the external process, then check again.',
+  ],
+  'runtime service is using a different executable; restart it before updating': [
+    '运行中的节点服务仍在使用另一份 sing-box 程序，而不是面板当前配置的二进制文件。为避免升级错误文件，更新已被阻止。请先用面板配置的程序重启该服务，再重新检查。',
+    'A running node service is using a different sing-box executable from the one configured by the panel. The update was blocked to avoid updating the wrong file. Restart the service with the panel-configured executable, then check again.',
+  ],
+  'runtime is not installed': [
+    '没有找到面板配置路径上的 sing-box 程序，因此无法检查或升级。请先安装 sing-box，或修正 Agent 中的二进制路径。',
+    'No sing-box executable was found at the path configured by the panel, so it cannot be checked or updated. Install sing-box or correct the binary path in the Agent configuration.',
+  ],
+  'connector must be a regular executable without group/world write access': [
+    '面板配置的 sing-box 文件不是普通可执行文件，或允许同组/其他用户写入。为避免替换不安全的程序，更新已被阻止。请检查文件类型和权限后重试。',
+    'The configured sing-box file is not a regular executable or is writable by its group or other users. The update was blocked to avoid replacing an unsafe executable. Check the file type and permissions, then retry.',
+  ],
+  'cannot determine runtime version': [
+    '无法读取当前 sing-box 程序的版本，不能确认升级目标和版本顺序，因此已阻止更新。请检查二进制文件是否可执行且可正常运行。',
+    'The current sing-box version could not be read, so the updater cannot verify the target or version order. The update was blocked. Check that the binary is executable and runs correctly.',
+  ],
+  'unsupported architecture': [
+    '当前服务器的 CPU 架构不受自动更新支持；目前仅支持 Linux amd64 和 arm64。',
+    'Automatic updates do not support this server architecture. Linux amd64 and arm64 are currently supported.',
+  ],
+  'update recovery is pending': [
+    '检测到上一次更新尚未完成恢复。为避免在恢复期间再次替换程序，更新已被阻止。请先完成或排查上一次更新的恢复任务，再重新检查。',
+    'Recovery from a previous update is still pending. The update was blocked to avoid replacing the executable during recovery. Complete or investigate the recovery first, then check again.',
+  ],
+  'latest release requires a newer panel compatibility profile': [
+    '最新版本要求更新的面板兼容配置，当前悟空版本无法安全迁移或验证它。请先升级悟空面板/Agent，再重新检查。',
+    'The latest release requires a newer panel compatibility profile that this Wukong version cannot safely migrate or verify. Upgrade the Wukong panel/Agent, then check again.',
+  ],
+}
+const tunnelUpdateMessages: Record<string, readonly [string, string]> = {
+  'managed service is not running the configured binary': [
+    '无法确认至少一个悟空托管的 Cloudflare Tunnel 服务正在运行面板配置的 cloudflared 程序，因此为避免替换错误程序或影响其他服务，已禁止升级。若主机使用 Alpine/OpenRC，旧版 Agent 可能把 musl 加载器误认为 cloudflared；请先升级到包含 OpenRC 检测修复的悟空版本，再重新检查。其他系统请核对 Tunnel 服务启动命令是否指向面板配置的 cloudflared 路径。',
+    'At least one Wukong-managed Cloudflare Tunnel service could not be verified as running the configured cloudflared binary, so the update was blocked to avoid replacing the wrong executable or affecting another service. On Alpine/OpenRC, an older Agent may mistake the musl loader for cloudflared; upgrade to a Wukong version with the OpenRC detection fix, then check again. On other systems, verify that the Tunnel service command points to the cloudflared path configured by the panel.',
+  ],
+  'unsupported connector service identity': [
+    '至少一个悟空托管的 Tunnel 节点使用了无效的服务标识，或未使用受支持的 systemd/OpenRC 管理方式。更新器无法确认该服务并安全重启，因此已阻止升级。请检查该 Tunnel 节点的服务登记。',
+    'At least one Wukong-managed Tunnel node has an invalid service identity or uses an unsupported service manager. The updater cannot verify and safely restart it, so the update was blocked. Check the Tunnel node’s service registration.',
+  ],
+  'conflicting connector service managers': [
+    '同一个 Cloudflare Tunnel 服务被登记为不同的服务管理器。为避免停止或重启错误的服务，更新已被阻止。请修正 Tunnel 节点的服务登记，使该服务只对应一个管理器后重试。',
+    'The same Cloudflare Tunnel service is registered under different service managers. The update was blocked to avoid stopping or restarting the wrong service. Correct the Tunnel node registration so the service has one manager, then retry.',
+  ],
+  'no Wukong-managed Tunnel connectors': [
+    '当前没有由悟空管理的 Cloudflare Tunnel 节点。更新器只会更新并重启悟空登记的 Tunnel 服务，因此目前无法升级 cloudflared。请先在悟空中创建或接管 Tunnel 节点。',
+    'There are no Cloudflare Tunnel nodes managed by Wukong. The updater only updates and restarts Tunnel services registered with Wukong, so cloudflared cannot be updated yet. Create or import a Tunnel node in Wukong first.',
+  ],
+  'runtime binary is also used by an unmanaged process': [
+    '检测到悟空托管的 Tunnel 服务以外的进程也在使用这份 cloudflared 程序。替换它可能影响该进程，因此更新已被阻止。请先确认并停止或迁移该外部进程，再重新检查。',
+    'A process outside the Wukong-managed Tunnel services is also using this cloudflared binary. Replacing it could affect that process, so the update was blocked. Identify and stop or migrate the external process, then check again.',
+  ],
+  'runtime service is using a different executable; restart it before updating': [
+    '运行中的 Tunnel 服务使用的不是面板配置的 cloudflared 程序。为避免升级错误文件，更新已被阻止。请先用面板配置的程序重启 Tunnel 服务，再重新检查。',
+    'A running Tunnel service is using a different cloudflared executable from the one configured by the panel. The update was blocked to avoid updating the wrong file. Restart the Tunnel service with the configured executable, then check again.',
+  ],
+  'cannot parse cloudflared version': [
+    '无法从当前 cloudflared 程序读取版本号，因此不能确认升级目标和版本顺序，更新已被阻止。请检查该程序是否为有效的 cloudflared 可执行文件。',
+    'The current cloudflared version could not be read, so the updater cannot verify the target or version order. The update was blocked. Check that the executable is a valid cloudflared binary.',
+  ],
+  'external connector change prevents automatic rollback': [
+    '更新期间检测到 Cloudflare Tunnel 程序或服务被其他操作修改。为避免覆盖外部变更，自动回滚已停止；请先核对当前程序版本和 Tunnel 服务状态，再手动重新检查更新。',
+    'The cloudflared binary or Tunnel services changed outside the update process. Automatic rollback was stopped to avoid overwriting that change. Verify the current binary version and Tunnel service state before checking again.',
+  ],
+  'connector binary changed during download': [
+    '下载更新期间，cloudflared 程序被其他操作替换或修改。为避免覆盖该变更，更新已中止；请重新检查当前版本后再试。',
+    'The cloudflared binary was replaced or modified while the update was downloading. The update was stopped to avoid overwriting that change. Check the current version again before retrying.',
+  ],
+  'connector services changed during download': [
+    '下载更新期间，Tunnel 服务登记或运行状态发生变化。为避免重启错误的服务，更新已中止；请重新检查 Tunnel 服务后再试。',
+    'Tunnel service registration or status changed while the update was downloading. The update was stopped to avoid restarting the wrong service. Check the Tunnel services again before retrying.',
+  ],
+}
+const updateMessage = (raw?: string) => {
+  if (!raw) return raw
+  const tunnelExact = isTunnel.value ? tunnelUpdateMessages[raw] : undefined
+  if (tunnelExact) return t(tunnelExact[0], tunnelExact[1])
+  const exact = updateMessages[raw]
+  if (exact) return t(exact[0].replaceAll('sing-box', binaryName.value), exact[1].replaceAll('sing-box', binaryName.value))
+  const migration = raw.match(/^configuration (.+) requires manual migration$/)
+  if (migration) return t(`配置文件 ${migration[1]} 包含无法自动迁移的内容。为避免破坏节点，升级已被阻止；请先按新版本要求手动调整配置，再重新检查。`, `Configuration ${migration[1]} contains data that cannot be migrated automatically. The update was blocked to protect the node; adjust the configuration for the new version, then check again.`)
+  const iface = raw.match(/^configuration references unavailable interface (.+)$/)
+  if (iface) return t(`节点配置引用了本机不存在或不可用的网络接口 ${iface[1]}，升级前校验无法通过，因此已阻止升级。请检查接口名称或配置后重试。`, `The node configuration references network interface ${iface[1]}, which is unavailable on this host. Pre-update validation failed, so the update was blocked. Check the interface name or configuration, then retry.`)
+  const proxy = raw.match(/^node (.+) failed the local proxy round trip$/)
+  if (proxy) return t(`节点 ${proxy[1]} 更新后的本机代理连通性检测失败。系统已中止更新并自动恢复原版本；请检查节点配置和本机监听后重试。`, `The local proxy connectivity check failed after updating node ${proxy[1]}. The update was stopped and the previous version was restored. Check the node configuration and local listener before retrying.`)
+  const service = raw.match(/^runtime service (.+) is not active after restart$/)
+  if (service) return t(`服务 ${service[1]} 在更新后未能正常启动。系统已中止更新并自动恢复原版本；请查看该服务日志后重试。`, `Service ${service[1]} did not start after the update. The update was stopped and the previous version was restored. Check the service logs before retrying.`)
+  const http = raw.match(/^runtime download HTTP (\d+)$/)
+  if (http) return t(`连接官方更新源失败（HTTP ${http[1]}），无法读取或下载新版本。请检查服务器网络及 GitHub 连通性后重新检查。`, `The official update source returned HTTP ${http[1]}, so the release could not be read or downloaded. Check server network access to GitHub, then retry.`)
+  return raw
+}
+const reasonText = computed(() => updateMessage(state.value?.reason))
+const errorText = computed(() => updateMessage(error.value || state.value?.lastError))
 const message = (e: unknown) => e instanceof Error ? e.message : t('操作失败', 'Operation failed')
 async function load() {
   if (!available.value) return
@@ -89,7 +221,7 @@ onBeforeUnmount(() => { alive = false; if (timer) clearTimeout(timer) })
       <p v-if="state?.reason" class="help-text">{{ reasonText }}</p>
       <p v-if="state?.checkedAt && !state.checkedAt.startsWith('0001')" class="help-text">{{ t('最后检查', 'Last checked') }} {{ new Date(state.checkedAt).toLocaleString(language) }}</p>
       <p v-if="job" role="status">{{ job.message }} · {{ job.progress }}%</p>
-      <p v-if="error || state?.lastError" class="connector-error" role="alert">{{ error || state?.lastError }}</p>
+      <p v-if="errorText" class="connector-error" role="alert">{{ errorText }}</p>
     </template>
   </section>
 </template>
