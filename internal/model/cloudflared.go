@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-type CloudflaredState struct {
+type ComponentUpdateState struct {
 	Installed       bool      `json:"installed"`
 	CurrentVersion  string    `json:"currentVersion"`
 	LatestVersion   string    `json:"latestVersion"`
@@ -16,9 +16,12 @@ type CloudflaredState struct {
 	LastError       string    `json:"lastError,omitempty"`
 }
 
-type CloudflaredRequest struct {
+type ComponentUpdateRequest struct {
 	Operation      string `json:"operation"`
 	CurrentVersion string `json:"currentVersion,omitempty"`
 	TargetVersion  string `json:"targetVersion,omitempty"`
 	AutoUpdate     *bool  `json:"autoUpdate,omitempty"`
 }
+
+type CloudflaredState = ComponentUpdateState
+type CloudflaredRequest = ComponentUpdateRequest

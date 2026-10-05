@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.7.12-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.7.13-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -147,7 +147,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.7.12 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.7.13 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -309,6 +309,12 @@ A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/I
 安装和更新都校验官方 Release 的架构、资产 URL、大小、SHA-256 及实际版本；缺失校验信息时停止，不降级到固定旧版本。更新仅替换配置的 cloudflared 二进制并重启此前运行的悟空连接器，停止的连接器保持停止，节点配置和 Tunnel Token 保留。校验和备份完成后才替换；失败恢复原二进制并重启原连接器，Agent 中断后由持久恢复记录重试。共享同一二进制的外部连接器会阻止更新。服务状态校验不代表已经完成异地公网代理验收。
 
 自动更新仍保留 `--no-autoupdate`，由悟空管理更新事务。开关与检查结果存于 root-only 的 `<secret-dir>/cloudflared-update/state.json`，恢复记录为同目录 `pending.json`。二进制旁只保留一份 `.wukong-rollback` 回滚文件，避免每次更新累积完整数据库备份；手动更新的执行结果可在任务日志查看。
+
+系统页把 **sing-box** 和 **Cloudflare Tunnel** 更新卡片并排显示，手机端上下排列，卡片间距均为 17px。sing-box 提供当前版本、官方稳定版检查和确认后的手动升级，执行结果写入任务日志；切换主机再返回会继续跟踪该主机和组件的进行中任务。该入口只提供手动更新；原 cloudflared 自动更新开关继续保留。
+
+sing-box 面板更新支持 Linux amd64/arm64 的官方稳定包，并校验资产地址、大小、SHA-256 和解压后的实际版本。目标必须属于当前面板支持的配置系列（目前为 1.14.x），后续主/次版本需要先扩展面板兼容性支持。更新只处理悟空托管配置和服务；未托管节点、未知 JSON 配置、符号链接、外部进程共用二进制或缺失配置会阻止更新。新二进制先检查迁移后的全部配置及网卡依赖，再保存旧二进制和私有配置快照、停止原活动服务、原子提交文件、重启并执行本机代理 HTTPS 闭环探测；停止的节点保持停止。失败或中断由同一持久恢复记录还原二进制、原配置及文件权限和活动服务，不修改服务定义，也不重启 cloudflared。探测经过本机入站，不代表已验收 Cloudflare 边缘或异地公网接入。
+
+sing-box 更新状态和 root-only 恢复记录位于 `<secret-dir>/sing-box-update`，二进制旁保留一份 `.wukong-rollback`；该流程不备份完整面板数据库，也不累计每次更新的历史快照。现有安装器的 sing-box 更新/回退命令保持可用，面板更新前应避免同时通过独立安装器执行升级。
 
 ## 架构与安全边界
 

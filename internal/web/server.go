@@ -127,6 +127,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/share", s.auth(s.share, false))
 	mux.HandleFunc("GET /api/v1/imports/scan", s.auth(s.scan, false))
 	mux.HandleFunc("POST /api/v1/imports/{id}/delete", s.auth(s.deleteCandidate, true))
+	mux.HandleFunc("GET /api/v1/system/sing-box", s.auth(s.singBoxUpdate, false))
+	mux.HandleFunc("POST /api/v1/system/sing-box/{action}", s.auth(s.singBoxUpdate, true))
 	mux.HandleFunc("GET /api/v1/system/cloudflared", s.auth(s.cloudflared, false))
 	mux.HandleFunc("POST /api/v1/system/cloudflared/{action}", s.auth(s.cloudflared, true))
 	mux.HandleFunc("GET /api/v1/system/{kind}", s.auth(s.hostSecurity, false))

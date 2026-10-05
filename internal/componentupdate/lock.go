@@ -1,4 +1,4 @@
-package cloudflaredupdate
+package componentupdate
 
 import (
 	"context"
@@ -44,7 +44,7 @@ func (c *Controller) withLock(ctx context.Context, fn func() error) error {
 		return e
 	}
 	// An interrupted download never leaves a permanent cache of large binaries.
-	for _, pattern := range []string{".wukong-cloudflared-stage-*", ".wukong-cloudflared-copy-*"} {
+	for _, pattern := range []string{".wukong-" + filepath.Base(c.Binary) + "-stage-*", ".wukong-" + filepath.Base(c.Binary) + "-copy-*", ".wukong-" + filepath.Base(c.Binary) + ".wukong-rollback-copy-*"} {
 		files, _ := filepath.Glob(filepath.Join(filepath.Dir(c.Binary), pattern))
 		for _, p := range files {
 			if info, e := os.Lstat(p); e == nil && info.Mode().IsRegular() {
@@ -79,11 +79,11 @@ func (c *Controller) Auto(ctx context.Context) error {
 	}
 	return c.withLock(ctx, func() error { return c.auto(ctx) })
 }
-func (c *Controller) Check(ctx context.Context) (s model.CloudflaredState, e error) {
+func (c *Controller) Check(ctx context.Context) (s model.ComponentUpdateState, e error) {
 	e = c.withLock(ctx, func() error { s, e = c.check(ctx); return e })
 	return
 }
-func (c *Controller) Configure(ctx context.Context, enabled bool) (s model.CloudflaredState, e error) {
+func (c *Controller) Configure(ctx context.Context, enabled bool) (s model.ComponentUpdateState, e error) {
 	e = c.withLock(ctx, func() error { s, e = c.configure(ctx, enabled); return e })
 	return
 }

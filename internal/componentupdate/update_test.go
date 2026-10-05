@@ -1,4 +1,4 @@
-package cloudflaredupdate
+package componentupdate
 
 import (
 	"context"
@@ -168,7 +168,7 @@ func interrupted(t *testing.T, c *Controller) {
 		t.Fatal(e)
 	}
 	newSHA, _ := fileSHA(c.Binary)
-	if e := c.save("pending.json", journal{old, newSHA, []Service{{"cloudflared-wukong-test", "openrc"}}}); e != nil {
+	if e := c.save("pending.json", journal{OldSHA: old, NewSHA: newSHA, Services: []Service{{"cloudflared-wukong-test", "openrc"}}}); e != nil {
 		t.Fatal(e)
 	}
 }

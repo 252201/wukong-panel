@@ -126,3 +126,110 @@ func TestCloudflaredFleetMappingAndLegacyRestriction(t *testing.T) {
 		t.Fatal("legacy Agent received update command")
 	}
 }
+
+func (a *cloudflaredFake) SingBoxUpdate(ctx context.Context, r model.ComponentUpdateRequest) (model.ComponentUpdateState, error) {
+	return a.Cloudflared(ctx, r)
+}
+func TestSingBoxUpdateAuthAndJob(t *testing.T) {
+	s, db := fleetWebTestServer(t)
+	a := &cloudflaredFake{}
+	s.agent = a
+	if _, _, e := db.EnsureAdmin(); e != nil {
+		t.Fatal(e)
+	}
+	db.DB.Exec("UPDATE users SET must_change=0")
+	var id int64
+	db.DB.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&id)
+	session, e := db.CreateSession(id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, action := range []string{"check", "update"} {
+		for _, auth := range []struct {
+			cookie, csrf bool
+			want         int
+		}{{false, false, 401}, {true, false, 403}, {true, true, 200}} {
+			req := httptest.NewRequest("POST", "/api/v1/system/sing-box/"+action, strings.NewReader(`{"autoUpdate":true,"currentVersion":"2026.8.2","targetVersion":"2026.9.3"}`))
+			if auth.cookie {
+				req.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
+			}
+			if auth.csrf {
+				req.Header.Set("X-CSRF-Token", session.CSRF)
+			}
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
+			want := auth.want
+			if action == "update" && want == 200 {
+				want = 202
+			}
+			if rec.Code != want {
+				t.Fatalf("%s %v: %d %s", action, auth, rec.Code, rec.Body.String())
+			}
+			if want == 202 {
+				var result struct {
+					JobID string `json:"jobId"`
+				}
+				json.Unmarshal(rec.Body.Bytes(), &result)
+				deadline := time.Now().Add(time.Second)
+				for {
+					job, e := db.Job(result.JobID)
+					if e != nil {
+						t.Fatal(e)
+					}
+					if job.Status == "success" {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("job did not complete", job)
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}
+		}
+	}
+	if a.calls.Load() != 2 {
+		t.Fatal("unauthorized requests reached Agent", a.calls.Load())
+	}
+}
+
+func TestSingBoxUpdateFleetMappingAndLegacyRestriction(t *testing.T) {
+	for _, action := range []string{"status", "check", "update"} {
+		path := "system/sing-box"
+		method := "GET"
+		if action != "status" {
+			path += "/" + action
+			method = "POST"
+		}
+		req := httptest.NewRequest(method, "/", strings.NewReader(`{"operation":"malicious","autoUpdate":true}`))
+		kind, payload, async, e := fleetCommandForRequest(req, path)
+		if e != nil || kind != "sing-box."+action || async != (action == "update") {
+			t.Fatal(kind, async, e)
+		}
+		var r model.CloudflaredRequest
+		json.Unmarshal(payload, &r)
+		if r.Operation != action {
+			t.Fatal("untrusted operation reached Agent", r)
+		}
+	}
+	s, db := fleetWebTestServer(t)
+	h := model.FleetHost{ID: "legacy", Name: "legacy", Online: true, Compatible: true, Capabilities: []string{"overview"}}
+	if e := db.CreateFleetEnrollmentToken("test-enroll", time.Now().Add(time.Minute)); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.ConsumeFleetEnrollmentToken("test-enroll", h, "testhash"); e != nil {
+		t.Fatal(e)
+	}
+	r := httptest.NewRequest("POST", "/", strings.NewReader(`{}`))
+	r.SetPathValue("hostId", h.ID)
+	r.SetPathValue("resource", "system/sing-box/update")
+	w := httptest.NewRecorder()
+	s.fleetHostGateway(w, r, store.Session{Username: "admin"})
+	if w.Code != 409 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var count int
+	db.DB.QueryRow("SELECT COUNT(*) FROM fleet_commands").Scan(&count)
+	if count != 0 {
+		t.Fatal("legacy Agent received update command")
+	}
+}
