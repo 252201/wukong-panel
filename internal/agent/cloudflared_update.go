@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/252201/wukong-panel/internal/cloudflaredupdate"
+	"github.com/252201/wukong-panel/internal/componentupdate"
 	"github.com/252201/wukong-panel/internal/model"
 )
 
-func (m *Manager) cloudflaredUpdater() *cloudflaredupdate.Controller {
+func (m *Manager) cloudflaredUpdater() *componentupdate.Controller {
 	binary := strings.TrimSpace(m.cfg.CloudflaredBin)
 	if binary == "" {
 		binary = "/usr/local/bin/cloudflared"
@@ -26,7 +26,7 @@ func (m *Manager) cloudflaredUpdater() *cloudflaredupdate.Controller {
 	if root == "" {
 		root = filepath.Join(m.cfg.DataDir, "secrets")
 	}
-	c := cloudflaredupdate.New(filepath.Join(root, "cloudflared-update"), binary, runtime.GOARCH)
+	c := componentupdate.New(filepath.Join(root, "cloudflared-update"), binary, runtime.GOARCH)
 	c.Version = func(ctx context.Context, path string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -44,33 +44,16 @@ func (m *Manager) cloudflaredUpdater() *cloudflaredupdate.Controller {
 		return match[1], nil
 	}
 	c.Services = m.cloudflaredUpdateServices
-	c.Restart = func(ctx context.Context, s cloudflaredupdate.Service) error {
-		if e := m.serviceCommand(ctx, s.Manager, "restart", s.Name); e != nil {
-			return e
-		}
-		// Check consecutive samples so a connector which immediately crashes
-		// cannot be reported as a successful service restart.
-		for i := 0; i < 3; i++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Second):
-			}
-			if m.serviceStatus(ctx, s.Manager, s.Name) != "active" {
-				return fmt.Errorf("connector %s is not active after restart", s.Name)
-			}
-		}
-		return nil
-	}
+	c.Restart = m.restartUpdatedService
 	return c
 }
 
-func (m *Manager) cloudflaredUpdateServices(ctx context.Context) ([]cloudflaredupdate.Service, error) {
+func (m *Manager) cloudflaredUpdateServices(ctx context.Context) ([]componentupdate.Service, error) {
 	nodes, e := m.store.Nodes(ctx)
 	if e != nil {
 		return nil, e
 	}
-	services := map[string]cloudflaredupdate.Service{}
+	services := map[string]componentupdate.Service{}
 	for _, n := range nodes {
 		if n.Ownership != "managed" || normalizeProtocol(n.Protocol) != protocolVLESSWSTunnel {
 			continue
@@ -83,59 +66,20 @@ func (m *Manager) cloudflaredUpdateServices(ctx context.Context) ([]cloudflaredu
 		if previous, ok := services[name]; ok && previous.Manager != n.ServiceManager {
 			return nil, errors.New("conflicting connector service managers")
 		}
-		services[name] = cloudflaredupdate.Service{Name: name, Manager: n.ServiceManager}
+		services[name] = componentupdate.Service{Name: name, Manager: n.ServiceManager}
 	}
 	if len(services) == 0 {
 		return nil, errors.New("no Wukong-managed Tunnel connectors")
 	}
-	result := []cloudflaredupdate.Service{}
+	result := []componentupdate.Service{}
 	for _, s := range services {
 		if m.serviceStatus(ctx, s.Manager, s.Name) == "active" {
 			result = append(result, s)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
-	// Do not replace a binary also used by an external connector. Inspect
-	// cgroups/PID files only; never read the command line or Tunnel tokens.
-	binary := m.cloudflaredUpdater().Binary
-	seenServices := map[string]bool{}
-	procs, _ := filepath.Glob("/proc/[0-9]*/exe")
-	for _, p := range procs {
-		exe, err := os.Readlink(p)
-		if err != nil || strings.TrimSuffix(exe, " (deleted)") != binary {
-			continue
-		}
-		pid := filepath.Base(filepath.Dir(p))
-		owned := false
-		group, _ := os.ReadFile(filepath.Join(filepath.Dir(p), "cgroup"))
-		for _, s := range result {
-			if s.Manager == "systemd" {
-				for _, line := range strings.Split(string(group), "\n") {
-					for _, part := range strings.Split(line, "/") {
-						if part == s.Name+".service" {
-							owned = true
-							seenServices[s.Name] = true
-						}
-					}
-				}
-			} else {
-				b, _ := os.ReadFile(filepath.Join("/run", s.Name+".pid"))
-				if strings.TrimSpace(string(b)) == pid {
-					owned = true
-					seenServices[s.Name] = true
-				}
-			}
-		}
-		if !owned {
-			return nil, errors.New("connector binary is also used by an unmanaged process")
-		}
-	}
-	if runtime.GOOS == "linux" {
-		for _, s := range result {
-			if !seenServices[s.Name] {
-				return nil, errors.New("managed connector is not running the configured binary")
-			}
-		}
+	if e := m.checkManagedRuntimeProcesses(m.cloudflaredUpdater().Binary, result); e != nil {
+		return nil, e
 	}
 	return result, nil
 }
@@ -209,4 +153,74 @@ func (m *Manager) recoverCloudflared(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	return m.cloudflaredUpdater().Recover(ctx)
+}
+
+func (m *Manager) restartUpdatedService(ctx context.Context, s componentupdate.Service) error {
+	if e := m.serviceCommand(ctx, s.Manager, "restart", s.Name); e != nil {
+		return e
+	}
+	// Check consecutive samples so a connector which immediately crashes
+	// cannot be reported as a successful service restart.
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+		if m.serviceStatus(ctx, s.Manager, s.Name) != "active" {
+			return fmt.Errorf("runtime service %s is not active after restart", s.Name)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) checkManagedRuntimeProcesses(binary string, services []componentupdate.Service) error {
+	live, e := os.Stat(binary)
+	if e != nil {
+		return e
+	}
+	seenServices := map[string]bool{}
+	procs, _ := filepath.Glob("/proc/[0-9]*/exe")
+	for _, p := range procs {
+		exe, err := os.Readlink(p)
+		if err != nil || strings.TrimSuffix(exe, " (deleted)") != binary {
+			continue
+		}
+		processBinary, e := os.Stat(p)
+		if e != nil || !os.SameFile(live, processBinary) {
+			return errors.New("runtime service is using a different executable; restart it before updating")
+		}
+		pid := filepath.Base(filepath.Dir(p))
+		owned := false
+		group, _ := os.ReadFile(filepath.Join(filepath.Dir(p), "cgroup"))
+		for _, s := range services {
+			if s.Manager == "systemd" {
+				for _, line := range strings.Split(string(group), "\n") {
+					for _, part := range strings.Split(line, "/") {
+						if part == s.Name+".service" {
+							owned = true
+							seenServices[s.Name] = true
+						}
+					}
+				}
+			} else {
+				b, _ := os.ReadFile(filepath.Join("/run", s.Name+".pid"))
+				if strings.TrimSpace(string(b)) == pid {
+					owned = true
+					seenServices[s.Name] = true
+				}
+			}
+		}
+		if !owned {
+			return errors.New("runtime binary is also used by an unmanaged process")
+		}
+	}
+	if runtime.GOOS == "linux" {
+		for _, s := range services {
+			if !seenServices[s.Name] {
+				return errors.New("managed service is not running the configured binary")
+			}
+		}
+	}
+	return nil
 }

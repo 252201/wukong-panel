@@ -23,3 +23,22 @@ test('connector requests and job polling stay bound to their original host',asyn
   assert.equal(requests[0].url,'api/v1/system/cloudflared')
  }finally{globalThis.fetch=previous;api.setFleetHost('local');api.setCSRF('')}
 })
+
+test('sing-box updates and jobs stay bound to their original host',async()=>{
+ const requests=[]
+ const previous=globalThis.fetch
+ globalThis.fetch=async(url,options)=>{requests.push({url,options});return new Response('{}',{status:200,headers:{'Content-Type':'application/json'}})}
+ try{
+  api.setCSRF('test-csrf')
+  const ac=api.componentUpdateAPI('ac','sing-box')
+  api.setFleetHost('qw')
+  await ac.status();await ac.check();await ac.update('1.14.1','1.14.2');await ac.job('job-1')
+  assert.ok(requests.every(r=>r.url.startsWith('api/v1/fleet/hosts/ac/')))
+  assert.equal(requests[3].url,'api/v1/fleet/hosts/ac/jobs/job-1')
+  for(const r of requests.slice(1,3)){assert.equal(r.options.headers.get('X-CSRF-Token'),'test-csrf');assert.equal(r.options.method,'POST')}
+  assert.deepEqual(JSON.parse(requests[2].options.body),{currentVersion:'1.14.1',targetVersion:'1.14.2'})
+  requests.length=0
+  await api.componentUpdateAPI('local','sing-box').status()
+  assert.equal(requests[0].url,'api/v1/system/sing-box')
+ }finally{globalThis.fetch=previous;api.setFleetHost('local');api.setCSRF('')}
+})

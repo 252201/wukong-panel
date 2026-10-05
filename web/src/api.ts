@@ -312,20 +312,24 @@ export function hostSecurityAPI(hostId: string) {
  }
 }
 
-export interface CloudflaredState {
+export interface ComponentUpdateState {
  installed: boolean; currentVersion: string; latestVersion: string; updateAvailable: boolean
  autoUpdate: boolean; writable: boolean; reason?: string; checkedAt: string; updatedAt: string; lastError?: string
 }
 // Bind every request to the component's host, including after asynchronous work.
-export function cloudflaredAPI(hostId: string) {
+export function componentUpdateAPI(hostId: string, component: 'cloudflared' | 'sing-box') {
  const prefix=hostId==='local' ? '' : `fleet/hosts/${encodeURIComponent(hostId)}/`
  const call=<T>(path: string,options: RequestInit={})=>request<T>(prefix+path,options,false)
- const post=<T>(action:string,body:unknown)=>call<T>(`system/cloudflared/${action}`,{method:'POST',body:JSON.stringify(body)})
+ const post=<T>(action:string,body:unknown)=>call<T>(`system/${component}/${action}`,{method:'POST',body:JSON.stringify(body)})
  return {
-  status:()=>call<CloudflaredState>('system/cloudflared'),
-  check:()=>post<CloudflaredState>('check',{}),
-  settings:(autoUpdate:boolean)=>post<CloudflaredState>('settings',{autoUpdate}),
+  status:()=>call<ComponentUpdateState>(`system/${component}`),
+  check:()=>post<ComponentUpdateState>('check',{}),
+  settings:(autoUpdate:boolean)=>post<ComponentUpdateState>('settings',{autoUpdate}),
   update:(currentVersion:string,targetVersion:string)=>post<{jobId:string}>('update',{currentVersion,targetVersion}),
   job:(id:string)=>call<Job>(`jobs/${encodeURIComponent(id)}`),
  }
 }
+
+export const cloudflaredAPI = (hostId: string) => componentUpdateAPI(hostId, 'cloudflared')
+
+export type CloudflaredState = ComponentUpdateState

@@ -111,6 +111,10 @@ func (d directAgent) SecurityTransaction(ctx context.Context, id string) (model.
 	return d.manager.SecurityTransaction(ctx, id)
 }
 
+func (d directAgent) SingBoxUpdate(ctx context.Context, r model.ComponentUpdateRequest) (model.ComponentUpdateState, error) {
+	return d.manager.SingBoxUpdate(ctx, r)
+}
+
 func (d directAgent) Cloudflared(ctx context.Context, r model.CloudflaredRequest) (model.CloudflaredState, error) {
 	return d.manager.Cloudflared(ctx, r)
 }

@@ -1,6 +1,6 @@
-// Package cloudflaredupdate updates only the configured connector binary.
-// Tokens and service definitions are never read or changed by the updater.
-package cloudflaredupdate
+// Package componentupdate manages verified runtime updates and crash recovery.
+// Service definitions are never changed by the updater.
+package componentupdate
 
 import (
 	"context"
@@ -24,45 +24,57 @@ import (
 const releaseURL = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest"
 const maxBinary = 128 << 20
 
-var versionPattern = regexp.MustCompile(`^\d{4}\.\d{1,2}\.\d{1,3}$`)
-var servicePattern = regexp.MustCompile(`^cloudflared-wukong-[A-Za-z0-9_-]+$`)
+var calendarVersionPattern = regexp.MustCompile(`^\d{4}\.\d{1,2}\.\d{1,3}$`)
 
 type Service struct {
 	Name    string `json:"name"`
 	Manager string `json:"manager"`
 }
 type Controller struct {
-	Dir, Binary, Architecture string
-	HTTP                      *http.Client
-	Version                   func(context.Context, string) (string, error)
-	Services                  func(context.Context) ([]Service, error)
-	Restart                   func(context.Context, Service) error
+	Dir, Binary, Architecture      string
+	HTTP                           *http.Client
+	Version                        func(context.Context, string) (string, error)
+	Services                       func(context.Context) ([]Service, error)
+	Restart                        func(context.Context, Service) error
+	Stop                           func(context.Context, Service) error
+	Prepare                        func(context.Context, string, string) ([]ConfigFile, error)
+	Verify                         func(context.Context) error
+	ConfigDir                      string
+	AllowedTarget                  func(string) bool
+	name, repo                     string
+	versionPattern, servicePattern *regexp.Regexp
+	assetName                      func(string, string) string
+	archive                        bool
 }
 type asset struct {
 	Version, URL, SHA256 string
 	Size                 int64
 }
 type journal struct {
-	OldSHA   string    `json:"oldSHA"`
-	NewSHA   string    `json:"newSHA"`
-	Services []Service `json:"services"`
+	OldSHA   string       `json:"oldSHA"`
+	NewSHA   string       `json:"newSHA"`
+	Services []Service    `json:"services"`
+	Files    []ConfigFile `json:"files,omitempty"`
 }
 
 func New(dir, binary, arch string) *Controller {
-	return &Controller{Dir: dir, Binary: binary, Architecture: arch, HTTP: &http.Client{Timeout: 3 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 5 || r.URL.Scheme != "https" || r.URL.User != nil || r.URL.Port() != "" {
-			return errors.New("untrusted cloudflared download redirect")
-		}
-		switch r.URL.Hostname() {
-		case "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
-			return nil
-		}
-		return errors.New("untrusted cloudflared download host")
-	}}}
+	return &Controller{Dir: dir, Binary: binary, Architecture: arch,
+		name: "cloudflared", repo: "cloudflare/cloudflared", versionPattern: calendarVersionPattern,
+		servicePattern: regexp.MustCompile(`^cloudflared-wukong-[A-Za-z0-9_-]+$`),
+		assetName:      func(_, arch string) string { return "cloudflared-linux-" + arch }, HTTP: &http.Client{Timeout: 3 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || r.URL.Scheme != "https" || r.URL.User != nil || r.URL.Port() != "" {
+				return errors.New("untrusted runtime download redirect")
+			}
+			switch r.URL.Hostname() {
+			case "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+				return nil
+			}
+			return errors.New("untrusted runtime download host")
+		}}}
 }
 
-func newer(a, b string) bool {
-	if !versionPattern.MatchString(a) || !versionPattern.MatchString(b) {
+func (c *Controller) newer(a, b string) bool {
+	if !c.versionPattern.MatchString(a) || !c.versionPattern.MatchString(b) {
 		return false
 	}
 	x, y := strings.Split(a, "."), strings.Split(b, ".")
@@ -76,8 +88,8 @@ func newer(a, b string) bool {
 	return false
 }
 
-func (c *Controller) readState() (model.CloudflaredState, error) {
-	var s model.CloudflaredState
+func (c *Controller) readState() (model.ComponentUpdateState, error) {
+	var s model.ComponentUpdateState
 	b, e := os.ReadFile(filepath.Join(c.Dir, "state.json"))
 	if errors.Is(e, os.ErrNotExist) {
 		return s, nil
@@ -91,7 +103,7 @@ func (c *Controller) readState() (model.CloudflaredState, error) {
 	return s, nil
 }
 
-func (c *Controller) Status(ctx context.Context) (model.CloudflaredState, error) {
+func (c *Controller) Status(ctx context.Context) (model.ComponentUpdateState, error) {
 	s, e := c.readState()
 	if e != nil {
 		return s, e
@@ -103,7 +115,7 @@ func (c *Controller) Status(ctx context.Context) (model.CloudflaredState, error)
 	s.Reason = ""
 	info, e := os.Lstat(c.Binary)
 	if errors.Is(e, os.ErrNotExist) {
-		s.Reason = "cloudflared is not installed"
+		s.Reason = "runtime is not installed"
 		return s, nil
 	}
 	if e != nil {
@@ -119,8 +131,8 @@ func (c *Controller) Status(ctx context.Context) (model.CloudflaredState, error)
 		return s, nil
 	}
 	s.Installed = true
-	if !versionPattern.MatchString(s.CurrentVersion) {
-		s.Reason = "cannot determine cloudflared version"
+	if !c.versionPattern.MatchString(s.CurrentVersion) {
+		s.Reason = "cannot determine runtime version"
 		return s, nil
 	}
 	if c.Architecture != "amd64" && c.Architecture != "arm64" {
@@ -137,8 +149,12 @@ func (c *Controller) Status(ctx context.Context) (model.CloudflaredState, error)
 		s.Reason = e.Error()
 		return s, nil
 	}
+	s.UpdateAvailable = c.newer(s.LatestVersion, s.CurrentVersion)
+	if s.LatestVersion != "" && c.AllowedTarget != nil && !c.AllowedTarget(s.LatestVersion) {
+		s.Reason = "latest release requires a newer panel compatibility profile"
+		return s, nil
+	}
 	s.Writable = true
-	s.UpdateAvailable = newer(s.LatestVersion, s.CurrentVersion)
 	return s, nil
 }
 
@@ -147,7 +163,7 @@ func (c *Controller) request(ctx context.Context, url string) (*http.Response, e
 	if e != nil {
 		return nil, e
 	}
-	r.Header.Set("User-Agent", "wukong-panel/cloudflared-updater")
+	r.Header.Set("User-Agent", "wukong-panel/component-updater")
 	r.Header.Set("Accept", "application/vnd.github+json")
 	resp, e := c.HTTP.Do(r)
 	if e != nil {
@@ -155,12 +171,12 @@ func (c *Controller) request(ctx context.Context, url string) (*http.Response, e
 	}
 	if resp.StatusCode != 200 {
 		resp.Body.Close()
-		return nil, fmt.Errorf("cloudflared download HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("runtime download HTTP %d", resp.StatusCode)
 	}
 	return resp, nil
 }
 func (c *Controller) latest(ctx context.Context) (asset, error) {
-	resp, e := c.request(ctx, releaseURL)
+	resp, e := c.request(ctx, "https://api.github.com/repos/"+c.repo+"/releases/latest")
 	if e != nil {
 		return asset{}, e
 	}
@@ -187,10 +203,10 @@ func (c *Controller) latest(ctx context.Context) (asset, error) {
 		return asset{}, e
 	}
 	version := strings.TrimPrefix(release.Tag, "v")
-	if release.Draft || release.Prerelease || !versionPattern.MatchString(version) {
-		return asset{}, errors.New("invalid stable cloudflared release")
+	if release.Draft || release.Prerelease || !c.versionPattern.MatchString(version) {
+		return asset{}, errors.New("invalid stable runtime release")
 	}
-	name := "cloudflared-linux-" + c.Architecture
+	name := c.assetName(version, c.Architecture)
 	var result asset
 	count := 0
 	for _, a := range release.Assets {
@@ -200,7 +216,7 @@ func (c *Controller) latest(ctx context.Context) (asset, error) {
 		count++
 		sha := strings.TrimPrefix(a.Digest, "sha256:")
 		raw, err := hex.DecodeString(sha)
-		url := "https://github.com/cloudflare/cloudflared/releases/download/" + release.Tag + "/" + name
+		url := "https://github.com/" + c.repo + "/releases/download/" + release.Tag + "/" + name
 		if err != nil || len(raw) != sha256.Size || a.Digest != "sha256:"+sha || a.URL != url || a.Size <= 0 || a.Size >= maxBinary {
 			return asset{}, errors.New("release asset lacks trusted SHA-256, size or URL")
 		}
@@ -212,7 +228,7 @@ func (c *Controller) latest(ctx context.Context) (asset, error) {
 	return result, nil
 }
 
-func (c *Controller) check(ctx context.Context) (model.CloudflaredState, error) {
+func (c *Controller) check(ctx context.Context) (model.ComponentUpdateState, error) {
 	s, e := c.Status(ctx)
 	if e != nil {
 		return s, e
@@ -226,14 +242,17 @@ func (c *Controller) check(ctx context.Context) (model.CloudflaredState, error) 
 		s.UpdateAvailable = false
 	} else {
 		s.LatestVersion = a.Version
-		s.UpdateAvailable = newer(a.Version, s.CurrentVersion)
+		s.UpdateAvailable = c.newer(a.Version, s.CurrentVersion)
 	}
 	if saveErr := c.save("state.json", s); saveErr != nil {
 		return s, saveErr
 	}
+	if e == nil {
+		return c.Status(ctx)
+	}
 	return s, e
 }
-func (c *Controller) configure(ctx context.Context, enabled bool) (model.CloudflaredState, error) {
+func (c *Controller) configure(ctx context.Context, enabled bool) (model.ComponentUpdateState, error) {
 	s, e := c.Status(ctx)
 	if e != nil {
 		return s, e
@@ -254,11 +273,14 @@ func (c *Controller) configure(ctx context.Context, enabled bool) (model.Cloudfl
 // Install resolves the stable release afresh. Existing connectors are never
 // replaced as a side effect of deploying a node.
 func (c *Controller) install(ctx context.Context) error {
+	if c.archive {
+		return errors.New("runtime installation is not supported by the update endpoint")
+	}
 	if _, e := os.Lstat(c.Binary); !errors.Is(e, os.ErrNotExist) {
-		return errors.New("cloudflared already exists or cannot be inspected")
+		return errors.New("runtime already exists or cannot be inspected")
 	}
 	if c.Architecture != "amd64" && c.Architecture != "arm64" {
-		return errors.New("unsupported cloudflared architecture")
+		return errors.New("unsupported runtime architecture")
 	}
 	a, e := c.latest(ctx)
 	if e != nil {
@@ -267,7 +289,7 @@ func (c *Controller) install(ctx context.Context) error {
 	if e = os.MkdirAll(filepath.Dir(c.Binary), 0755); e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(filepath.Dir(c.Binary), ".wukong-cloudflared-stage-*")
+	f, e := os.CreateTemp(filepath.Dir(c.Binary), ".wukong-"+filepath.Base(c.Binary)+"-stage-*")
 	if e != nil {
 		return e
 	}
@@ -286,7 +308,7 @@ func (c *Controller) install(ctx context.Context) error {
 	}
 	if n != a.Size || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
 		f.Close()
-		return errors.New("cloudflared installation checksum or size mismatch")
+		return errors.New("runtime installation checksum or size mismatch")
 	}
 	if e = f.Chmod(0755); e == nil {
 		e = f.Sync()
@@ -314,8 +336,8 @@ func (c *Controller) install(ctx context.Context) error {
 }
 
 func (c *Controller) update(ctx context.Context, current, target string) (err error) {
-	if !versionPattern.MatchString(current) || !versionPattern.MatchString(target) {
-		return errors.New("invalid expected cloudflared versions")
+	if !c.versionPattern.MatchString(current) || !c.versionPattern.MatchString(target) {
+		return errors.New("invalid expected runtime versions")
 	}
 	if err = c.recover(ctx); err != nil {
 		return err
@@ -331,13 +353,16 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 		return nil
 	} // An idempotent replay after successful replacement.
 	if s.CurrentVersion != current {
-		return errors.New("cloudflared changed; check versions again")
+		return errors.New("runtime changed; check versions again")
 	}
 	a, err := c.latest(ctx)
 	if err != nil {
 		return err
 	}
-	if a.Version != target || !newer(target, current) {
+	if c.AllowedTarget != nil && !c.AllowedTarget(target) {
+		return errors.New("unsupported target compatibility profile")
+	}
+	if a.Version != target || !c.newer(target, current) {
 		return errors.New("stable release changed or requested downgrade; check versions again")
 	}
 	services, err := c.Services(ctx)
@@ -348,12 +373,12 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(c.Binary), ".wukong-cloudflared-stage-*")
+	tmp, err := os.CreateTemp(filepath.Dir(c.Binary), ".wukong-"+filepath.Base(c.Binary)+"-stage-*")
 	if err != nil {
 		return err
 	}
 	stage := tmp.Name()
-	defer os.Remove(stage)
+	defer func() { os.Remove(stage) }()
 	resp, err := c.request(ctx, a.URL)
 	if err != nil {
 		tmp.Close()
@@ -368,7 +393,7 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	}
 	if n != a.Size || hex.EncodeToString(hash.Sum(nil)) != a.SHA256 {
 		tmp.Close()
-		return errors.New("cloudflared asset size or checksum mismatch")
+		return errors.New("runtime asset size or checksum mismatch")
 	}
 	if err = tmp.Chmod(0755); err == nil {
 		err = tmp.Sync()
@@ -380,12 +405,30 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if closeErr != nil {
 		return closeErr
 	}
+	if c.archive {
+		archivePath := stage
+		stage, err = c.unpack(archivePath, a.Version)
+		os.Remove(archivePath)
+		if err != nil {
+			return err
+		}
+	}
 	v, err := c.Version(ctx, stage)
 	if err != nil {
 		return err
 	}
 	if v != target {
-		return errors.New("downloaded cloudflared version does not match release")
+		return errors.New("downloaded runtime version does not match release")
+	}
+	var files []ConfigFile
+	if c.Prepare != nil {
+		files, err = c.Prepare(ctx, stage, target)
+		if err != nil {
+			return err
+		}
+		if err = c.validateFiles(files, false); err != nil {
+			return err
+		}
 	}
 	if liveSHA, e := fileSHA(c.Binary); e != nil || liveSHA != oldSHA {
 		return errors.New("connector binary changed during download")
@@ -403,9 +446,13 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 		return err
 	}
 	if backupSHA, e := fileSHA(c.Binary + ".wukong-rollback"); e != nil || backupSHA != oldSHA {
-		return errors.New("cannot verify cloudflared rollback binary")
+		return errors.New("cannot verify runtime rollback binary")
 	}
-	j := journal{oldSHA, a.SHA256, services}
+	newSHA, e := fileSHA(stage)
+	if e != nil {
+		return e
+	}
+	j := journal{OldSHA: oldSHA, NewSHA: newSHA, Services: services, Files: files}
 	if err = c.save("pending.json", j); err != nil {
 		return err
 	}
@@ -419,6 +466,16 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 			err = errors.Join(err, c.restore(recoveryCtx, j))
 		}
 	}()
+	if c.Stop != nil {
+		for _, service := range services {
+			if err = c.Stop(ctx, service); err != nil {
+				return err
+			}
+		}
+	}
+	if err = c.writeFiles(files, false); err != nil {
+		return err
+	}
 	if err = os.Rename(stage, c.Binary); err != nil {
 		return err
 	}
@@ -430,11 +487,16 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 			return err
 		}
 	}
+	if c.Verify != nil {
+		if err = c.Verify(ctx); err != nil {
+			return err
+		}
+	}
 	if v, err = c.Version(ctx, c.Binary); err != nil {
 		return err
 	}
 	if v != target {
-		return errors.New("installed cloudflared version verification failed")
+		return errors.New("installed runtime version verification failed")
 	}
 	s.LatestVersion = target
 	s.CurrentVersion = target
@@ -468,13 +530,13 @@ func (c *Controller) recover(ctx context.Context) error {
 
 func (c *Controller) restore(ctx context.Context, j journal) error {
 	for _, s := range j.Services {
-		if !servicePattern.MatchString(s.Name) || (s.Manager != "systemd" && s.Manager != "openrc") {
+		if !c.servicePattern.MatchString(s.Name) || (s.Manager != "systemd" && s.Manager != "openrc") {
 			return errors.New("invalid recovery service")
 		}
 	}
 	old, e := fileSHA(c.Binary + ".wukong-rollback")
 	if e != nil || old != j.OldSHA || len(old) != 64 {
-		return errors.New("cloudflared rollback checksum mismatch")
+		return errors.New("runtime rollback checksum mismatch")
 	}
 	live, e := fileSHA(c.Binary)
 	if e != nil {
@@ -483,7 +545,20 @@ func (c *Controller) restore(ctx context.Context, j journal) error {
 	if live != j.OldSHA && live != j.NewSHA {
 		return errors.New("external connector change prevents automatic rollback")
 	}
+	if e = c.validateFiles(j.Files, true); e != nil {
+		return e
+	}
+	if c.Stop != nil {
+		for _, service := range j.Services {
+			if e = c.Stop(ctx, service); e != nil {
+				return e
+			}
+		}
+	}
 	if e = copyAtomic(c.Binary+".wukong-rollback", c.Binary, 0755); e != nil {
+		return e
+	}
+	if e = c.writeFiles(j.Files, true); e != nil {
 		return e
 	}
 	for _, s := range j.Services {
@@ -551,7 +626,7 @@ func copyAtomic(source, target string, mode os.FileMode) error {
 		return e
 	}
 	defer input.Close()
-	f, e := os.CreateTemp(filepath.Dir(target), ".wukong-cloudflared-copy-*")
+	f, e := os.CreateTemp(filepath.Dir(target), ".wukong-"+filepath.Base(target)+"-copy-*")
 	if e != nil {
 		return e
 	}

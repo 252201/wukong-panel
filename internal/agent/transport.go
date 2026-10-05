@@ -47,6 +47,18 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 		return err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /sing-box-update", s.authorize(func(w http.ResponseWriter, r *http.Request) {
+		var req model.ComponentUpdateRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		v, e := s.manager.SingBoxUpdate(r.Context(), req)
+		if e != nil {
+			writeError(w, 400, e.Error())
+			return
+		}
+		writeJSON(w, 200, v)
+	}))
 	mux.HandleFunc("POST /cloudflared", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		var req model.CloudflaredRequest
 		if !decode(w, r, &req) {
