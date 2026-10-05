@@ -66,6 +66,14 @@ type bindingAddressState struct {
 }
 
 func (m *Manager) RunReconciler(ctx context.Context) {
+	for m.recoverCloudflared(ctx) != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Minute):
+		}
+	}
+	_ = m.reconcileCloudflared(ctx)
 	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileBindings(ctx)
 	_ = m.ReconcileInboundListeners(ctx)
@@ -78,6 +86,7 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			_ = m.reconcileCloudflared(ctx)
 			_ = m.ReconcileDeviceGroups(ctx)
 			_ = m.ReconcileBindings(ctx)
 			_ = m.ReconcileInboundListeners(ctx)

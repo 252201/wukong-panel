@@ -2,7 +2,7 @@
 
 悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
 
-![Version](https://img.shields.io/badge/version-v1.7.11-d4ad57)
+![Version](https://img.shields.io/badge/version-v1.7.12-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
 
@@ -147,7 +147,7 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
   | sudo sh -s -- --uninstall --purge
 
 # 固定版本、自定义端口和入口
-sudo sh install.sh --version v1.7.11 --port 9443 --base-path /my-secret-panel/
+sudo sh install.sh --version v1.7.12 --port 9443 --base-path /my-secret-panel/
 
 # 使用现有证书
 sudo sh install.sh --domain panel.example.com \
@@ -272,7 +272,7 @@ AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书�
 
 如果已经测得更适合当前网络的 Cloudflare 优选域名或 IP，可在部署表单填写“优选连接域名 / IP”。面板只会把它写入分享链接和 Clash/Mihomo 订阅的 `server`；TLS `servername`、SNI、WebSocket `Host` 和 Tunnel Published application 路由仍使用上面的 Cloudflare 节点域名。该字段不能包含 `http://`、`https://`、路径或端口，留空即使用 Cloudflare 标准 Anycast。优选地址的可用性会随运营商、地区和时间变化，需要用户自行测试并维护。
 
-首次部署时，面板会按固定 SHA-256 下载并安装官方 `cloudflared 2026.7.1`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备编队的启动、停止和重启按整组执行，删除单台设备只会从共享配置移除对应 inbound 并重启组进程，删除最后一台设备时才移除共享 sing-box 与 Tunnel 连接器。升级后的 Agent 会自动把旧版多进程设备编队校验并合并为单进程，失败时恢复旧服务。节点“检测”仍按单台设备的端口和凭据验证完整代理链路。
+首次部署且连接器尚未安装时，面板会查询官方最新稳定 Release，按对应资产的 SHA-256 下载并安装 `cloudflared`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备编队的启动、停止和重启按整组执行，删除单台设备只会从共享配置移除对应 inbound 并重启组进程，删除最后一台设备时才移除共享 sing-box 与 Tunnel 连接器。升级后的 Agent 会自动把旧版多进程设备编队校验并合并为单进程，失败时恢复旧服务。节点“检测”仍按单台设备的端口和凭据验证完整代理链路。
 
 ### 双 VPS 落地 IP 出口
 
@@ -303,6 +303,12 @@ A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/I
 备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退会恢复同一快照中的旧二进制和配套配置，而不是只替换二进制；刚才运行的新版本也会形成反向快照，因此可以再次切回。
 
 `--uninstall-sing-box` 是独立的破坏性操作：先保存并校验 sing-box 二进制、全部 `/etc/s-box/*.json`、活动服务清单、受管 systemd/OpenRC 服务定义及启用状态，再停止服务并删除这些受管内容。证书等非 JSON 文件、悟空面板和 SQLite 数据库不会删除；删除阶段失败会自动恢复二进制、配置、服务定义和原活动服务。
+
+系统页的 **Cloudflare Tunnel** 卡片提供当前版本、稳定版检查、手动升级和自动更新开关。本机和支持 `cloudflared.update` 能力的完整舰队 Agent 均可使用；旧 Agent、轻量探针、离线或不兼容主机不能执行更新。自动更新默认关闭，启用前需确认运行中的悟空隧道会短暂重启；Agent 每日检查官方稳定版，手动检查不会推迟自动检查。创建新节点不会升级已有可用连接器。
+
+安装和更新都校验官方 Release 的架构、资产 URL、大小、SHA-256 及实际版本；缺失校验信息时停止，不降级到固定旧版本。更新仅替换配置的 cloudflared 二进制并重启此前运行的悟空连接器，停止的连接器保持停止，节点配置和 Tunnel Token 保留。校验和备份完成后才替换；失败恢复原二进制并重启原连接器，Agent 中断后由持久恢复记录重试。共享同一二进制的外部连接器会阻止更新。服务状态校验不代表已经完成异地公网代理验收。
+
+自动更新仍保留 `--no-autoupdate`，由悟空管理更新事务。开关与检查结果存于 root-only 的 `<secret-dir>/cloudflared-update/state.json`，恢复记录为同目录 `pending.json`。二进制旁只保留一份 `.wukong-rollback` 回滚文件，避免每次更新累积完整数据库备份；手动更新的执行结果可在任务日志查看。
 
 ## 架构与安全边界
 
