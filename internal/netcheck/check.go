@@ -28,7 +28,7 @@ const (
 )
 
 const defaultTargets = "1.1.1.1,8.8.8.8"
-const defaultDomesticTargets = "194.138.202.35,138.113.151.2"
+const defaultDomesticTargets = "194.138.202.35|223.5.5.5,138.113.151.1"
 
 const (
 	internationalGroup = "international"
@@ -65,11 +65,19 @@ type socketListener func(string, string) (icmpSocket, error)
 
 // Service keeps one recent outbound ICMP measurement for this VPS. Probes run
 // in the root agent or lightweight probe; the web process only reads snapshots.
+type targetSpec struct {
+	primary   net.IP
+	fallbacks []net.IP
+	label     string
+}
+
+// Service keeps one recent outbound ICMP measurement for this VPS. Probes run
+// in the root agent or lightweight probe; the web process only reads snapshots.
 type Service struct {
-	targets          []net.IP
+	targets          []targetSpec
 	labels           []string
 	setupErr         error
-	domesticTargets  []net.IP
+	domesticTargets  []targetSpec
 	domesticLabels   []string
 	domesticSetupErr error
 	demo             bool
@@ -110,26 +118,58 @@ func NewService(rawTargets, rawDomesticTargets string, demo bool, repository his
 	return service
 }
 
-func parseTargets(raw string) ([]net.IP, []string, error) {
+func parseTargets(raw string) ([]targetSpec, []string, error) {
 	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })
-	targets := make([]net.IP, 0, len(parts))
+	targets := make([]targetSpec, 0, len(parts))
 	labels := make([]string, 0, len(parts))
 	seen := make(map[string]bool, len(parts))
 	for _, part := range parts {
-		ip := net.ParseIP(strings.TrimSpace(part)).To4()
-		if ip == nil {
-			return nil, nil, fmt.Errorf("探测目标必须是 IPv4 地址：%q", part)
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
 		}
-		label := ip.String()
-		if seen[label] {
+		var primary net.IP
+		var fallbacks []net.IP
+		var primaryLabel string
+
+		if strings.Contains(trimmed, "|") {
+			candidates := strings.Split(trimmed, "|")
+			for i, cand := range candidates {
+				c := strings.TrimSpace(cand)
+				if c == "" {
+					return nil, nil, fmt.Errorf("探测目标必须是 IPv4 地址：%q", part)
+				}
+				ip := net.ParseIP(c).To4()
+				if ip == nil {
+					return nil, nil, fmt.Errorf("探测目标必须是 IPv4 地址：%q", c)
+				}
+				if i == 0 {
+					primary = ip
+					primaryLabel = ip.String()
+				} else {
+					if !ip.Equal(primary) {
+						fallbacks = append(fallbacks, ip)
+					}
+				}
+			}
+		} else {
+			ip := net.ParseIP(trimmed).To4()
+			if ip == nil {
+				return nil, nil, fmt.Errorf("探测目标必须是 IPv4 地址：%q", trimmed)
+			}
+			primary = ip
+			primaryLabel = ip.String()
+		}
+
+		if seen[primaryLabel] {
 			continue
 		}
 		if len(targets) == 4 {
 			return nil, nil, errors.New("最多配置 4 个探测目标")
 		}
-		seen[label] = true
-		targets = append(targets, ip)
-		labels = append(labels, label)
+		seen[primaryLabel] = true
+		targets = append(targets, targetSpec{primary: primary, fallbacks: fallbacks, label: primaryLabel})
+		labels = append(labels, primaryLabel)
 	}
 	if len(targets) == 0 {
 		return nil, nil, errors.New("至少配置 1 个探测目标")
@@ -235,9 +275,9 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-func (s *Service) measureGroup(ctx context.Context, targets []net.IP, labels []string, setupErr error, domestic bool) model.NetworkHealth {
+func (s *Service) measureGroup(ctx context.Context, targets []targetSpec, labels []string, setupErr error, domestic bool) model.NetworkHealth {
 	if setupErr != nil {
-		return model.NetworkHealth{Status: "error", Error: setupErr.Error(), CheckedAt: time.Now().UTC()}
+		return model.NetworkHealth{Status: "error", Error: setupErr.Error(), CheckedAt: time.Now().UTC(), Targets: append([]string(nil), labels...)}
 	}
 	if s.demo {
 		packetCount := samplesPerTarget * len(labels)
@@ -312,29 +352,47 @@ func demoTargetResults(targets []string, lost int) []model.NetworkTargetResult {
 	return results
 }
 
-func measure(ctx context.Context, targets []net.IP, labels []string, probe targetProbe) (health model.NetworkHealth) {
-	health = model.NetworkHealth{Status: "error", Targets: append([]string(nil), labels...)}
+func measure(ctx context.Context, targets []targetSpec, labels []string, probe targetProbe) (health model.NetworkHealth) {
+	health = model.NetworkHealth{Status: "error", Targets: make([]string, len(targets))}
 	defer func() { health.CheckedAt = time.Now().UTC() }()
 	if len(targets) == 0 {
 		health.Error = "没有可用的探测目标"
 		return health
 	}
 	type indexedResult struct {
-		index int
-		value targetResult
+		index       int
+		activeLabel string
+		value       targetResult
 	}
 	results := make(chan indexedResult, len(targets))
 	health.TargetResults = make([]model.NetworkTargetResult, len(targets))
 	for index, target := range targets {
-		go func(index int, ip net.IP) { results <- indexedResult{index, probe(ctx, ip)} }(index, target)
+		go func(index int, spec targetSpec) {
+			res := probe(ctx, spec.primary)
+			activeLabel := spec.label
+			if (res.received == 0 || res.err != nil) && len(spec.fallbacks) > 0 {
+				for _, fb := range spec.fallbacks {
+					fbRes := probe(ctx, fb)
+					if fbRes.received > 0 {
+						res = fbRes
+						activeLabel = fb.String()
+						break
+					}
+					res = fbRes
+					activeLabel = fb.String()
+				}
+			}
+			results <- indexedResult{index: index, activeLabel: activeLabel, value: res}
+		}(index, target)
 	}
 	var roundTrips []time.Duration
 	var failures []string
 	for range targets {
 		entry := <-results
 		result := entry.value
+		health.Targets[entry.index] = entry.activeLabel
 		health.TargetResults[entry.index] = model.NetworkTargetResult{
-			Target: labels[entry.index], PacketsSent: result.sent, PacketsReceived: result.received,
+			Target: entry.activeLabel, PacketsSent: result.sent, PacketsReceived: result.received,
 		}
 		health.PacketsSent += result.sent
 		health.PacketsReceived += result.received

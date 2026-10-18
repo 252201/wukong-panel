@@ -53,8 +53,82 @@ func TestParseTargets(t *testing.T) {
 
 func TestDefaultDomesticTarget(t *testing.T) {
 	service := NewService("", "", false, nil)
-	if got := strings.Join(service.domesticLabels, ","); got != "194.138.202.35,138.113.151.2" {
+	if got := strings.Join(service.domesticLabels, ","); got != "194.138.202.35,138.113.151.1" {
 		t.Fatalf("domestic default targets = %q", got)
+	}
+}
+
+func TestParseTargetsWithFallback(t *testing.T) {
+	targets, labels, err := parseTargets("194.138.202.35|223.5.5.5, 138.113.151.1")
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("targets=%v labels=%v err=%v", targets, labels, err)
+	}
+	if labels[0] != "194.138.202.35" || labels[1] != "138.113.151.1" {
+		t.Fatalf("unexpected labels: %v", labels)
+	}
+	if len(targets[0].fallbacks) != 1 || targets[0].fallbacks[0].String() != "223.5.5.5" {
+		t.Fatalf("unexpected fallback: %+v", targets[0])
+	}
+	for _, invalid := range []string{"194.138.202.35|", "|223.5.5.5", "194.138.202.35|invalid"} {
+		if _, _, err := parseTargets(invalid); err == nil {
+			t.Fatalf("parseTargets(%q) should have failed", invalid)
+		}
+	}
+}
+
+func TestMeasureFallbackWhenPrimaryFails(t *testing.T) {
+	targets, labels, _ := parseTargets("194.138.202.35|223.5.5.5,138.113.151.1")
+	probed := make(map[string]bool)
+	var mu sync.Mutex
+	probe := func(_ context.Context, ip net.IP) targetResult {
+		mu.Lock()
+		probed[ip.String()] = true
+		mu.Unlock()
+		if ip.String() == "194.138.202.35" {
+			return targetResult{sent: 5, received: 0}
+		}
+		if ip.String() == "223.5.5.5" {
+			return targetResult{sent: 5, received: 5, roundTrips: []time.Duration{20 * time.Millisecond}}
+		}
+		if ip.String() == "138.113.151.1" {
+			return targetResult{sent: 5, received: 5, roundTrips: []time.Duration{30 * time.Millisecond}}
+		}
+		return targetResult{sent: 5, received: 0}
+	}
+	health := measure(context.Background(), targets, labels, probe)
+	if health.Status != "ok" || health.PacketLossPct != 0 || health.PacketsReceived != 10 {
+		t.Fatalf("fallback did not produce 0%% loss: %+v", health)
+	}
+	if health.Targets[0] != "223.5.5.5" || health.Targets[1] != "138.113.151.1" {
+		t.Fatalf("expected target 223.5.5.5, got: %v", health.Targets)
+	}
+	if health.TargetResults[0].Target != "223.5.5.5" || health.TargetResults[0].PacketsReceived != 5 {
+		t.Fatalf("target results mismatch: %+v", health.TargetResults)
+	}
+	if !probed["194.138.202.35"] || !probed["223.5.5.5"] || !probed["138.113.151.1"] {
+		t.Fatalf("did not probe expected targets: %v", probed)
+	}
+}
+
+func TestMeasurePrimarySuccessSkipsFallback(t *testing.T) {
+	targets, labels, _ := parseTargets("194.138.202.35|223.5.5.5,138.113.151.1")
+	probed := make(map[string]bool)
+	var mu sync.Mutex
+	probe := func(_ context.Context, ip net.IP) targetResult {
+		mu.Lock()
+		probed[ip.String()] = true
+		mu.Unlock()
+		return targetResult{sent: 5, received: 5, roundTrips: []time.Duration{15 * time.Millisecond}}
+	}
+	health := measure(context.Background(), targets, labels, probe)
+	if health.Status != "ok" || health.PacketLossPct != 0 {
+		t.Fatalf("unexpected health: %+v", health)
+	}
+	if health.Targets[0] != "194.138.202.35" {
+		t.Fatalf("expected primary target 194.138.202.35, got: %v", health.Targets)
+	}
+	if probed["223.5.5.5"] {
+		t.Fatalf("fallback was probed despite primary success")
 	}
 }
 
