@@ -661,7 +661,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 .fleet-resource-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   min-width: 0;
 }
 .fleet-resource {
@@ -671,9 +671,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   gap: 5px;
   min-width: 0;
   min-height: 64px;
-  padding: 6px 6px 6px 0;
+  padding: 6px 7px 6px 0;
 }
-.fleet-resource + .fleet-resource { padding-left: 8px; border-left: 1px solid var(--line); }
+.fleet-resource + .fleet-resource { padding-left: 10px; border-left: 1px solid var(--line); }
 .fleet-resource small { color: var(--muted); font-size: 11px; }
 .fleet-resource b {
   overflow: hidden;
@@ -683,7 +683,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   white-space: nowrap;
 }
 .fleet-resource:first-child b { font-size: 16px; }
-.fleet-resource:not(:first-child) b { font-size: clamp(11px, calc(1.1cqw + 2px), 13px); letter-spacing: -.25px; }
+.fleet-resource:not(:first-child) b { font-size: clamp(12px, calc(1.4cqw + 2px), 14px); letter-spacing: -.25px; }
 .fleet-resource em {
   overflow: hidden;
   color: var(--gold-muted-text);
@@ -691,28 +691,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.fleet-rate-resource em {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: clamp(10px, calc(0.95cqw + 2px), 11px);
-  font-weight: 500;
-  letter-spacing: -.2px;
-}
-.fleet-resource .rate-down {
-  display: inline-block;
-  color: var(--jade-text);
-  font-weight: 700;
-  margin-right: 2px;
-}
-.fleet-resource .rate-up {
-  display: inline-block;
-  color: var(--gold);
-  font-weight: 700;
-  margin-right: 2px;
-}
-.fleet-host-card.offline .fleet-resource .rate-down,
-.fleet-host-card.offline .fleet-resource .rate-up {
-  color: var(--muted-2);
 }
 .fleet-host-network {
   display: grid;
@@ -771,17 +749,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: rgba(202,93,70,.12);
   color: var(--danger-text);
 }
-@container (max-width: 660px) {
+@container (max-width: 700px) {
   .fleet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fleet-resource { padding: 8px 10px 8px 0; }
   .fleet-resource:nth-child(odd) { padding-left: 0; border-left: 0; }
-  .fleet-resource:nth-child(even) { padding-left: 12px; border-left: 1px solid var(--line); }
   .fleet-resource:nth-child(n+3) { border-top: 1px solid var(--line); }
-  .fleet-resource:nth-child(5) {
-    grid-column: 1 / -1;
-    padding-left: 0;
-    border-left: 0;
-  }
 }
 @container (max-width: 560px) {
   .fleet-host-network { grid-template-columns: minmax(0, 1fr); }

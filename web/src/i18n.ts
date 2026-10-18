@@ -155,8 +155,6 @@ const english: Record<string, string> = {
   '在线运行 / 已知节点': 'Running / known nodes',
   '网络探测异常': 'Probe alerts',
   '实时流量': 'Live traffic',
-  '实时网络速率': 'Live Rate',
-  '实时速率': 'Live rate',
   '中央本机': 'Controller host',
   '内存': 'Memory',
   '磁盘': 'Disk',
