@@ -28,9 +28,11 @@ const Capability = "probe"
 var Capabilities = []string{"overview", Capability}
 
 type Config struct {
-	ControllerURL string `json:"controllerUrl"`
-	HostID        string `json:"hostId"`
-	HostName      string `json:"hostName"`
+	ControllerURL                string `json:"controllerUrl"`
+	HostID                       string `json:"hostId"`
+	HostName                     string `json:"hostName"`
+	NetworkProbeTargets          string `json:"networkProbeTargets,omitempty"`
+	NetworkProbeDomesticTargets  string `json:"networkProbeDomesticTargets,omitempty"`
 }
 
 type Client struct {
@@ -169,7 +171,15 @@ func Load(directory string) (*Client, error) {
 	if config.HostID == "" || strings.TrimSpace(string(token)) == "" {
 		return nil, errors.New("incomplete probe configuration")
 	}
-	return &Client{Config: config, Token: strings.TrimSpace(string(token)), HTTP: newHTTPClient(), Sampler: &Sampler{}, Network: netcheck.NewService("", "", false, nil), Location: hostlocation.New()}, nil
+	targets := os.Getenv("WUKONG_NETWORK_PROBE_TARGETS")
+	if targets == "" {
+		targets = config.NetworkProbeTargets
+	}
+	domesticTargets := os.Getenv("WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS")
+	if domesticTargets == "" {
+		domesticTargets = config.NetworkProbeDomesticTargets
+	}
+	return &Client{Config: config, Token: strings.TrimSpace(string(token)), HTTP: newHTTPClient(), Sampler: &Sampler{}, Network: netcheck.NewService(targets, domesticTargets, false, nil), Location: hostlocation.New()}, nil
 }
 
 func (c *Client) Heartbeat(ctx context.Context) error {

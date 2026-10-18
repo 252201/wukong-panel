@@ -193,7 +193,7 @@ func TestBuildTrafficTimeline(t *testing.T) {
 		{Timestamp: start.Add(12*time.Hour + 10*time.Second).Unix(), Interface: "eth0", RXBytes: 9_000, TXBytes: 12_000},
 	}
 	for _, metric := range metrics {
-		if err := database.AddMetric(metric); err != nil {
+		if _, err := database.DB.Exec(`INSERT INTO metrics(ts,iface,rx_bytes,tx_bytes,rx_bps,tx_bps,cpu,memory,memory_used_bytes,memory_total_bytes,disk,disk_used_bytes,disk_total_bytes,load1,uptime) VALUES(?,?,?,?,0,0,0,0,0,0,0,0,0,0,0)`, metric.Timestamp, metric.Interface, metric.RXBytes, metric.TXBytes); err != nil {
 			t.Fatal(err)
 		}
 	}
