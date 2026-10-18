@@ -12,7 +12,7 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
+import { fleetHostRateHint, networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -251,6 +251,9 @@ function fleetNetworkHint(host: FleetHost, group: NetworkGroupName) {
   if (state === 'pending') return language.value === 'en-US' ? 'Waiting for probe' : '等待首次采样'
   if (state === 'stale') return language.value === 'en-US' ? 'Stale sample' : '采样已过期'
   return health?.error || health?.targets?.join(' / ') || 'ICMP'
+}
+function fleetRateHint(host: FleetHost) {
+  return fleetHostRateHint(host, language.value)
 }
 const chartPeak = computed(() => Math.max(0, ...(overview.value?.history || []).flatMap(row => [row.rxBps, row.txBps])))
 function makeChartPath(field: 'rxBps' | 'txBps') {
@@ -981,7 +984,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
               <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
-              <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? '轻量探针' : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+              <aside class="fleet-header-aside">
+                <div class="fleet-header-rates" :title="fleetRateHint(host)">
+                  <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
+                  <span class="fleet-rate-up">↑ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.txBps || 0) : '0 B/s' }}</b></span>
+                </div>
+                <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? '轻量探针' : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+              </aside>
             </header>
             <div class="fleet-host-body">
               <section class="fleet-resource-grid" aria-label="主机资源">

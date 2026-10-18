@@ -605,6 +605,60 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   flex: 0 0 auto;
 }
 
+.fleet-header-aside {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.fleet-header-rates {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", monospace;
+  line-height: 1.2;
+}
+
+.fleet-host-card > header .fleet-header-rates span {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.fleet-host-card > header .fleet-header-rates b {
+  font-size: 11px;
+}
+
+.fleet-host-card > header .fleet-rate-down {
+  color: var(--jade);
+  font-weight: 600;
+}
+
+.fleet-host-card > header .fleet-rate-down b {
+  color: var(--paper);
+  font-weight: 600;
+}
+
+.fleet-host-card > header .fleet-rate-up {
+  color: var(--gold);
+  font-weight: 500;
+}
+
+.fleet-host-card > header .fleet-rate-up b {
+  color: var(--gold-muted-text);
+  font-weight: 500;
+}
+
+.fleet-host-card.offline > header .fleet-header-rates span,
+.fleet-host-card.offline > header .fleet-header-rates b {
+  color: #888d82;
+}
+
 .fleet-host-metrics .fleet-cpu-value {
   white-space: nowrap;
 }
@@ -759,10 +813,16 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .fleet-network-group { padding-right: 0; }
   .fleet-network-group + .fleet-network-group { padding: 9px 0 0; border-left: 0; border-top: 1px solid var(--line); }
 }
+@container (max-width: 520px) {
+  .fleet-header-aside { gap: 10px; }
+}
 @container (max-width: 390px) {
   .fleet-host-card > header { gap: 8px; padding-inline: 15px; }
   .fleet-host-card > header b { font-size: 13px; }
   .fleet-host-card > header em { font-size: 9px; }
+  .fleet-header-aside { gap: 6px; }
+  .fleet-host-card > header .fleet-header-rates span,
+  .fleet-host-card > header .fleet-header-rates b { font-size: 9px; }
   .fleet-host-body { padding-inline: 15px; }
   .fleet-host-card footer { padding-inline: 15px; }
 }
