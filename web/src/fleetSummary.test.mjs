@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { recentNetworkLossPct, summarizeFleet } from './fleetSummary.ts'
+import { recentNetworkLossPct, summarizeFleet, fleetHostLiveRates, fleetHostRateHint } from './fleetSummary.ts'
 
 const now = Date.parse('2026-09-27T10:00:00Z')
 const sample = (checkedAt, packetsSent = 10, packetsReceived = packetsSent, status = 'ok') => ({
@@ -72,4 +72,48 @@ test('stale or failed probes alert, including historical outages; a host awaitin
   const summary = summarizeFleet(hosts, now)
   assert.equal(summary.networkAlerts, 3)
   assert.equal(summary.networkPending, 1)
+})
+
+test('fleetHostLiveRates computes rates for online hosts and zeroes out offline hosts', () => {
+  const onlineHost = {
+    id: 'h1', online: true,
+    snapshot: { overview: { now: { rxBps: 1250000, txBps: 54000 } } },
+  }
+  const offlineHost = {
+    id: 'h2', online: false,
+    snapshot: { overview: { now: { rxBps: 9999999, txBps: 8888888 } } },
+  }
+  const emptyHost = { id: 'h3', online: true }
+
+  const onlineRates = fleetHostLiveRates(onlineHost)
+  assert.equal(onlineRates.rx, 1250000)
+  assert.equal(onlineRates.tx, 54000)
+  assert.equal(onlineRates.rxFormatted, '1.25 MB/s')
+  assert.equal(onlineRates.txFormatted, '54 KB/s')
+
+  const offlineRates = fleetHostLiveRates(offlineHost)
+  assert.equal(offlineRates.rx, 0)
+  assert.equal(offlineRates.tx, 0)
+  assert.equal(offlineRates.rxFormatted, '0 B/s')
+  assert.equal(offlineRates.txFormatted, '0 B/s')
+
+  const emptyRates = fleetHostLiveRates(emptyHost)
+  assert.equal(emptyRates.rx, 0)
+  assert.equal(emptyRates.tx, 0)
+  assert.equal(emptyRates.rxFormatted, '0 B/s')
+  assert.equal(emptyRates.txFormatted, '0 B/s')
+})
+
+test('fleetHostRateHint formats Chinese and English tooltips correctly', () => {
+  const onlineHost = {
+    id: 'h1', online: true,
+    snapshot: { overview: { now: { rxBps: 1250000, txBps: 54000, interface: 'eth0' } } },
+  }
+  const offlineHost = { id: 'h2', online: false }
+
+  assert.equal(fleetHostRateHint(onlineHost, 'zh-CN'), '实时下载: 1.25 MB/s · 实时上传: 54 KB/s · 出口网卡: eth0')
+  assert.equal(fleetHostRateHint(onlineHost, 'en-US'), 'Download: 1.25 MB/s · Upload: 54 KB/s · Interface: eth0')
+
+  assert.equal(fleetHostRateHint(offlineHost, 'zh-CN'), '主机离线')
+  assert.equal(fleetHostRateHint(offlineHost, 'en-US'), 'Host offline')
 })
