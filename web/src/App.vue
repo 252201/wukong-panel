@@ -12,7 +12,7 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
+import { fleetHostRateHint, networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -251,6 +251,9 @@ function fleetNetworkHint(host: FleetHost, group: NetworkGroupName) {
   if (state === 'pending') return language.value === 'en-US' ? 'Waiting for probe' : '等待首次采样'
   if (state === 'stale') return language.value === 'en-US' ? 'Stale sample' : '采样已过期'
   return health?.error || health?.targets?.join(' / ') || 'ICMP'
+}
+function fleetRateHint(host: FleetHost) {
+  return fleetHostRateHint(host, language.value)
 }
 const chartPeak = computed(() => Math.max(0, ...(overview.value?.history || []).flatMap(row => [row.rxBps, row.txBps])))
 function makeChartPath(field: 'rxBps' | 'txBps') {
@@ -988,6 +991,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <div class="fleet-resource"><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b><em>负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</em></div>
                 <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0, 0) }}</em></div>
                 <div class="fleet-resource"><small>磁盘</small><b :title="resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</em></div>
+                <div class="fleet-resource fleet-rate-resource" :title="fleetRateHint(host)"><small>{{ language === 'en-US' ? 'Live Rate' : '实时网络速率' }}</small><b><span class="rate-down">↓</span> {{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b><em><span class="rate-up">↑</span> {{ host.online ? rate(host.snapshot?.overview?.now?.txBps || 0) : '0 B/s' }}</em></div>
                 <div v-if="isProbeHost(host)" class="fleet-resource"><small>网卡累计流量</small><b>{{ bytes((host.snapshot?.overview?.now?.rxBytes || 0) + (host.snapshot?.overview?.now?.txBytes || 0)) }}</b><em>{{ language === 'en-US' ? 'Since boot' : '自系统启动' }} · {{ host.snapshot?.overview?.now?.interface || '—' }}</em></div><div v-else class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
               </section>
               <section class="fleet-host-network" aria-label="网络质量">
