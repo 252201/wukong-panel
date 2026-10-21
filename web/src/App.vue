@@ -555,9 +555,9 @@ function expiryDays(dateStr?: string) {
 function expiryLabel(dateStr?: string) {
   const days = expiryDays(dateStr)
   if (days === null) return ''
-  if (days < 0) return language.value === 'en-US' ? `Expired (${-days}d ago)` : `已过期 ${-days} 天`
-  if (days === 0) return language.value === 'en-US' ? 'Expires today' : '今日到期'
-  if (days <= 7) return language.value === 'en-US' ? `Expires in ${days}d` : `剩余 ${days} 天到期`
+  if (days < 0) return language.value === 'en-US' ? `⚠️ Expired (${-days}d ago)` : `⚠️ 已过期 ${-days} 天`
+  if (days === 0) return language.value === 'en-US' ? '⚠️ Expires today' : '⚠️ 今日到期'
+  if (days <= 7) return language.value === 'en-US' ? `⚠️ Expires in ${days}d` : `⚠️ 剩余 ${days} 天到期`
   return language.value === 'en-US' ? `${dateStr} (${days}d left)` : `${dateStr} 到期 (${days}天)`
 }
 
