@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/252201/wukong-panel/internal/model"
@@ -95,8 +97,10 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 	}
 	var enrolledCapabilities []string
 	_ = json.Unmarshal([]byte(enrolledCapabilitiesJSON), &enrolledCapabilities)
+	isProbe := false
 	for _, capability := range enrolledCapabilities {
 		if capability == "probe" {
+			isProbe = true
 			// Probe enrollment is immutable: heartbeats cannot turn a read-only probe into a command agent.
 			heartbeat.Capabilities = []string{"overview", "probe"}
 			break
@@ -118,6 +122,38 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 			return err
 		}
 	}
+	if isProbe && heartbeat.Snapshot.Overview.Now.Interface != "" {
+		rx := heartbeat.Snapshot.Overview.Now.RXBytes
+		txBytes := heartbeat.Snapshot.Overview.Now.TXBytes
+		iface := heartbeat.Snapshot.Overview.Now.Interface
+
+		var lastIface string
+		var lastRX, lastTX int64
+		errState := tx.QueryRowContext(ctx, `SELECT iface, last_rx, last_tx FROM fleet_traffic_state WHERE host_id=?`, hostID).Scan(&lastIface, &lastRX, &lastTX)
+		if errState == sql.ErrNoRows {
+			_, _ = tx.ExecContext(ctx, `INSERT INTO fleet_traffic_state(host_id, iface, last_rx, last_tx, updated_at) VALUES(?,?,?,?,?)`, hostID, iface, rx, txBytes, now)
+		} else if errState == nil {
+			var deltaRX, deltaTX int64
+			if iface == lastIface && rx >= lastRX && txBytes >= lastTX {
+				deltaRX = rx - lastRX
+				deltaTX = txBytes - lastTX
+			} else {
+				deltaRX = rx
+				deltaTX = txBytes
+			}
+			if deltaRX > 0 || deltaTX > 0 {
+				tz, _ := s.Setting("timezone")
+				loc, errTz := time.LoadLocation(tz)
+				if errTz != nil {
+					loc = time.Local
+				}
+				day := time.Unix(now, 0).In(loc).Format("2006-01-02")
+				_, _ = tx.ExecContext(ctx, `INSERT INTO fleet_traffic_daily(host_id, day, rx_bytes, tx_bytes) VALUES(?,?,?,?) ON CONFLICT(host_id, day) DO UPDATE SET rx_bytes=fleet_traffic_daily.rx_bytes+excluded.rx_bytes, tx_bytes=fleet_traffic_daily.tx_bytes+excluded.tx_bytes`, hostID, day, deltaRX, deltaTX)
+			}
+			_, _ = tx.ExecContext(ctx, `UPDATE fleet_traffic_state SET iface=?, last_rx=?, last_tx=?, updated_at=? WHERE host_id=?`, iface, rx, txBytes, now, hostID)
+		}
+	}
+	_, _ = tx.ExecContext(ctx, `DELETE FROM fleet_traffic_daily WHERE day<?`, time.Now().Add(-90*24*time.Hour).Format("2006-01-02"))
 	if _, err = tx.ExecContext(ctx, `DELETE FROM fleet_metrics WHERE ts<?`, time.Now().Add(-90*24*time.Hour).Unix()); err != nil {
 		return err
 	}
@@ -125,7 +161,7 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 }
 
 func (s *Store) FleetHosts(includeArchived bool) ([]model.FleetHost, error) {
-	query := `SELECT id,name,hostname,os,arch,service_manager,panel_version,sing_box_version,protocol_version,capabilities_json,snapshot_json,last_seen_at,archived_at,created_at FROM fleet_hosts`
+	query := `SELECT id,name,hostname,os,arch,service_manager,panel_version,sing_box_version,protocol_version,capabilities_json,snapshot_json,last_seen_at,archived_at,created_at,billing_reset_day,traffic_quota_bytes,traffic_calc_mode,expires_at FROM fleet_hosts`
 	if !includeArchived {
 		query += ` WHERE archived_at=0`
 	}
@@ -135,12 +171,13 @@ func (s *Store) FleetHosts(includeArchived bool) ([]model.FleetHost, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	tz, _ := s.Setting("timezone")
 	result := []model.FleetHost{}
 	for rows.Next() {
 		var host model.FleetHost
 		var capabilities, snapshot string
 		var lastSeen, archived, created int64
-		if err = rows.Scan(&host.ID, &host.Name, &host.Hostname, &host.OS, &host.Arch, &host.ServiceManager, &host.PanelVersion, &host.SingBoxVersion, &host.ProtocolVersion, &capabilities, &snapshot, &lastSeen, &archived, &created); err != nil {
+		if err = rows.Scan(&host.ID, &host.Name, &host.Hostname, &host.OS, &host.Arch, &host.ServiceManager, &host.PanelVersion, &host.SingBoxVersion, &host.ProtocolVersion, &capabilities, &snapshot, &lastSeen, &archived, &created, &host.BillingResetDay, &host.TrafficQuotaBytes, &host.TrafficCalcMode, &host.ExpiresAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(capabilities), &host.Capabilities)
@@ -150,6 +187,37 @@ func (s *Store) FleetHosts(includeArchived bool) ([]model.FleetHost, error) {
 		host.Archived = archived > 0
 		host.Online = !host.Archived && lastSeen > 0 && time.Since(host.LastSeenAt) <= 30*time.Second
 		host.Compatible = host.ProtocolVersion == model.FleetProtocolVersion
+		if host.BillingResetDay < 1 || host.BillingResetDay > 31 {
+			host.BillingResetDay = 1
+		}
+		if host.TrafficCalcMode == "" {
+			host.TrafficCalcMode = "both"
+		}
+		if slices.Contains(host.Capabilities, "probe") {
+			bStart, bEnd := FleetBillingPeriod(time.Now(), host.BillingResetDay, tz)
+			startDay := bStart.Format("2006-01-02")
+			endDay := bEnd.Format("2006-01-02")
+			rx, tx, _ := s.FleetHostTrafficBetween(host.ID, startDay, endDay)
+			var used int64
+			switch host.TrafficCalcMode {
+			case "rx":
+				used = rx
+			case "tx":
+				used = tx
+			case "max":
+				if rx > tx {
+					used = rx
+				} else {
+					used = tx
+				}
+			default:
+				used = rx + tx
+			}
+			host.Snapshot.Overview.TrafficUsed = used
+			host.Snapshot.Overview.TrafficQuota = host.TrafficQuotaBytes
+			host.Snapshot.Overview.BillingStart = startDay
+			host.Snapshot.Overview.BillingEnd = endDay
+		}
 		result = append(result, host)
 	}
 	return result, rows.Err()
@@ -203,6 +271,83 @@ func (s *Store) RenameFleetHost(id, name string) error {
 	return err
 }
 
+func (s *Store) UpdateFleetHostSettings(id string, req model.FleetHostSettingsRequest) error {
+	if req.BillingResetDay < 1 || req.BillingResetDay > 31 {
+		req.BillingResetDay = 1
+	}
+	if req.TrafficQuotaBytes < 0 {
+		req.TrafficQuotaBytes = 0
+	}
+	switch req.TrafficCalcMode {
+	case "both", "tx", "rx", "max":
+	default:
+		req.TrafficCalcMode = "both"
+	}
+	req.ExpiresAt = strings.TrimSpace(req.ExpiresAt)
+	if req.ExpiresAt != "" {
+		if _, err := time.Parse("2006-01-02", req.ExpiresAt); err != nil {
+			return errors.New("到期时间格式无效，应为 YYYY-MM-DD")
+		}
+	}
+	result, err := s.DB.Exec(`UPDATE fleet_hosts SET billing_reset_day=?,traffic_quota_bytes=?,traffic_calc_mode=?,expires_at=?,updated_at=? WHERE id=? AND archived_at=0`, req.BillingResetDay, req.TrafficQuotaBytes, req.TrafficCalcMode, req.ExpiresAt, time.Now().Unix(), id)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func daysInMonth(year int, month time.Month) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+func FleetBillingPeriod(now time.Time, day int, timezone string) (time.Time, time.Time) {
+	if day < 1 || day > 31 {
+		day = 1
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		location = time.Local
+	}
+	local := now.In(location)
+	year, month := local.Year(), local.Month()
+	if local.Day() < day {
+		month--
+		if month == 0 {
+			month = 12
+			year--
+		}
+	}
+	maxDays := daysInMonth(year, month)
+	targetDay := day
+	if targetDay > maxDays {
+		targetDay = maxDays
+	}
+	start := time.Date(year, month, targetDay, 0, 0, 0, 0, location)
+	nextMonth := month + 1
+	nextYear := year
+	if nextMonth > 12 {
+		nextMonth = 1
+		nextYear++
+	}
+	nextMaxDays := daysInMonth(nextYear, nextMonth)
+	nextTargetDay := day
+	if nextTargetDay > nextMaxDays {
+		nextTargetDay = nextMaxDays
+	}
+	end := time.Date(nextYear, nextMonth, nextTargetDay, 0, 0, 0, 0, location).Add(-time.Second)
+	return start, end
+}
+
+func (s *Store) FleetHostTrafficBetween(hostID, start, end string) (int64, int64, error) {
+	var rx, tx int64
+	err := s.DB.QueryRow(`SELECT COALESCE(SUM(rx_bytes),0), COALESCE(SUM(tx_bytes),0) FROM fleet_traffic_daily WHERE host_id=? AND day>=? AND day<=?`, hostID, start, end).Scan(&rx, &tx)
+	return rx, tx, err
+}
+
 func (s *Store) ArchiveFleetHost(id string) error {
 	now := time.Now().Unix()
 	_, err := s.DB.Exec(`UPDATE fleet_hosts SET archived_at=?,token_hash=?,updated_at=? WHERE id=? AND archived_at=0`, now, "revoked:"+id+":"+time.Now().String(), now, id)
@@ -210,6 +355,8 @@ func (s *Store) ArchiveFleetHost(id string) error {
 }
 
 func (s *Store) PurgeFleetHost(id string) error {
+	_, _ = s.DB.Exec(`DELETE FROM fleet_traffic_state WHERE host_id=?`, id)
+	_, _ = s.DB.Exec(`DELETE FROM fleet_traffic_daily WHERE host_id=?`, id)
 	_, err := s.DB.Exec(`DELETE FROM fleet_hosts WHERE id=? AND archived_at>0`, id)
 	return err
 }

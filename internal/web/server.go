@@ -155,6 +155,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/fleet/subscription-probe", s.auth(s.probeFleetSubscription, true))
 	mux.HandleFunc("POST /api/v1/fleet/enrollments", s.auth(s.createFleetEnrollment, true))
 	mux.HandleFunc("PATCH /api/v1/fleet/hosts/{hostId}", s.auth(s.renameFleetHost, true))
+	mux.HandleFunc("PUT /api/v1/fleet/hosts/{hostId}/quota", s.auth(s.updateFleetHostSettings, true))
 	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}", s.auth(s.archiveFleetHost, true))
 	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}/purge", s.auth(s.purgeFleetHost, true))
 	mux.HandleFunc("/api/v1/fleet/hosts/{hostId}/{resource...}", s.fleetAuth(s.fleetHostGateway))

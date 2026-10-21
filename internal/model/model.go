@@ -370,7 +370,18 @@ type FleetHost struct {
 	LastSeenAt           time.Time     `json:"lastSeenAt,omitempty"`
 	SubscriptionCachedAt time.Time     `json:"subscriptionCachedAt,omitempty"`
 	CreatedAt            time.Time     `json:"createdAt"`
+	BillingResetDay      int           `json:"billingResetDay"`
+	TrafficQuotaBytes    int64         `json:"trafficQuotaBytes"`
+	TrafficCalcMode      string        `json:"trafficCalcMode"`
+	ExpiresAt            string        `json:"expiresAt"`
 	Snapshot             FleetSnapshot `json:"snapshot"`
+}
+
+type FleetHostSettingsRequest struct {
+	BillingResetDay   int    `json:"billingResetDay"`
+	TrafficQuotaBytes int64  `json:"trafficQuotaBytes"`
+	TrafficCalcMode   string `json:"trafficCalcMode"`
+	ExpiresAt         string `json:"expiresAt"`
 }
 
 type FleetSnapshot struct {

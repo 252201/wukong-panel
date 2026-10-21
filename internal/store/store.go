@@ -154,9 +154,31 @@ CREATE TABLE IF NOT EXISTS fleet_subscription_cache (
   host_id TEXT PRIMARY KEY, revision TEXT NOT NULL DEFAULT '', cipher TEXT NOT NULL,
   updated_at INTEGER NOT NULL, FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS fleet_traffic_daily (
+  host_id TEXT NOT NULL, day TEXT NOT NULL,
+  rx_bytes INTEGER NOT NULL DEFAULT 0, tx_bytes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(host_id, day),
+  FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS fleet_traffic_state (
+  host_id TEXT PRIMARY KEY, iface TEXT NOT NULL DEFAULT '',
+  last_rx INTEGER NOT NULL DEFAULT 0, last_tx INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
 `
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
+	}
+	for name, definition := range map[string]string{
+		"billing_reset_day":   "INTEGER NOT NULL DEFAULT 1",
+		"traffic_quota_bytes": "INTEGER NOT NULL DEFAULT 0",
+		"traffic_calc_mode":   "TEXT NOT NULL DEFAULT 'both'",
+		"expires_at":          "TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := s.ensureColumn("fleet_hosts", name, definition); err != nil {
+			return err
+		}
 	}
 	for name, definition := range map[string]string{
 		"memory_used_bytes":  "INTEGER NOT NULL DEFAULT 0",

@@ -195,3 +195,92 @@ func TestFleetMigrationIsAdditiveToSingleHostData(t *testing.T) {
 		t.Fatal("fleet schema missing after upgrade:", err)
 	}
 }
+
+func TestFleetProbeTrafficTrackingAndSettings(t *testing.T) {
+	database := openFleetTestStore(t)
+	if err := database.CreateFleetEnrollmentToken("probe_token", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	host := model.FleetHost{ID: "probe-1", Name: "Probe Alpine", ProtocolVersion: model.FleetProtocolVersion, Capabilities: []string{"overview", "probe"}}
+	if err := database.ConsumeFleetEnrollmentToken("probe_token", host, "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update host settings
+	settingsReq := model.FleetHostSettingsRequest{
+		BillingResetDay:   15,
+		TrafficQuotaBytes: 500_000_000_000,
+		TrafficCalcMode:   "both",
+		ExpiresAt:         "2027-05-18",
+	}
+	if err := database.UpdateFleetHostSettings(host.ID, settingsReq); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Unix()
+	// Heartbeat 1 (initial reading)
+	hb1 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: now, Interface: "eth0", RXBytes: 1000, TXBytes: 2000},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Heartbeat 2 (+500 rx, +800 tx)
+	hb2 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: now + 10, Interface: "eth0", RXBytes: 1500, TXBytes: 2800},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Heartbeat 3 (reboot simulation: counters reset to 200 rx, 300 tx)
+	hb3 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: now + 20, Interface: "eth0", RXBytes: 200, TXBytes: 300},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb3); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.BillingResetDay != 15 {
+		t.Fatalf("expected billing reset day 15, got %d", stored.BillingResetDay)
+	}
+	if stored.TrafficQuotaBytes != 500_000_000_000 {
+		t.Fatalf("expected quota 500GB, got %d", stored.TrafficQuotaBytes)
+	}
+	if stored.ExpiresAt != "2027-05-18" {
+		t.Fatalf("expected expiresAt 2027-05-18, got %q", stored.ExpiresAt)
+	}
+	// Expected trafficUsed = (1500-1000 + 2800-2000) + (200 + 300) = 500 + 800 + 200 + 300 = 1800
+	if stored.Snapshot.Overview.TrafficUsed != 1800 {
+		t.Fatalf("expected trafficUsed 1800, got %d", stored.Snapshot.Overview.TrafficUsed)
+	}
+	if stored.Snapshot.Overview.TrafficQuota != 500_000_000_000 {
+		t.Fatalf("expected snapshot quota 500GB, got %d", stored.Snapshot.Overview.TrafficQuota)
+	}
+}

@@ -649,6 +649,46 @@ func (s *Server) renameFleetHost(w http.ResponseWriter, r *http.Request, session
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) updateFleetHostSettings(w http.ResponseWriter, r *http.Request, session store.Session) {
+	hostID := r.PathValue("hostId")
+	host, err := s.store.FleetHost(hostID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "主机不存在")
+		return
+	}
+	var req model.FleetHostSettingsRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.BillingResetDay < 1 || req.BillingResetDay > 31 {
+		writeError(w, http.StatusBadRequest, "账期重置日必须在 1 到 31 之间")
+		return
+	}
+	if req.TrafficQuotaBytes < 0 {
+		writeError(w, http.StatusBadRequest, "流量配额不能为负数")
+		return
+	}
+	switch req.TrafficCalcMode {
+	case "", "both", "tx", "rx", "max":
+	default:
+		writeError(w, http.StatusBadRequest, "未知的流量计费规则")
+		return
+	}
+	req.ExpiresAt = strings.TrimSpace(req.ExpiresAt)
+	if req.ExpiresAt != "" {
+		if _, parseErr := time.Parse("2006-01-02", req.ExpiresAt); parseErr != nil {
+			writeError(w, http.StatusBadRequest, "到期时间格式无效，应为 YYYY-MM-DD")
+			return
+		}
+	}
+	if err = s.store.UpdateFleetHostSettings(hostID, req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = s.store.Audit(session.Username, "fleet.host.settings", hostID, fmt.Sprintf("reset=%d quota=%d mode=%s expires=%s host=%s", req.BillingResetDay, req.TrafficQuotaBytes, req.TrafficCalcMode, req.ExpiresAt, host.Name))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) archiveFleetHost(w http.ResponseWriter, r *http.Request, session store.Session) {
 	host, err := s.store.FleetHost(r.PathValue("hostId"))
 	if err != nil {

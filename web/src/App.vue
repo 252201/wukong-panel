@@ -90,10 +90,17 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | null>(null)
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
 const fleetHostTarget = ref<FleetHost | null>(null)
+const fleetHostSettingsTarget = ref<FleetHost | null>(null)
+const fleetHostSettingsDraft = ref({
+  billingResetDay: 1,
+  trafficQuotaGB: 0,
+  trafficCalcMode: 'both',
+  expiresAt: '',
+})
 const fleetHostNameDraft = ref('')
 const fleetHostConfirm = ref('')
 const candidates = ref<Candidate[]>([])
@@ -532,6 +539,69 @@ async function submitFleetHostAction() {
     }
   } catch (error) { notify(error instanceof Error ? error.message : action === 'rename' ? '重命名失败' : action === 'remove' ? '移除失败' : '永久清除失败') }
   finally { busy.value = false }
+}
+
+function expiryDays(dateStr?: string) {
+  if (!dateStr) return null
+  const parts = dateStr.split('-').map(Number)
+  if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) return null
+  const target = new Date(parts[0], parts[1] - 1, parts[2])
+  const today = new Date()
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const diffMs = target.getTime() - todayDate.getTime()
+  return Math.round(diffMs / 86400000)
+}
+
+function expiryLabel(dateStr?: string) {
+  const days = expiryDays(dateStr)
+  if (days === null) return ''
+  if (days < 0) return language.value === 'en-US' ? `Expired (${-days}d ago)` : `已过期 ${-days} 天`
+  if (days === 0) return language.value === 'en-US' ? 'Expires today' : '今日到期'
+  if (days <= 7) return language.value === 'en-US' ? `Expires in ${days}d` : `剩余 ${days} 天到期`
+  return language.value === 'en-US' ? `${dateStr} (${days}d left)` : `${dateStr} 到期 (${days}天)`
+}
+
+function expiryTone(dateStr?: string) {
+  const days = expiryDays(dateStr)
+  if (days === null) return ''
+  if (days < 0) return 'danger'
+  if (days <= 7) return 'warning'
+  return 'info'
+}
+
+function openFleetHostSettings(host: FleetHost) {
+  fleetHostSettingsTarget.value = host
+  const quotaBytes = host.trafficQuotaBytes || host.snapshot?.overview?.trafficQuota || 0
+  fleetHostSettingsDraft.value = {
+    billingResetDay: host.billingResetDay || 1,
+    trafficQuotaGB: quotaBytes > 0 ? Number((quotaBytes / 1_000_000_000).toFixed(2)) : 0,
+    trafficCalcMode: host.trafficCalcMode || 'both',
+    expiresAt: host.expiresAt || '',
+  }
+  modal.value = 'fleet-host-settings'
+}
+
+async function submitFleetHostSettings() {
+  const host = fleetHostSettingsTarget.value
+  if (!host) return
+  busy.value = true
+  try {
+    const quotaBytes = Math.max(0, Math.round(Number(fleetHostSettingsDraft.value.trafficQuotaGB || 0) * 1_000_000_000))
+    await api.updateFleetHostSettings(host.id, {
+      billingResetDay: Number(fleetHostSettingsDraft.value.billingResetDay) || 1,
+      trafficQuotaBytes: quotaBytes,
+      trafficCalcMode: fleetHostSettingsDraft.value.trafficCalcMode || 'both',
+      expiresAt: (fleetHostSettingsDraft.value.expiresAt || '').trim(),
+    })
+    modal.value = null
+    fleetHostSettingsTarget.value = null
+    await refreshFleetStatus()
+    notify(language.value === 'en-US' ? 'Host settings updated' : '主机配额与设置已保存')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '保存主机设置失败')
+  } finally {
+    busy.value = false
+  }
 }
 
 function ensureHostWritable() {
@@ -983,7 +1053,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
@@ -997,7 +1067,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <div class="fleet-resource"><small>CPU</small><b>{{ (host.snapshot?.overview?.now?.cpu || 0).toFixed(1) }}%</b><em>负载 {{ (host.snapshot?.overview?.now?.load1 || 0).toFixed(2) }}</em></div>
                 <div class="fleet-resource"><small>内存</small><b :title="resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0)">{{ resourceUsage(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.memoryUsedBytes || 0, host.snapshot?.overview?.now?.memoryTotalBytes || 0, host.snapshot?.overview?.now?.memory || 0, 0) }}</em></div>
                 <div class="fleet-resource"><small>磁盘</small><b :title="resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0)">{{ resourceUsage(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0) }}</b><em>{{ resourcePercent(host.snapshot?.overview?.now?.diskUsedBytes || 0, host.snapshot?.overview?.now?.diskTotalBytes || 0, host.snapshot?.overview?.now?.disk || 0) }}</em></div>
-                <div v-if="isProbeHost(host)" class="fleet-resource"><small>网卡累计流量</small><b>{{ bytes((host.snapshot?.overview?.now?.rxBytes || 0) + (host.snapshot?.overview?.now?.txBytes || 0)) }}</b><em>{{ language === 'en-US' ? 'Since boot' : '自系统启动' }} · {{ host.snapshot?.overview?.now?.interface || '—' }}</em></div><div v-else class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
+                <div v-if="isProbeHost(host)" class="fleet-resource fleet-resource-clickable" :title="language === 'en-US' ? 'Click to configure quota and VPS expiry' : '点击配置配额与到期时间'" @click="openFleetHostSettings(host)"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }} · {{ host.snapshot?.overview?.now?.interface || '—' }}</em></div><div v-else class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
               </section>
               <section class="fleet-host-network" aria-label="网络质量">
                 <div class="fleet-network-heading"><strong>网络质量</strong><small>ICMP · 近 30 分钟</small></div>
@@ -1010,7 +1080,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </section>
             </div>
-            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '仅监控'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer>
+            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '仅监控'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="host.id !== 'local'" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
         </section>
@@ -1227,6 +1297,43 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <label v-if="fleetHostAction === 'rename'">新的主机名称<input v-model="fleetHostNameDraft" maxlength="120" autocomplete="off" required autofocus></label>
       <label v-else>输入完整主机名 <code>{{ fleetHostTarget?.name }}</code> 确认<input v-model="fleetHostConfirm" autocomplete="off" spellcheck="false" :placeholder="fleetHostTarget?.name" required autofocus></label>
       <div class="modal-actions"><button type="button" class="secondary" :disabled="busy" @click="closeFleetHostAction">取消</button><button :class="fleetHostAction === 'rename' ? 'primary' : 'danger-button'" :disabled="busy || (fleetHostAction === 'rename' ? !fleetHostNameDraft.trim() || fleetHostNameDraft.trim() === fleetHostTarget?.name : fleetHostConfirm.trim() !== fleetHostTarget?.name)">{{ busy ? '处理中…' : fleetHostAction === 'rename' ? '保存名称' : fleetHostAction === 'purge' ? '永久清除' : '确认移除' }}</button></div>
+    </form>
+    <form v-else-if="modal === 'fleet-host-settings'" class="modal-card compact fleet-host-settings-modal" role="dialog" aria-modal="true" @submit.prevent="submitFleetHostSettings" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" :disabled="busy" @click="modal = null">×</button>
+      <span class="modal-seal">设</span>
+      <p class="eyebrow">FLEET HOST SETTINGS</p>
+      <h2>{{ fleetHostSettingsTarget?.name }} · 配额与设置</h2>
+      <p>由中央主控统一托管主机的账期流量配额与 VPS 到期时间。</p>
+      <div v-if="fleetHostSettingsTarget" class="fleet-host-action-target">
+        <small>目标主机</small><b>{{ fleetHostSettingsTarget.name }}</b>
+        <span>{{ fleetHostSettingsTarget.hostname || fleetHostSettingsTarget.id }} · {{ isProbeHost(fleetHostSettingsTarget) ? '轻量探针' : '完整面板' }}</span>
+      </div>
+      <div class="form-grid">
+        <label>每月重置日
+          <input v-model.number="fleetHostSettingsDraft.billingResetDay" type="number" min="1" max="31" required>
+          <small>每月流量归零日（1~31）</small>
+        </label>
+        <label>月流量额度（GB）
+          <input v-model.number="fleetHostSettingsDraft.trafficQuotaGB" type="number" min="0" step="any" required>
+          <small>0 表示不限量</small>
+        </label>
+      </div>
+      <label>流量计费规则
+        <select v-model="fleetHostSettingsDraft.trafficCalcMode">
+          <option value="both">双向计费（入站 + 出站）</option>
+          <option value="tx">仅计出站（绝大多数云厂商）</option>
+          <option value="rx">仅计入站</option>
+          <option value="max">出入取大值（部分美西/欧机）</option>
+        </select>
+      </label>
+      <label>VPS 到期时间
+        <input v-model="fleetHostSettingsDraft.expiresAt" type="date">
+        <small>{{ fleetHostSettingsDraft.expiresAt ? expiryLabel(fleetHostSettingsDraft.expiresAt) : '留空表示长期有效 / 未设置' }}</small>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="secondary" :disabled="busy" @click="modal = null">取消</button>
+        <button class="primary" :disabled="busy">{{ busy ? '保存中…' : '保存设置' }}</button>
+      </div>
     </form>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else-if="modal === 'socks-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeSOCKSExit"><span class="modal-seal red">撤</span><p class="eyebrow">SOCKS EGRESS REMOVAL</p><h2>移除 SOCKS 出站？</h2><p>这会删除 Root Agent 加密保存的 SOCKS 服务器与认证信息，不会修改上游代理。</p><p v-if="socksNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用 SOCKS 出站：{{ socksNodesInUse.map(node => node.name).join('、') }}。请先将它们切回其他出口。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="socksRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="socksBusy" @click="modal = null">保留 SOCKS 出站</button><button class="danger-button" :disabled="socksBusy || socksRemoveConfirm !== 'REMOVE' || socksNodesInUse.length > 0">{{ socksBusy ? '正在移除…' : '确认移除' }}</button></div></form>

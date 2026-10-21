@@ -551,4 +551,32 @@ func TestLightweightProbeAppearsInControllerFleet(t *testing.T) {
 	if len(status.Hosts) != 2 || status.Hosts[1].ID != joined.HostID || !status.Hosts[1].Online || !fleetHasCapability(status.Hosts[1], "probe") || status.Hosts[1].Snapshot.Overview.Now.Timestamp == 0 || status.Hosts[1].Snapshot.Overview.NodeCount != 0 {
 		t.Fatalf("probe fleet status=%+v", status.Hosts)
 	}
+
+	// Test update fleet host settings
+	settingsJSON := `{"billingResetDay":20,"trafficQuotaBytes":1000000000000,"trafficCalcMode":"both","expiresAt":"2027-10-01"}`
+	setReq := httptest.NewRequest(http.MethodPut, "/api/v1/fleet/hosts/"+joined.HostID+"/quota", strings.NewReader(settingsJSON))
+	setReq.SetPathValue("hostId", joined.HostID)
+	rec := httptest.NewRecorder()
+	server.updateFleetHostSettings(rec, setReq, store.Session{Username: "admin"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update settings status=%d %s", rec.Code, rec.Body.String())
+	}
+
+	// Test invalid date
+	badDateReq := httptest.NewRequest(http.MethodPut, "/api/v1/fleet/hosts/"+joined.HostID+"/quota", strings.NewReader(`{"expiresAt":"not-a-date"}`))
+	badDateReq.SetPathValue("hostId", joined.HostID)
+	badRec := httptest.NewRecorder()
+	server.updateFleetHostSettings(badRec, badDateReq, store.Session{Username: "admin"})
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad date, got %d", badRec.Code)
+	}
+
+	// Verify status after update
+	statusUpdated, err := server.buildFleetStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statusUpdated.Hosts[1].BillingResetDay != 20 || statusUpdated.Hosts[1].TrafficQuotaBytes != 1000000000000 || statusUpdated.Hosts[1].ExpiresAt != "2027-10-01" {
+		t.Fatalf("updated host settings not reflected in fleet status: %+v", statusUpdated.Hosts[1])
+	}
 }
