@@ -1,242 +1,103 @@
-# 悟空面板
+# 悟空面板 (Wukong Panel)
 
-悟空面板是面向个人与小型团队的自治 VPS 节点控制台，可在任一面板启用中央主控，将本机与 2–10 台远端的节点生命周期、分享订阅、主机状态和整机流量账期放在同一个安全界面中。
+悟空面板是面向个人与小型团队的自治 VPS 节点控制台。可在任一面板启用中央主控，将本机与 2–10 台远端主机的节点生命周期、分享订阅、实时速率、主机状态和整机流量账期汇聚在同一个安全界面中。
 
 ![Version](https://img.shields.io/badge/version-v1.7.17-d4ad57)
 ![Go](https://img.shields.io/badge/Go-1.24+-52b690)
 ![Vue](https://img.shields.io/badge/Vue-3.5-52b690)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## 宣传片 | Product Film
 
 https://github.com/user-attachments/assets/a66e91b8-70e7-401b-99b3-439cc35217d2
 
+---
 
-## 特性
+## 核心特性
 
-- 中央多机管理：任一面板可管理本机和最多 10 台远端 VPS；顶栏切换主机后，节点、流量、系统、任务和设置页面直接作用于该主机。舰队主机卡片按各主机直连公网出口 IP 显示国家/地区和国旗，并注明运行时长单位。远端继续保留本机 Web、SQLite 与 Root Agent，中央停机不影响代理服务和本机管理。
-- 轻量探针：无面板的 VPS 可以单独安装 `wukong-probe`，只向中央上报 CPU、内存、磁盘、网卡流量、运行时间、出口地区及国际/国内 ICMP 网络质量。它不安装 Web、Nginx、SQLite 或 sing-box，不开放入站端口，也不接受节点管理命令。舰队卡片标为“轻量探针”，不计入运行节点或全局订阅。
-- 出站安全通道：远端 Agent 仅通过证书可信的 HTTPS 主动连接中央，每 10 秒心跳并维持命令长轮询；不开放 Root Agent 公网端口、不使用 SSH。一次性接入令牌 10 分钟过期且只能成功使用一次，后续独立 Agent Token 只在中央保存 SHA-256。
-- 幂等远端任务：每台远端配置变更串行执行，命令使用幂等 ID；断线重投不会重复操作，过期命令不会在以后重连时补执行。配置暂存、`sing-box check`、快照和失败回滚仍由远端 Root Agent 完成。
-- 全局订阅：保留每台 VPS 的原订阅，同时提供可筛选主机和节点的中央订阅。远端生成的 Clash 片段以中央专用 AES-256-GCM 密钥加密缓存；离线时标记并使用最后成功缓存，从未生成缓存则明确返回 `503`。
-- 七协议驱动：完整管理 Hysteria2、VLESS + REALITY、VLESS + WebSocket + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 与 AnyTLS；支持 IPv6 优先、纯 IPv4、纯 IPv6、NAT 本地绑定、设备专用节点与无中断重命名。普通节点与设备编队使用相互独立的右上角入口；设备专用入口可一次创建 2–20 台设备，每台设备使用独立入站端口、凭据与分享配置，整组由一个 sing-box 配置和进程管理。新建 REALITY 节点默认使用已验证的 `www.cloudflare.com` 握手目标并继续自动分配随机端口，已有节点不会被改写。
-- 安全凭据：自动生成 UUID、WebSocket 随机路径、REALITY X25519 密钥、Short ID、SS2022 定长密钥和协议密码；Tunnel Token 不进入分享链接或公开 API，只以 AES-256-GCM 密文和 root-only `0600` 运行文件保存。
-- Cloudflare 优选接入：Tunnel 节点可选填优选域名或 IP，仅替换客户端实际拨号地址；TLS SNI、WebSocket Host 与 Published application 主机名保持不变。
-- 动态出站绑定：Agent 持久记录每个网卡的地址变化；固定绑定的 IPv4/IPv6 消失且同网卡能唯一识别对应新增地址时，先备份并校验 sing-box 配置，再切换绑定和重启服务。服务器同时存在多个静态或动态地址时不会按列表顺序误选；候选不唯一会保留原配置并写入审计，重启失败会自动恢复。
-- 双 VPS 落地出口：A 机继续承载代理入站，指定节点通过系统级 WireGuard 和独立策略路由从 B 机落地 IPv4 NAT 出站。面板不接收 B 机 SSH 凭据或私钥；隧道断线时带标记流量命中 `unreachable` 路由，不会回退并泄漏到 A 机公网。
-- 安全管理：非特权 Web 服务与 root Agent 通过受限 Unix Socket 通信。
-- 无损接管：扫描 `/etc/s-box` 与 systemd/OpenRC 服务，确认后导入，不重写未知字段。
-- 安全变更：配置暂存、`sing-box check`、原子替换、SHA-256 快照与失败回滚。
-- 节点检测：无需导入客户端即可从节点卡片执行本机完整代理闭环，验证服务、配置、协议握手、认证和代理出站，并记录延迟与出口 IP；公网防火墙/NAT 可达性仍需异地验证。
-- 实时观测：10 秒采样流量、CPU、内存、磁盘、负载、节点状态与进程 CPU/RSS；容量指标显示已用/总量。
-- 网络质量：各 VPS 的 Root Agent 每约 60 秒分别向国际与国内 IPv4 目标执行 5 次/目标 ICMP Echo；两组独立计算成功回包的 RTT 中位数与实际发包的丢包比例，并分别在总览卡片显示当前值和近 30 分钟历史色块（缺失分钟留空，异常采样标灰）。舰队主机卡片同时按国际/国内分组显示延迟、丢包率及各自的 30 分钟历史。两组采样在各 VPS 本地 SQLite 分开保存 24 小时以跨重启恢复；新采样保存逐 IP 回包数，悬浮历史色块时只将实际丢包的 IP 标红，旧采样没有逐 IP 明细时不猜测归属；升级时旧版合并采样不冒充任一组新历史。国际默认目标为 `1.1.1.1,8.8.8.8`，通过 `WUKONG_NETWORK_PROBE_TARGETS` 或 `--network-probe-targets` 配置；国内默认目标为 `194.138.202.35|223.5.5.5,138.113.151.1`（首目标不可达时自动回退备用 IP `223.5.5.5`，第二个目标位于香港），通过 `WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS` 或 `--network-probe-domestic-targets` 配置；每组最多 4 个插槽，支持使用 `|` 指定故障转移备用 IPv4 地址。目标为第三方 IP，可能变更或限制 ICMP，需定期复核。ICMP 被禁止时对应组显示不可用；这些指标是 VPS 到目标的出站质量，不代表客户端到代理节点的延迟或公网入站可达性。
-- 流量时间轴：今日按小时、本账期按日展示下载/上传堆叠流量，支持提示卡与平均线。
-- 多设备显示：流量脉络按节点展示 Hysteria2、TUIC、Shadowsocks、VLESS、Trojan、AnyTLS 与 VLESS + WS + Tunnel 最近完成窗口的下行速率，并在窄屏自动折叠为 `+N`。TCP 只统计有效载荷，忽略 ACK-only 包；Tunnel 按独立 Origin 端口归属节点，来源统一标记为 Cloudflare Tunnel，不伪装成真实客户端 IP。
-- 分享订阅：七种协议均可短时显示分享链接和二维码，并生成带流量响应头的 Clash/Mihomo 订阅。
-- 东方科幻界面：桌面、平板和移动端响应式布局。
+- **中央舰队与多机管控**：任一面板可纳管本机及最多 10 台远端 VPS；支持卡片实时网络速率监控、节点统一调度、跨机合并订阅与无损平滑切换。
+- **轻量探针零开销**：无面板小鸡可独立安装极简无状态的 `wukong-probe` 单二进制，上报资源与网络质量；中央主控自动托管账期流量配额与到期时间，防重启计数归零接续累计。
+- **七大主流协议驱动**：深度支持 Hysteria 2、VLESS + REALITY、VLESS + WS + Cloudflare Tunnel、Shadowsocks 2022、TUIC v5、Trojan TLS 与 AnyTLS，支持本机双栈闭环握手自检。
+- **设备编队与批量管理**：首创设备专用节点入口，一个进程、一个配置统一管理 2–20 台设备的独立入站端口与凭据；支持双 VPS 落地 IP 出口与 fail-closed 路由保护。
+- **出站安全与零公网暴露**：远端 Agent 仅通过证书可信 HTTPS 主动发起连接长轮询，不开放额外端口、不使用 SSH；非特权 Web 服务与 root Agent 通过受限 Unix Socket 严格隔离。
+- **全链路网络质量观测**：按国际与国内分组，实时采集 ICMP 延迟与丢包率，直观呈现近 30 分钟历史走势，支持故障自动切换备用目标。
+- **安全变更与无损接管**：自动扫描导入既有 `/etc/s-box` 与 systemd 服务，配置变更失败秒级自动回滚；自动申请与每日续期 ACME 证书。
 
-## 轻量探针接入
+---
 
-先在中央面板启用“中央多机控制”，打开舰队页并点击“接入轻量探针”，复制页面生成的 10 分钟一次性命令，在目标 VPS 以 root 执行。命令下载独立的 `probe-install.sh`、对应架构的 `wukong-probe`，校验 Release SHA-256 后注册 systemd 或 OpenRC 服务；不会安装完整面板、Nginx 或 sing-box。需要 Linux `amd64`/`arm64`、`curl`、`sha256sum` 和系统 CA 证书。探针默认以 root 运行，仅向中央可信 HTTPS 地址发起连接。
-
-ICMP 探测在原始 socket 无法打开时自动尝试非特权 ICMP Echo socket，兼容缺少 `CAP_NET_RAW` 的 Podman 等容器，无需安装或调用系统 `ping`。Linux 的 `net.ipv4.ping_group_range` 必须允许探针进程所在的组创建 Echo socket；若两种 socket 均被禁止，则显示“不可用”，不会把权限错误计为 100% 丢包。完整面板的网络质量采样也使用同一兼容逻辑。
-
-轻量探针只提供舰队主机卡片，不提供“进入主机”、节点操作或全局订阅。卡片的“网卡累计流量”是当前默认网卡自系统启动以来的计数器，重启或网卡更换后会重置；它不是账期用量。网络质量的近 30 分钟历史保存在探针内存中，探针服务重启后重新积累。
-
-升级探针使用 `sudo sh probe-install.sh --update`，卸载使用 `sudo sh probe-install.sh --uninstall`；通过 Release 地址执行也可以。卸载后还需在中央舰队页移除离线主机记录。现有完整面板安装与接入方式不变。
-
-## 一键安装
+## 快速开始
 
 支持 Debian、Ubuntu、Rocky Linux、AlmaLinux、Alpine；支持 `amd64`、`arm64`。
+
+### 1. 一键安装完整面板
 
 ```bash
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh
 ```
 
-纯净 VPS 如果没有预装 `curl`，请使用下面的兼容入口；它会优先使用已有的 `curl`/`wget`，否则通过 `apt`、`dnf` 或 `apk` 安装 `ca-certificates` 和 `curl` 后再继续：
-
-如果系统已有 `wget`，也可以直接使用发布资产中的 `bootstrap.sh`：
-
+纯净 VPS 如果没有预装 `curl`，可直接使用 `wget` 快速入口：
 ```bash
 wget -qO- https://github.com/252201/wukong-panel/releases/latest/download/bootstrap.sh | sudo sh
 ```
 
-```bash
-sudo sh -c '
-set -eu
-url="https://github.com/252201/wukong-panel/releases/latest/download/install.sh"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$url" | sh
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO- "$url" | sh
-elif command -v apt-get >/dev/null 2>&1; then
-  apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl
-  curl -fsSL "$url" | sh
-elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y -q ca-certificates curl
-  curl -fsSL "$url" | sh
-elif command -v apk >/dev/null 2>&1; then
-  apk add -q ca-certificates curl
-  curl -fsSL "$url" | sh
-else
-  echo "找不到 curl、wget 或受支持的包管理器" >&2
-  exit 1
-fi
-'
-```
+### 2. 接入轻量探针
 
-安装器进入系统后还会自动补齐 `curl`、`iproute2`（包含 `ss`）等依赖；只有明确使用 `--skip-packages` 时才要求这些工具事先存在。
+在中央主控面板进入“中央多机控制”并点击“接入轻量探针”，复制页面生成的 10 分钟一次性命令并在目标 VPS（root 权限）执行即可。探针仅消耗数 MB 内存，不安装 Web、数据库或 sing-box。
 
-同一个入口同时负责安装、启动、关闭、更新和卸载：未安装时进入安装向导；检测到已有面板时可直接启动或关闭 Web 与 Agent，也可选择安全更新、重新配置、保留数据卸载或彻底卸载。关闭面板只停止 Web 与 Agent，保留 nginx 公网入口和开机启动设置。更新模式只替换校验后的二进制，不重新申请证书、不改 nginx 和节点配置；但会为旧安装补齐可信证书路径、ACME 每日续期任务和续签后的安全 reload/restart 钩子。更新前会停服务复制 SQLite 一致性备份，健康检查失败则自动回滚；健康检查通过后只保留最近三个更新备份。systemd 使用 `RuntimeDirectory=`，Alpine/OpenRC 使用幂等 `start_pre()`，两者都会在服务启动前自动重建 `/run/wukong-panel`，避免重启清空临时目录后出现 502。
-
-首次安装可依次填写面板域名、HTTPS 端口、证书方式和 ACME 邮箱。填写域名后默认申请 Let’s Encrypt 证书，并可选择 HTTP-01 自动验证、仅 IPv4、仅 IPv6 或 Cloudflare DNS-01。安装器会注册每日续期检查：systemd 使用持久化 timer，OpenRC 使用 daily periodic；续签成功后先校验 sing-box 配置，只重启实际引用该证书的活动节点，再 reload Nginx。HTTP-01 standalone 仅在证书到达续期时间时临时停启 Nginx，并保证失败时恢复。纯脚本/CI 环境会自动保持非交互；也可显式使用 `--unattended`。
-
-申请证书前应先把域名的 A/AAAA 记录指向该 VPS。HTTP-01 要求公网 TCP 80 可达；IPv4 NAT 端口受限但 IPv6 不限端口时，选择“仅 IPv6”，并确保域名 AAAA 记录正确。若公网 80 已被 nginx、Apache、Caddy 或 lighttpd 占用，交互安装器会询问是否临时停止已知服务，签发完成后自动恢复；无人值守安装需显式增加 `--takeover-port-80`，否则会安全失败。未知进程不会被强制终止。
-
-NAT VPS、只开放指定端口的 VPS，需要在安装时把面板 HTTPS 端口设为可用的 **TCP** 端口。通过管道执行时，参数必须写在 `sh -s --` 后面：
+### 3. 常用运维与更新
 
 ```bash
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --port 你的可用TCP端口
-```
+# 安全更新到最新版本（保留现有配置、证书与节点）
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --update
 
-如果提供商的公网端口与 VPS 内部端口不同，安装器的 `--port` 填内部监听端口，浏览器使用提供商分配的公网映射端口。IPv6 没有限制时，安装完成信息也会单独打印带方括号的 IPv6 访问地址。
-
-常用安装参数：
-
-```bash
-# 直接更新到 latest（不修改现有配置、证书和节点）
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --update
-
-# 启动面板 Web 与 Agent，并等待健康检查通过
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --start-panel
-
-# 关闭面板 Web 与 Agent；保留 nginx 和开机启动设置
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --stop-panel
-
-# 忘记 admin 密码：备份数据库、撤销全部会话并生成一次性密码
-# 登录后必须立即设置至少 12 位的新密码
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --reset-password
-
-# 更新到悟空验证过的 sing-box 稳定版本；旧二进制和配置快照会保留
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --update-sing-box
-
-# 回退到上一次保留的 sing-box 版本
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --rollback-sing-box
-
-# 完整备份后卸载 sing-box、节点 JSON 和对应服务定义；保留悟空面板
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --uninstall-sing-box
-
-# 在 B 机安全停止隧道并移除落地出口配置；保留 WireGuard 软件与系统转发状态
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --remove-residential-peer
-
-# 卸载面板并保留配置、数据库和 sing-box 节点
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --uninstall
-
-# 完全删除悟空面板配置和数据；仍不删除 sing-box 节点
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --uninstall --purge
-
-# 固定版本、自定义端口和入口
+# 固定版本、自定义端口与访问路径
 sudo sh install.sh --version v1.7.17 --port 9443 --base-path /my-secret-panel/
 
-# 使用现有证书
-sudo sh install.sh --domain panel.example.com \
-  --cert-file /path/fullchain.cer --key-file /path/private.key
-
-# HTTP-01
-sudo sh install.sh --domain panel.example.com --acme http --email admin@example.com
-
-# HTTP-01（临时停止已知 Web 服务，签发后自动恢复）
-sudo sh install.sh --domain panel.example.com --acme http \
-  --email admin@example.com --takeover-port-80
-
-# IPv6 HTTP-01（适用于 IPv4 NAT 端口受限、IPv6 公网 80 可达）
-sudo sh install.sh --domain panel.example.com --acme http \
-  --acme-ip-version 6 --email admin@example.com
-
-# Cloudflare DNS-01
-sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh \
-  --domain panel.example.com --acme cloudflare
+# 忘记管理员密码：撤销现有会话并生成一次性临时登录密码
+curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --reset-password
 ```
 
-无域名时默认监听 HTTPS `9443` 并生成自签名证书。默认安装不会修改防火墙或云安全组；需要时可在安装阶段选择策略：
+<details>
+<summary><b>查看更多安装与高级配置参数（证书/防火墙/排障）</b></summary>
 
 ```bash
-# 开启主机防火墙，自动放行 SSH、80/443、面板端口，并额外放行节点端口
-sudo sh install.sh --firewall-mode on \
-  --firewall-ports 45080/udp,43191/tcp
+# 临时接管 80 端口用于 Let's Encrypt HTTP-01 验证（验证后自动恢复原服务）
+sudo sh install.sh --domain panel.example.com --acme http --email admin@example.com --takeover-port-80
 
-# 开启并放行所有入站端口（仅适合临时排障，不推荐长期使用）
-sudo sh install.sh --firewall-mode all
+# 使用已有证书
+sudo sh install.sh --domain panel.example.com --cert-file /path/fullchain.cer --key-file /path/private.key
 
-# 关闭已检测到的主机防火墙
-sudo sh install.sh --firewall-mode off
-```
+# Cloudflare DNS-01 自动证书
+sudo -E env CF_Token=... CF_Zone_ID=... sh install.sh --domain panel.example.com --acme cloudflare
 
-安装完成后也可以独立管理防火墙。Debian/Ubuntu 优先使用 UFW，Rocky/AlmaLinux 优先使用 firewalld，Alpine 使用 nftables；缺少后端时会按发行版自动安装：
-
-```bash
+# 防火墙状态与管理
 sudo sh install.sh --firewall-status
 sudo sh install.sh --firewall-on
 sudo sh install.sh --firewall-open 45080/udp,34001/tcp
-sudo sh install.sh --firewall-open-all   # 不推荐
 sudo sh install.sh --firewall-off
+
+# 停止或启动面板服务（保留 Nginx 入口与开机自启）
+sudo sh install.sh --stop-panel
+sudo sh install.sh --start-panel
+
+# 卸载面板（默认保留节点数据；--purge 彻底清理自身数据）
+sudo sh install.sh --uninstall
+sudo sh install.sh --uninstall --purge
 ```
+</details>
 
-已安装面板的 VPS 也可以直接运行 `sudo sh install.sh`，在操作菜单中选择“管理防火墙”，再选择查看状态、开启、关闭、指定端口或“开启并放行所有入站端口”。“所有端口”仅建议用于临时排障；云厂商安全组仍需单独配置。
+---
 
-开启防火墙时安装器会优先识别当前 SSH 监听端口并自动放行，避免因自定义 SSH 端口导致锁死；云厂商安全组仍需单独配置。
+## 中央舰队与全局订阅
 
-## 主机安全
-
-侧栏的“安全 / Security”页提供本机及舰队完整面板的防火墙和 Fail2ban SSH 管理。优先沿用正在运行的后端；无后端时，Debian/Ubuntu 选择 UFW，Rocky/AlmaLinux 选择 firewalld，Alpine 选择 nftables。多后端、复杂规则、缺少权限或旧 Agent 会显示具体原因并禁止写入。
-
-每项变更先预览，再核对状态、验证备份并执行。首次开启拒绝其他入站，放行实际 SSH、Nginx 面板入口、80/443 和现有公网节点所需的 TCP/UDP 端口。无法识别管理端口时必须填写确认；未来节点仅提供端口建议。可能影响连接的操作需要在 90 秒内确认，独立 systemd/OpenRC 恢复服务负责超时或重启回滚。nftables 只修改悟空自己的表；不调用整机 flush。
-
-SSH 防护默认正常模式，10 分钟失败 5 次封禁 1 小时，支持白名单、计数、封禁列表及逐个解封。已有 SSH jail 先展示后接管，解除接管恢复原配置；其他 jail 的配置不变。详细流程、API 和限制见 [安全管理说明](docs/host-security.md)。
-
-## 中央多机管理
-
-在准备作为中央的面板进入“设置 → 中央多机控制”。这里有两个职责不同的地址：
+在主控面板进入“设置 → 中央多机控制”配置主控：
 
 | 设置项 | 用途 | 示例 |
 | --- | --- | --- |
-| 主控通信地址 | 远端 Agent 接入、心跳与命令长轮询 | `https://panel.example.com/wukong-abc123/` |
-| 订阅公开地址 | 客户端拉取中央全局订阅 | `https://sub.example.com/` |
+| **主控通信地址** | 远端 Agent 接入、心跳与命令长轮询 | `https://panel.example.com/wukong-abc123/` |
+| **订阅公开地址** | 客户端拉取中央全局订阅（推荐标准 443 入口） | `https://sub.example.com/` |
 
-两个地址都必须使用操作系统信任链可验证的 HTTPS 证书，不提供跳过 TLS 校验的选项。订阅公开地址可以留空，此时继续复用主控通信地址，兼容已有安装；需要标准 `HTTPS 443` 入口时，建议使用独立域名。保存中央设置后可点击“检测订阅入口”，由主控验证 TLS、HTTP 状态、订阅格式、节点数量与响应延迟；检测不会跟随重定向，避免把订阅 Token 带到其他域名。
-
-已经安装悟空面板的 VPS 可以运行安装器菜单中的“配置独立订阅 443 域名”，或直接执行：
-
-```bash
-# Let's Encrypt HTTP-01；公网 80 已被 Nginx 等已知服务占用时临时停用，签发后自动恢复
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- \
-      --configure-subscription-domain sub.example.com \
-      --acme http --email admin@example.com --takeover-port-80
-
-# Cloudflare DNS-01；令牌只通过当前进程环境传入，不写入悟空数据库
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh -o /tmp/wukong-install.sh
-sudo -E env CF_Token=... CF_Zone_ID=... sh /tmp/wukong-install.sh \
-  --configure-subscription-domain sub.example.com --acme cloudflare
-```
-
-该操作只在 `443` 创建一个订阅专用 Nginx 虚拟主机：仅 `GET /fleet-sub/` 会反代到本机面板，其他路径一律返回 `404`，不会暴露登录页或管理 API。安装器会校验证书域名、证书与私钥匹配关系、Nginx 配置，并接入已有 ACME 自动续期。完成后把输出的 `https://sub.example.com/` 填入“订阅公开地址”；云安全组和本机防火墙的 `443/tcp` 仍需允许入站。
-
-如果服务器已经有自己的反向代理，可以不运行该操作，只需按同样原则将独立域名的 `/fleet-sub/` 转发到 `http://127.0.0.1:8788`，根路径和其他路径返回 `404`。Cloudflare Tunnel 用户也可以建立只匹配 `^/fleet-sub/` 的 ingress 规则并添加最终 `http_status:404` 兜底，再把该 Tunnel 域名填入订阅公开地址；不要把整个 `127.0.0.1:8788` 无路径限制地发布到公网。
-
-在远端 VPS 以 root 运行面板生成的命令即可完成安装或安全更新并接入；等价参数如下：
-
+在远端 VPS 以 root 运行主控生成的接入命令：
 ```bash
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
   | sudo sh -s -- \
@@ -245,78 +106,19 @@ curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/insta
       --host-name '东京-02'
 ```
 
-退出中央只会删除远端 root-only 的连接配置并重启 Agent，本机面板、数据库和 sing-box 节点保持不变：
+---
 
-```bash
-curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh \
-  | sudo sh -s -- --leave-controller
-```
+## 主机安全防护
 
-中央模式不提供跨主机批量部署、面板升级、RBAC、多主复制或自动故障切换。安全页支持具备独立安全能力的完整远端面板；旧 Agent 与轻量探针只读。远端管理员密码、单机订阅 Token 和节点数据库不会在主机之间同步。
+面板“安全 / Security”页深度集成了各发行版原生防火墙（UFW / firewalld / nftables）与 Fail2ban SSH 防暴破保护：
+- **安全变更防锁死**：高危规则变更需在 90 秒内确认，超时或断线自动回滚。
+- **端口自动识别**：智能识别当前 SSH 监听端口并默认放行，精准保护出入站安全。
+- **SSH 动态封禁**：可视化查看封禁名单、日志及白名单设置，支持一键解封。
+- 详细说明与规则规范见 [主机安全管理指南](docs/host-security.md)。
 
-### AnyTLS
+---
 
-AnyTLS 节点使用标准 TCP + TLS 入站，需要填写一个由节点证书覆盖的域名。面板会优先复用安装时配置的可信证书，自动生成独立密码，并在部署完成前通过本机 AnyTLS 客户端闭环验证 TLS、认证与代理出站。客户端分享采用标准 `anytls://` URI；Clash/Mihomo 订阅会启用 UDP 隧道能力、Chrome 客户端指纹和保守的空闲会话参数。自签名环境会在分享与订阅中明确启用跳过证书校验，生产环境建议使用自动续期的 Let’s Encrypt 证书。
-
-### VLESS + WebSocket + Cloudflare Tunnel
-
-这个节点类型需要 Cloudflare 账户和一个已接入 Cloudflare 的域名，但不要求用户把 Cloudflare API Key 交给面板。面板只接收单个 Tunnel 的运行 Token：
-
-1. 在 Cloudflare Zero Trust 的 Networks → Tunnels 创建 remotely-managed Tunnel，选择 `cloudflared`，只复制运行命令中的 Token。
-2. 普通单节点使用“部署节点”；多设备从右上角独立的“设备专用节点”入口进入。选择 VLESS + WebSocket + Cloudflare Tunnel 后填写公开主机名并粘贴 Token；本地 Origin 端口和 VLESS UUID 会自动生成，WebSocket 路径可留空随机生成。设备编队整组只需粘贴一次 Token。
-3. 设备编队中的每台设备必须填写不同的 Cloudflare 公开主机名；WebSocket 路径可留空随机生成。
-4. 部署完成后，从每张节点卡片复制对应的 `http://127.0.0.1:<端口>` Cloudflare Service URL。
-5. 回到同一个 Tunnel，为每台设备分别添加一条 Published application，填写对应的独立主机名，Path 留空，Service URL 使用对应节点卡片的本地地址。WebSocket 路径会自动写入客户端配置，不需要再填入 Cloudflare 路由。
-
-客户端始终连接 Cloudflare 边缘的 `443/TLS`，sing-box Origin 只监听 VPS 的 `127.0.0.1`，不需要在防火墙或 NAT 上开放该端口。普通单节点各自管理 Tunnel；同一个设备组共享一个 sing-box 进程、一个 Tunnel Token 和一个 `cloudflared` 连接器，并通过不同公开主机名的多条 Published application 路由到各自的本地 Origin。同一设备组不允许重复使用 Cloudflare 公开主机名。
-
-如果已经测得更适合当前网络的 Cloudflare 优选域名或 IP，可在部署表单填写“优选连接域名 / IP”。面板只会把它写入分享链接和 Clash/Mihomo 订阅的 `server`；TLS `servername`、SNI、WebSocket `Host` 和 Tunnel Published application 路由仍使用上面的 Cloudflare 节点域名。该字段不能包含 `http://`、`https://`、路径或端口，留空即使用 Cloudflare 标准 Anycast。优选地址的可用性会随运营商、地区和时间变化，需要用户自行测试并维护。
-
-首次部署且连接器尚未安装时，面板会查询官方最新稳定 Release，按对应资产的 SHA-256 下载并安装 `cloudflared`（`amd64`/`arm64`），为普通 Tunnel 节点或设备组创建 systemd/OpenRC 服务，并通过 `--token-file` 启动。现有 `cloudflared` 必须不低于 `2025.4.0`；自定义路径可使用 `--cloudflared` 或 `WUKONG_CLOUDFLARED_BIN`。普通 Tunnel 节点的生命周期会同时管理 sing-box 与 cloudflared；设备编队的启动、停止和重启按整组执行，删除单台设备只会从共享配置移除对应 inbound 并重启组进程，删除最后一台设备时才移除共享 sing-box 与 Tunnel 连接器。升级后的 Agent 会自动把旧版多进程设备编队校验并合并为单进程，失败时恢复旧服务。节点“检测”仍按单台设备的端口和凭据验证完整代理链路。
-
-### 双 VPS 落地 IP 出口
-
-系统页的“落地 IP 出口”用于把 A 机上的指定代理节点，经 WireGuard 转发到 B 机落地 IPv4 出口：
-
-1. 在 A 机面板填写 A 的公网 IP/域名和 UDP 监听端口，先不填 B 公钥，生成 B 机安装脚本。
-2. 复制面板生成的一行命令，在 B 机以 root 运行。统一安装器会静默补齐依赖，在 B 本地生成私钥、启用 IPv4 转发并配置 NAT；成功后主要输出可以公开的 `B_PUBLIC_KEY`。
-3. 把 `B_PUBLIC_KEY` 粘贴回 A 机面板并保存。Agent 写入 root-only WireGuard 配置并为 systemd/OpenRC 设置开机启动。
-4. 创建或编辑节点，把“出口位置”切换为“B 机落地 IP”。落地出口节点会被强制为纯 IPv4，取消本机地址绑定和动态地址跟随。
-
-A 机使用 fwmark `102` 和路由表 `166`。守护服务始终先写入 IPv4/IPv6 `unreachable default`，WireGuard 在线时只用更低 metric 的隧道路由覆盖 IPv4；因此隧道停止、握手失效或 B 机离线时，落地节点连接会失败而不是经 A 机默认路由直出。移除落地出口前，面板会拒绝操作直到所有落地节点都已切回本机直出。
-
-面板不保存 B 的 SSH 密码、SSH 私钥或 WireGuard 私钥。A 的 WireGuard 私钥只保存在 `WUKONG_SECRET_DIR` 和 `/etc/wireguard/wukong-exit.conf` 的 `0600` 文件中。需要在云防火墙放行 A 机所选 WireGuard UDP 端口；安装器本身不会修改云安全组。
-
-不再使用落地出口时，先在 A 机把相关节点切回本机直出并从系统页移除落地出口，再在 B 机运行 `install.sh --remove-residential-peer`。安装器只接受带 `10.77.0.2/30`、A 端 peer 地址和悟空 NAT 规则签名的 B 机配置，避免误删 A 机或其他 WireGuard 接口；清理后保留 `wireguard-tools`、`iproute2` 和当前全局 IPv4 转发状态。
-
-### sing-box 安全更新与回退
-
-悟空面板只允许安装内置清单中经过验证的 sing-box 版本，当前稳定版锁定为 `1.14.1`。全新 VPS 没有 `/etc/s-box/sing-box` 和旧 JSON 时，一键安装会下载官方资产、核对固定 SHA-256、验证包内版本并原子安装；检测到现有二进制则保持原版本不变。若只有旧 JSON 而缺少配套二进制，安装器会拒绝猜测版本，避免用新二进制误启旧配置。面板会按 1.10、1.11、1.12、1.13、1.14 的能力差异生成配置，并在升级前把旧 inbound、`block`/`dns` outbound、旧 TUN 地址、direct 目标覆盖、旧 DNS server 地址与 `domain_strategy` 等字段迁移到 Rule Actions、Endpoint、现代 DNS server 与 `domain_resolver`。无法无损自动转换的 WireGuard outbound、旧 DNS 规则地址过滤和未知 1.14 字段会作为阻断项展示，不会猜测性重写。更新流程会：
-
-1. 下载官方 GitHub Release 并核对固定 SHA-256。
-2. 生成逐文件迁移预览，保留未知 JSON 字段，并拒绝存在阻断项的升级。
-3. 检查配置引用的 `bind_interface` 是否存在，再用新二进制逐一检查迁移后的 JSON。
-4. 保存旧二进制、版本号、校验和、服务文件、活动服务清单和全部 JSON 配置快照。
-5. 仅停止当前正在运行且确实使用目标二进制的 sing-box 服务，并在停机窗口内安装配套二进制和配置。
-6. 恢复服务后按各 inbound 的真实协议和凭据，通过本机入口访问多组双栈探测地址；配置、服务或协议探测任一失败都会恢复旧二进制和旧配置。
-
-备份保存在 `/var/lib/wukong-panel/backups/sing-box/`。手动回退会恢复同一快照中的旧二进制和配套配置，而不是只替换二进制；刚才运行的新版本也会形成反向快照，因此可以再次切回。
-
-`--uninstall-sing-box` 是独立的破坏性操作：先保存并校验 sing-box 二进制、全部 `/etc/s-box/*.json`、活动服务清单、受管 systemd/OpenRC 服务定义及启用状态，再停止服务并删除这些受管内容。证书等非 JSON 文件、悟空面板和 SQLite 数据库不会删除；删除阶段失败会自动恢复二进制、配置、服务定义和原活动服务。
-
-系统页的 **Cloudflare Tunnel** 卡片提供当前版本、稳定版检查、手动升级和自动更新开关。本机和支持 `cloudflared.update` 能力的完整舰队 Agent 均可使用；旧 Agent、轻量探针、离线或不兼容主机不能执行更新。自动更新默认关闭，启用前需确认运行中的悟空隧道会短暂重启；Agent 每日检查官方稳定版，手动检查不会推迟自动检查。创建新节点不会升级已有可用连接器。
-
-安装和更新都校验官方 Release 的架构、资产 URL、大小、SHA-256 及实际版本；缺失校验信息时停止，不降级到固定旧版本。更新仅替换配置的 cloudflared 二进制并重启此前运行的悟空连接器，停止的连接器保持停止，节点配置和 Tunnel Token 保留。校验和备份完成后才替换；失败恢复原二进制并重启原连接器，Agent 中断后由持久恢复记录重试。共享同一二进制的外部连接器会阻止更新。服务状态校验不代表已经完成异地公网代理验收。
-
-自动更新仍保留 `--no-autoupdate`，由悟空管理更新事务。开关与检查结果存于 root-only 的 `<secret-dir>/cloudflared-update/state.json`，恢复记录为同目录 `pending.json`。二进制旁只保留一份 `.wukong-rollback` 回滚文件，避免每次更新累积完整数据库备份；手动更新的执行结果可在任务日志查看。
-
-系统页把 **sing-box** 和 **Cloudflare Tunnel** 更新卡片并排显示，手机端上下排列，卡片间距均为 17px。sing-box 提供当前版本、官方稳定版检查和确认后的手动升级，执行结果写入任务日志；切换主机再返回会继续跟踪该主机和组件的进行中任务。该入口只提供手动更新；原 cloudflared 自动更新开关继续保留。
-
-sing-box 面板更新支持 Linux amd64/arm64 的官方稳定包，并校验资产地址、大小、SHA-256 和解压后的实际版本。目标必须属于当前面板支持的配置系列（目前为 1.14.x），后续主/次版本需要先扩展面板兼容性支持。更新只处理悟空托管配置和服务；未托管节点、未知 JSON 配置、符号链接、外部进程共用二进制或缺失配置会阻止更新。新二进制先检查迁移后的全部配置及网卡依赖，再保存旧二进制和私有配置快照、停止原活动服务、原子提交文件、重启并执行本机代理 HTTPS 闭环探测；停止的节点保持停止。失败或中断由同一持久恢复记录还原二进制、原配置及文件权限和活动服务，不修改服务定义，也不重启 cloudflared。探测经过本机入站，不代表已验收 Cloudflare 边缘或异地公网接入。
-
-sing-box 更新状态和 root-only 恢复记录位于 `<secret-dir>/sing-box-update`，二进制旁保留一份 `.wukong-rollback`；该流程不备份完整面板数据库，也不累计每次更新的历史快照。现有安装器的 sing-box 更新/回退命令保持可用，面板更新前应避免同时通过独立安装器执行升级。
-
-## 架构与安全边界
+## 架构设计与安全边界
 
 ```mermaid
 flowchart LR
@@ -334,79 +136,33 @@ flowchart LR
   A --> K["root-only 机器密钥"]
 ```
 
-- 管理账号默认为 `admin`；初始密码只在首次安装时打印，首次登录强制改密。
-- 新密码使用 Argon2id（19 MiB、t=2、p=1），并兼容验证旧版 64 MiB 哈希；低内存主机会在认证后主动归还临时堆。节点密钥使用 AES-256-GCM，机器密钥权限为 `0600`。
-- 首次登录强制改密完成前，后端拒绝面板数据接口，前端不会预加载总览、节点、任务、设置、端点或时间轴。
-- 会话 Cookie 使用 `Secure`、`HttpOnly`、`SameSite=Strict`，所有变更 API 校验 CSRF。
-- 登录按来源 IP 限速；所有节点变更、密钥显示与设置修改写入审计日志。
-- Agent 不接收任意命令字符串，只执行固定类型操作。
+- **凭据加固**：用户密码使用 Argon2id 哈希计算，节点密钥采用 AES-256-GCM 加密，机器密钥文件严格限制权限为 `0600`。
+- **会话防护**：会话 Cookie 设置 `Secure`、`HttpOnly`、`SameSite=Strict`，所有写操作强制校验 CSRF。
+- **最小特权**：Web 前端以非特权用户运行，Root Agent 仅接受类型化固定动作指令，杜绝任意 Shell 注入。
 
-## CLI
+---
 
-安装后 `wukongctl` 与 `wukong-panel` 指向同一二进制：
+## 进阶指南与文档
 
-```bash
-wukongctl doctor
-wukongctl scan
-wukongctl node create --name "AC-HY2" --server node.example.com --domain node.example.com \
-  --mode prefer_v6 --ipv4-bind 192.0.2.10 --ipv6 2001:db8::10
-wukongctl node create --protocol vless --name "AC-Reality" \
-  --server node.example.com --domain www.cloudflare.com --mode prefer_v6
-wukongctl node create --protocol vless-ws-tunnel --name "AC-CF-WS" \
-  --server edge.example.com --ws-path /wukong-edge \
-  --tunnel-token-file /root/cloudflare-tunnel.token --mode prefer_v6
-wukongctl node create --protocol shadowsocks --name "AC-SS2022" \
-  --server node.example.com --mode prefer_v6
-wukongctl node create --protocol tuic --name "AC-TUIC" \
-  --server node.example.com --domain node.example.com --mode prefer_v6
-wukongctl node create --protocol trojan --name "AC-Trojan" \
-  --server node.example.com --domain node.example.com --mode prefer_v6
-wukongctl node create --protocol anytls --name "AC-AnyTLS" \
-  --server node.example.com --domain node.example.com --mode prefer_v6
-wukongctl node action --id NODE_ID --action restart
-wukongctl node action --id NODE_ID --action probe
-wukong-panel singbox plan --target 1.14.1 --config-dir /etc/s-box
-wukong-panel singbox migrate --target 1.14.1 \
-  --config-dir /etc/s-box --output-dir /tmp/s-box-1.14
-wukong-panel singbox check-interfaces --target 1.14.1 --config-dir /tmp/s-box-1.14
-wukong-panel singbox probe --binary /etc/s-box/sing-box --config-dir /etc/s-box
+- 📘 [Cloudflare Tunnel 节点与设备编队指南](docs/cloudflare-tunnel.md)
+- 🌐 [双 VPS 落地 IP 出口配置指南](docs/residential-exit.md)
+- 🛡️ [主机安全与防火墙说明](docs/host-security.md)
+- 📦 [sing-box 生命周期与平滑迁移](docs/sing-box-management.md)
+- 💻 [CLI 命令行工具与 RESTful API 指南](docs/cli-and-api.md)
 
-# 从另一台主机按配置中的实际协议验证公网入口；纯 IPv6 节点可直接填写真实 IPv6
-wukong-panel singbox probe --binary /path/to/sing-box --config-dir /path/to/probe-config \
-  --server 2001:db8::10 --server-name node.example.com
-```
-
-强制 IPv6 域名规则包含一个兼容性例外：当列表中包含 `claude.ai` 时，`downloads.claude.ai` 不会进入 IPv6-only 路由，而是使用普通 IPv6 优先、IPv4 可回退的出站，避免 Claude 下载和自动更新因该域名缺少可用 IPv6 而失败。
-
-`compat/deploy-hy2.sh` 保留原参数模式入口，并将参数交给 `wukongctl node create`。交互部署改由面板完成。
-
-## API
-
-管理 API 固定在 `/api/v1`：
-
-- `auth/login|me|password|logout`
-- `overview`、`metrics`、`metrics/endpoints`、`metrics/timeline`
-- `nodes`、`nodes/batch`、`nodes/{id}/actions`、`nodes/{id}/share`
-- `imports/scan|confirm`
-- `system/sing-box/migration`
-- `system/residential-exit`
-- `jobs`、`jobs/{id}/events`
-- `settings`、`settings/subscription-token`
-
-变更接口返回任务 ID；任务通过轮询或 SSE 获取进度。订阅接口位于 `/sub/{token}/clash.yaml`，订阅令牌与管理入口相互独立。
+---
 
 ## 本地开发
 
 ```bash
-cd web
-npm install
-npm run build
-cd ..
+# 1. 编译前端
+cd web && npm install && npm run build && cd ..
 
+# 2. 运行测试与构建后端
 go test ./...
 go build -o build/wukong-panel ./cmd/wukong-panel
 
-rm -rf /tmp/wukong-demo
+# 3. 启动演示环境
 ./build/wukong-panel serve \
   --listen 127.0.0.1:8788 \
   --data-dir /tmp/wukong-demo \
@@ -414,25 +170,7 @@ rm -rf /tmp/wukong-demo
   --base-path / --secure-cookie=false --demo
 ```
 
-## 从现有服务器迁移
-
-1. 安装面板但不要修改 sing-box 版本。
-2. 在“接管节点”中查看扫描结果和共享服务关系。
-3. 确认导入；导入过程不会重写现有 JSON。
-4. 并行运行旧监控和悟空指标至少 24 小时。
-5. 确认订阅、账期和流量一致后再停用旧 timer/service。
-
-sing-box 1.10 配置仍以兼容模式接管；系统页可先只读预览迁移差异，一键脚本升级时再生成 1.13 配置并执行整体快照、协议探测和失败回退。迁移规则对应[官方迁移文档](https://sing-box.sagernet.org/migration/)。
-
-## 卸载
-
-```bash
-sudo sh install.sh --uninstall          # 保留面板数据、节点和 sing-box
-sudo sh install.sh --uninstall --purge  # 额外删除悟空面板自身数据
-sudo sh install.sh --uninstall-sing-box # 备份后只卸载 sing-box 与节点服务
-```
-
-独立的 `uninstall.sh` 仍保留兼容。面板卸载和 purge 都不会删除 `/etc/s-box` 或任何节点服务；只有显式执行 `--uninstall-sing-box` 才会删除 sing-box 二进制、节点 JSON 和对应服务定义。
+---
 
 ## License
 
