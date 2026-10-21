@@ -184,6 +184,7 @@ export interface Settings {
   interface: string
   trafficQuotaBytes: number
   billingResetDay: number
+  expiresAt?: string
   collectEndpoints: boolean
   subscriptionToken?: string
 }
@@ -205,6 +206,10 @@ export interface FleetHost {
   id: string; name: string; hostname: string; os: string; arch: string; serviceManager: string
   panelVersion: string; singBoxVersion: string; protocolVersion: number; capabilities: string[]
   online: boolean; compatible: boolean; archived: boolean; lastSeenAt?: string; subscriptionCachedAt?: string; createdAt: string; snapshot: FleetSnapshot
+  billingResetDay?: number
+  trafficQuotaBytes?: number
+  trafficCalcMode?: string
+  expiresAt?: string
 }
 export interface FleetStatus {
   enabled: boolean; publicUrl: string; subscriptionPublicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
@@ -279,6 +284,7 @@ export const api = {
   probeFleetSubscription: (subscriptionPublicUrl: string) => request<FleetSubscriptionProbe>('fleet/subscription-probe', { method: 'POST', body: JSON.stringify({ subscriptionPublicUrl }) }, false),
   createFleetEnrollment: (mode: 'panel' | 'probe' = 'panel') => request<{token: string; expiresAt: string; command: string}>(`fleet/enrollments?type=${mode}`, { method: 'POST', body: '{}' }, false),
   renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
+  updateFleetHostSettings: (hostId: string, data: { billingResetDay: number; trafficQuotaBytes: number; trafficCalcMode: string; expiresAt: string }) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/quota`, { method: 'PUT', body: JSON.stringify(data) }, false),
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
 }

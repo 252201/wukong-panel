@@ -242,6 +242,7 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	devices, _ := c.store.ActiveDevices(25*time.Second, 12)
 	processes, count, _ := c.store.Processes(200)
 	settings, _ := c.store.Settings()
+	settings.SubscriptionToken = ""
 	billingStart, billingEnd := fleetBillingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
 	usedRX, usedTX, _ := c.store.TrafficBetween(billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02"))
 	var now model.Metric
@@ -260,7 +261,7 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 			}
 		}
 	}
-	snapshot := model.FleetSnapshot{Full: full, Overview: model.Overview{Now: now, Devices: devices, Processes: processes, ProcessCount: count, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: usedRX + usedTX, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: c.manager.Version(ctx), PanelVersion: c.version}, Nodes: nodes}
+	snapshot := model.FleetSnapshot{Full: full, Overview: model.Overview{Now: now, Devices: devices, Processes: processes, ProcessCount: count, NodeCount: len(nodes), OnlineNodes: online, TrafficUsed: usedRX + usedTX, TrafficQuota: settings.TrafficQuotaBytes, BillingStart: billingStart.Format("2006-01-02"), BillingEnd: billingEnd.Format("2006-01-02"), SingBoxVersion: c.manager.Version(ctx), PanelVersion: c.version}, Nodes: nodes, Settings: settings}
 	if c.location != nil {
 		snapshot.Location = c.location.Current()
 	}
