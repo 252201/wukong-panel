@@ -936,13 +936,19 @@ func (s *Store) Settings() (model.Settings, error) {
 	}
 	quota, _ := strconv.ParseInt(values["traffic_quota_bytes"], 10, 64)
 	day, _ := strconv.Atoi(values["billing_reset_day"])
-	return model.Settings{Language: values["language"], Timezone: values["timezone"], Interface: values["interface"], TrafficQuotaBytes: quota, BillingResetDay: day, CollectEndpoints: values["collect_endpoints"] != "false", SubscriptionToken: values["subscription_token"]}, nil
+	return model.Settings{Language: values["language"], Timezone: values["timezone"], Interface: values["interface"], TrafficQuotaBytes: quota, BillingResetDay: day, ExpiresAt: values["expires_at"], CollectEndpoints: values["collect_endpoints"] != "false", SubscriptionToken: values["subscription_token"]}, nil
 }
 func (s *Store) SaveSettings(settings model.Settings) error {
 	if settings.BillingResetDay < 1 || settings.BillingResetDay > 28 {
 		return errors.New("billing reset day must be between 1 and 28")
 	}
-	values := map[string]string{"language": settings.Language, "timezone": settings.Timezone, "interface": settings.Interface, "traffic_quota_bytes": strconv.FormatInt(settings.TrafficQuotaBytes, 10), "billing_reset_day": strconv.Itoa(settings.BillingResetDay), "collect_endpoints": strconv.FormatBool(settings.CollectEndpoints)}
+	settings.ExpiresAt = strings.TrimSpace(settings.ExpiresAt)
+	if settings.ExpiresAt != "" {
+		if _, err := time.Parse("2006-01-02", settings.ExpiresAt); err != nil {
+			return errors.New("到期时间格式无效，应为 YYYY-MM-DD")
+		}
+	}
+	values := map[string]string{"language": settings.Language, "timezone": settings.Timezone, "interface": settings.Interface, "traffic_quota_bytes": strconv.FormatInt(settings.TrafficQuotaBytes, 10), "billing_reset_day": strconv.Itoa(settings.BillingResetDay), "expires_at": settings.ExpiresAt, "collect_endpoints": strconv.FormatBool(settings.CollectEndpoints)}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err

@@ -349,6 +349,7 @@ type Settings struct {
 	Interface         string `json:"interface"`
 	TrafficQuotaBytes int64  `json:"trafficQuotaBytes"`
 	BillingResetDay   int    `json:"billingResetDay"`
+	ExpiresAt         string `json:"expiresAt,omitempty"`
 	CollectEndpoints  bool   `json:"collectEndpoints"`
 	SubscriptionToken string `json:"subscriptionToken,omitempty"`
 }

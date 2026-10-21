@@ -184,6 +184,7 @@ export interface Settings {
   interface: string
   trafficQuotaBytes: number
   billingResetDay: number
+  expiresAt?: string
   collectEndpoints: boolean
   subscriptionToken?: string
 }

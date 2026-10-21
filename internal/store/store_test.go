@@ -444,3 +444,52 @@ func TestLegacyMetricsSchemaMigration(t *testing.T) {
 		t.Fatalf("legacy migration did not preserve resource totals: %#v err=%v", items, err)
 	}
 }
+
+func TestSaveSettingsExpiresAt(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	settings := model.Settings{
+		Language:          "zh-CN",
+		Timezone:          "Asia/Shanghai",
+		Interface:         "eth0",
+		TrafficQuotaBytes: 100_000_000_000,
+		BillingResetDay:   5,
+		ExpiresAt:         "2027-11-20",
+		CollectEndpoints:  true,
+	}
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to save settings: %v", err)
+	}
+	loaded, err := s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if loaded.ExpiresAt != "2027-11-20" {
+		t.Fatalf("expected expiresAt 2027-11-20, got %q", loaded.ExpiresAt)
+	}
+	if loaded.BillingResetDay != 5 {
+		t.Fatalf("expected reset day 5, got %d", loaded.BillingResetDay)
+	}
+
+	invalidSettings := settings
+	invalidSettings.ExpiresAt = "not-a-date"
+	if err := s.SaveSettings(invalidSettings); err == nil {
+		t.Fatal("expected error for invalid expiresAt date format")
+	}
+
+	settings.ExpiresAt = ""
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to clear expiresAt: %v", err)
+	}
+	cleared, err := s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if cleared.ExpiresAt != "" {
+		t.Fatalf("expected empty expiresAt, got %q", cleared.ExpiresAt)
+	}
+}

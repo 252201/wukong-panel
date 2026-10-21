@@ -127,11 +127,11 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_hosts")), &status.SelectedHostIDs)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_nodes")), &status.SelectedNodeIDs)
 	singBoxVersion := s.singBoxVersion(ctx)
-	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", OS: localFleetOS(), Arch: runtime.GOARCH, PanelVersion: s.version, SingBoxVersion: singBoxVersion, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now()}
+	settings, _ := s.store.Settings()
+	local := model.FleetHost{ID: localFleetHostID, Name: "本机", Hostname: "localhost", OS: localFleetOS(), Arch: runtime.GOARCH, PanelVersion: s.version, SingBoxVersion: singBoxVersion, ProtocolVersion: model.FleetProtocolVersion, Compatible: true, Online: true, CreatedAt: time.Now(), BillingResetDay: settings.BillingResetDay, TrafficQuotaBytes: settings.TrafficQuotaBytes, TrafficCalcMode: "both", ExpiresAt: settings.ExpiresAt}
 	metrics, _ := s.store.Metrics(80)
 	nodes, _ := s.store.Nodes(ctx)
 	jobs, _ := s.store.Jobs(30)
-	settings, _ := s.store.Settings()
 	billingStart, billingEnd := billingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
 	trafficUsed := int64(0)
 	if rx, tx, trafficErr := s.store.TrafficBetween(billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02")); trafficErr == nil {
@@ -816,6 +816,17 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 			createJob = true
 		}
 	}
+	if kind == "settings.save" {
+		var req model.Settings
+		if json.Unmarshal(payload, &req) == nil {
+			_ = s.store.UpdateFleetHostSettings(host.ID, model.FleetHostSettingsRequest{
+				BillingResetDay:   req.BillingResetDay,
+				TrafficQuotaBytes: req.TrafficQuotaBytes,
+				TrafficCalcMode:   host.TrafficCalcMode,
+				ExpiresAt:         req.ExpiresAt,
+			})
+		}
+	}
 	command, job, err := s.queueFleetCommand(host, kind, payload, session.Username, createJob)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
@@ -889,6 +900,9 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 		writeError(w, http.StatusNotFound, "任务不存在")
 	case resource == "settings":
 		snapshot.Settings.SubscriptionToken = maskToken(snapshot.Settings.SubscriptionToken)
+		if snapshot.Settings.ExpiresAt == "" && host.ExpiresAt != "" {
+			snapshot.Settings.ExpiresAt = host.ExpiresAt
+		}
 		writeJSON(w, http.StatusOK, snapshot.Settings)
 	case resource == "system/firewall":
 		writeJSON(w, 200, snapshot.Firewall)

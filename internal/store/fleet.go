@@ -111,6 +111,9 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 	if err != nil {
 		return err
 	}
+	if !isProbe && strings.TrimSpace(heartbeat.Snapshot.Settings.ExpiresAt) != "" {
+		_, _ = tx.ExecContext(ctx, `UPDATE fleet_hosts SET expires_at=? WHERE id=? AND archived_at=0`, strings.TrimSpace(heartbeat.Snapshot.Settings.ExpiresAt), hostID)
+	}
 	count, _ := result.RowsAffected()
 	if count != 1 {
 		return sql.ErrNoRows
@@ -217,6 +220,10 @@ func (s *Store) FleetHosts(includeArchived bool) ([]model.FleetHost, error) {
 			host.Snapshot.Overview.TrafficQuota = host.TrafficQuotaBytes
 			host.Snapshot.Overview.BillingStart = startDay
 			host.Snapshot.Overview.BillingEnd = endDay
+		} else {
+			if host.ExpiresAt == "" && host.Snapshot.Settings.ExpiresAt != "" {
+				host.ExpiresAt = host.Snapshot.Settings.ExpiresAt
+			}
 		}
 		result = append(result, host)
 	}
