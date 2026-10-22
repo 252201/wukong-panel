@@ -1015,22 +1015,20 @@ function reputationBadgeTitle(host: FleetHost): string {
   return lines.join('\n')
 }
 
-function reputationBadgeContent(host: FleetHost) {
+function reputationBadgeText(host: FleetHost): string {
   const { v4, v6, state4, state6 } = hostReputationDual(host)
-  if (v4 && v6) {
-    const s4 = state4?.report?.trust_score !== undefined ? `${state4.report.trust_score}` : (state4?.loading ? '..' : '--')
-    const s6 = state6?.report?.trust_score !== undefined ? `${state6.report.trust_score}` : (state6?.loading ? '..' : '--')
-    return { dual: true, s4, s6, text: '' }
+  if (!v4 && !v6) return 'IP检测'
+
+  const scores: number[] = []
+  if (state4?.report?.trust_score !== undefined) scores.push(state4.report.trust_score)
+  if (state6?.report?.trust_score !== undefined) scores.push(state6.report.trust_score)
+
+  if (scores.length > 0) {
+    return `${Math.min(...scores)}分`
   }
-  if (v4) {
-    const s4 = state4?.report?.trust_score !== undefined ? `${state4.report.trust_score}分` : (state4?.loading ? '...' : 'IPv4')
-    return { dual: false, s4: '', s6: '', text: s4 }
-  }
-  if (v6) {
-    const s6 = state6?.report?.trust_score !== undefined ? `${state6.report.trust_score}分` : (state6?.loading ? '...' : 'IPv6')
-    return { dual: false, s4: '', s6: '', text: s6 }
-  }
-  return { dual: false, s4: '', s6: '', text: 'IP检测' }
+  if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return '...'
+  if (state4?.error || state6?.error) return '--分'
+  return 'IP分'
 }
 
 function openReputationModal(host?: FleetHost, initialIP?: string) {
@@ -1523,7 +1521,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span v-if="reputationBadgeContent(host).dual" class="dual-rep-scores"><small>v4:</small><b>{{ reputationBadgeContent(host).s4 }}</b><em>/</em><small>v6:</small><b>{{ reputationBadgeContent(host).s6 }}</b></span><span v-else><b>{{ reputationBadgeContent(host).text }}</b></span></button><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span>{{ reputationBadgeText(host) }}</span></button><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
