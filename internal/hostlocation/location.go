@@ -15,7 +15,11 @@ import (
 	"github.com/252201/wukong-panel/internal/model"
 )
 
-const traceURL = "https://www.cloudflare.com/cdn-cgi/trace"
+const (
+	traceURL     = "https://www.cloudflare.com/cdn-cgi/trace"
+	traceIPv4URL = "https://1.1.1.1/cdn-cgi/trace"
+	traceIPv6URL = "https://[2606:4700:4700::1111]/cdn-cgi/trace"
+)
 
 // Detector observes the host's direct public egress IP without delaying fleet requests.
 type Detector struct {
@@ -82,7 +86,44 @@ func (d *Detector) lookup(ctx context.Context) (*model.HostLocation, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("location trace returned HTTP %d", response.StatusCode)
 	}
-	return parseTrace(io.LimitReader(response.Body, 4096))
+	loc, err := parseTrace(io.LimitReader(response.Body, 4096))
+	if err != nil {
+		return nil, err
+	}
+
+	// If using the standard trace endpoint, probe the opposite address family to capture both IPv4 and IPv6
+	if d.endpoint == traceURL {
+		if loc.IPv4 == "" {
+			if v4, err := d.probeSingle(ctx, traceIPv4URL); err == nil && v4.IPv4 != "" {
+				loc.IPv4 = v4.IPv4
+			}
+		}
+		if loc.IPv6 == "" {
+			if v6, err := d.probeSingle(ctx, traceIPv6URL); err == nil && v6.IPv6 != "" {
+				loc.IPv6 = v6.IPv6
+			}
+		}
+	}
+
+	return loc, nil
+}
+
+func (d *Detector) probeSingle(ctx context.Context, endpoint string) (*model.HostLocation, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return parseTrace(io.LimitReader(resp.Body, 4096))
 }
 
 func parseTrace(reader io.Reader) (*model.HostLocation, error) {
@@ -106,6 +147,11 @@ func parseTrace(reader io.Reader) (*model.HostLocation, error) {
 	ip, err := netip.ParseAddr(location.PublicIP)
 	if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
 		return nil, errors.New("location trace did not contain a public IP")
+	}
+	if ip.Is4() {
+		location.IPv4 = location.PublicIP
+	} else if ip.Is6() {
+		location.IPv6 = location.PublicIP
 	}
 	code := location.CountryCode
 	if len(code) != 2 || code == "XX" || code == "T1" || code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {

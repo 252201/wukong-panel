@@ -427,10 +427,12 @@ type FleetSnapshot struct {
 	Endpoints          []EndpointStat             `json:"endpoints"`
 }
 
-// HostLocation describes the country of this host's directly observed public IP.
+// HostLocation describes the country and observed public egress IPs of this host.
 type HostLocation struct {
 	PublicIP    string `json:"publicIP"`
 	CountryCode string `json:"countryCode"`
+	IPv4        string `json:"ipv4,omitempty"`
+	IPv6        string `json:"ipv6,omitempty"`
 }
 
 type FleetEnrollmentRequest struct {
