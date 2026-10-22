@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bufio"
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
@@ -8,7 +9,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/252201/wukong-panel/internal/model"
@@ -17,39 +20,66 @@ import (
 var defaultScanDirs = []string{
 	"/etc/s-box",
 	"/etc/sing-box",
+	"/etc/sing-box/conf",
 	"/etc/xray",
+	"/etc/xray/conf",
 	"/usr/local/etc/xray",
 	"/etc/v2ray",
+	"/usr/local/x-ui",
+	"/usr/local/x-ui/bin",
+	"/etc/v2ray-agent/sing-box/conf",
+	"/etc/v2ray-agent/xray/conf",
+	"/etc/hysteria",
+	"/etc/tuic",
+	"/root",
 }
 
-// ScanDirectories scans config directories for proxy inbounds and builds FleetProbeNode list.
+// ScanDirectories scans config directories and active process cmdlines for proxy inbounds.
 func ScanDirectories(serverHost string, dirs ...string) []model.FleetProbeNode {
-	if len(dirs) == 0 {
-		dirs = defaultScanDirs
-	}
 	serverHost = strings.TrimSpace(serverHost)
 	if serverHost == "" {
 		serverHost = "127.0.0.1"
 	}
 
+	var allTargets []string
+	if len(dirs) == 0 {
+		// 1. Actively running process configs via /proc
+		allTargets = append(allTargets, findProcessConfigs()...)
+		// 2. Default standard directories
+		allTargets = append(allTargets, defaultScanDirs...)
+	} else {
+		allTargets = dirs
+	}
+
 	seen := make(map[string]bool)
 	var nodes []model.FleetProbeNode
 
-	for _, dir := range dirs {
-		stat, err := os.Stat(dir)
+	for _, target := range allTargets {
+		stat, err := os.Stat(target)
 		if err != nil {
 			continue
 		}
 		var files []string
 		if stat.IsDir() {
-			matches, _ := filepath.Glob(filepath.Join(dir, "*.json"))
-			files = append(files, matches...)
+			jsonMatches, _ := filepath.Glob(filepath.Join(target, "*.json"))
+			yamlMatches, _ := filepath.Glob(filepath.Join(target, "*.yaml"))
+			ymlMatches, _ := filepath.Glob(filepath.Join(target, "*.yml"))
+			files = append(files, jsonMatches...)
+			files = append(files, yamlMatches...)
+			files = append(files, ymlMatches...)
 		} else {
-			files = append(files, dir)
+			files = append(files, target)
 		}
 
 		for _, file := range files {
-			parsedNodes := parseConfigFile(file, serverHost)
+			ext := strings.ToLower(filepath.Ext(file))
+			var parsedNodes []model.FleetProbeNode
+			if ext == ".yaml" || ext == ".yml" {
+				parsedNodes = parseYAMLConfigFile(file, serverHost)
+			} else {
+				parsedNodes = parseConfigFile(file, serverHost)
+			}
+
 			for _, node := range parsedNodes {
 				key := fmt.Sprintf("%s:%d", node.Protocol, node.Port)
 				if seen[key] {
@@ -69,6 +99,56 @@ func ScanDirectories(serverHost string, dirs ...string) []model.FleetProbeNode {
 	})
 
 	return nodes
+}
+
+func findProcessConfigs() []string {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var configs []string
+	seen := make(map[string]bool)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if len(name) == 0 || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", name, "cmdline"))
+		if err != nil || len(cmdline) == 0 {
+			continue
+		}
+		args := strings.Split(string(cmdline), "\x00")
+		if len(args) == 0 {
+			continue
+		}
+		exe := filepath.Base(args[0])
+		if !isProxyExecutable(exe) {
+			continue
+		}
+		for i, arg := range args {
+			if (arg == "-c" || arg == "--config" || arg == "-config" || arg == "-C") && i+1 < len(args) {
+				cfgPath := strings.TrimSpace(args[i+1])
+				if cfgPath != "" && !seen[cfgPath] {
+					seen[cfgPath] = true
+					configs = append(configs, cfgPath)
+				}
+			}
+		}
+	}
+	return configs
+}
+
+func isProxyExecutable(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "sing-box") ||
+		strings.Contains(lower, "xray") ||
+		strings.Contains(lower, "v2ray") ||
+		strings.Contains(lower, "hysteria") ||
+		strings.Contains(lower, "tuic")
 }
 
 func parseConfigFile(path, serverHost string) []model.FleetProbeNode {
@@ -99,6 +179,76 @@ func parseConfigFile(path, serverHost string) []model.FleetProbeNode {
 		}
 	}
 	return nodes
+}
+
+var (
+	yamlListenRe   = regexp.MustCompile(`(?i)^\s*listen\s*:\s*"?([^"\s]+)"?`)
+	yamlPasswordRe = regexp.MustCompile(`(?i)^\s*password\s*:\s*"?([^"\s]+)"?`)
+	yamlSniRe      = regexp.MustCompile(`(?i)^\s*sni\s*:\s*"?([^"\s]+)"?`)
+)
+
+func parseYAMLConfigFile(path, serverHost string) []model.FleetProbeNode {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var listenStr, password, sni string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if m := yamlListenRe.FindStringSubmatch(line); len(m) > 1 && listenStr == "" {
+			listenStr = m[1]
+		}
+		if m := yamlPasswordRe.FindStringSubmatch(line); len(m) > 1 && password == "" {
+			password = m[1]
+		}
+		if m := yamlSniRe.FindStringSubmatch(line); len(m) > 1 && sni == "" {
+			sni = m[1]
+		}
+	}
+
+	if listenStr == "" || password == "" {
+		return nil
+	}
+
+	port := 0
+	if idx := strings.LastIndex(listenStr, ":"); idx != -1 {
+		p, _ := strconv.Atoi(listenStr[idx+1:])
+		port = p
+	} else {
+		p, _ := strconv.Atoi(listenStr)
+		port = p
+	}
+
+	if port < 1 || port > 65535 {
+		return nil
+	}
+
+	if sni == "" {
+		sni = serverHost
+	}
+
+	name := fmt.Sprintf("HY2-%d", port)
+	tagEscaped := url.QueryEscape(name)
+	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?sni=%s&insecure=0#%s",
+		url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+
+	return []model.FleetProbeNode{
+		{
+			ID:       fmt.Sprintf("scan_hysteria2_%d", port),
+			Name:     name,
+			Protocol: "hysteria2",
+			Server:   serverHost,
+			Port:     port,
+			Domain:   sni,
+			ShareURI: uri,
+			Source:   "scan",
+			RawName:  name,
+		},
+	}
 }
 
 func convertInboundToNode(inbound map[string]any, serverHost string) (model.FleetProbeNode, bool) {
