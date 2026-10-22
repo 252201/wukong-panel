@@ -651,12 +651,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .ip-rep-source { font-size: 11px; color: var(--muted); }
 .ip-rep-topbar-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
 
-/* Dual scores on host card header */
-.dual-rep-scores { display: inline-flex; align-items: center; gap: 3px; }
-.dual-rep-scores small { font-size: 9px; opacity: 0.8; font-weight: 500; }
-.dual-rep-scores b { font-size: 11px; font-weight: 700; }
-.dual-rep-scores em { font-style: normal; opacity: 0.5; margin: 0 1px; font-size: 10px; }
-
 /* Orange-white light theme: bright canvas, restrained depth, and clear status colors. */
 :root[data-effective-theme="light"] body {
   background:
@@ -913,8 +907,12 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  margin: 0;
+  height: auto;
   padding: 2px 7px;
   border-radius: 3px;
+  font-family: inherit;
   font-size: 11px;
   line-height: 1.4;
   font-weight: 600;
@@ -923,6 +921,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: rgba(var(--wash-rgb), 0.03);
   color: var(--muted);
   transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.fleet-host-reputation-badge span {
   white-space: nowrap;
 }
 .fleet-host-reputation-badge:hover {
