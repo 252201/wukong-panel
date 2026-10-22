@@ -133,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/system/cloudflared/{action}", s.auth(s.cloudflared, true))
 	mux.HandleFunc("GET /api/v1/system/{kind}", s.auth(s.hostSecurity, false))
 	mux.HandleFunc("GET /api/v1/system/ip-location", s.auth(s.securityIPLocation, false))
+	mux.HandleFunc("GET /api/v1/system/ip-reputation", s.auth(s.ipReputation, false))
 	mux.HandleFunc("POST /api/v1/system/{kind}/{action}", s.auth(s.hostSecurity, true))
 	mux.HandleFunc("GET /api/v1/system/security-transactions/{id}", s.auth(s.hostSecurityTransaction, false))
 	mux.HandleFunc("POST /api/v1/system/security-transactions/{id}/confirm", s.auth(s.hostSecurityTransaction, true))

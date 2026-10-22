@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, getIPReputation, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import ComponentUpdatePanel from './ComponentUpdatePanel.vue'
@@ -90,7 +90,7 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | null>(null)
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
 const fleetHostTarget = ref<FleetHost | null>(null)
@@ -733,6 +733,226 @@ async function addProbeNode() {
   }
 }
 
+interface IPRepState {
+  loading: boolean
+  report?: IPReputationReport
+  error?: string
+  fetchedAt: number
+}
+const ipReputationCache = reactive<Record<string, IPRepState>>({})
+const reputationModalHost = ref<FleetHost | null>(null)
+const reputationModalIP = ref('')
+
+function getHostCandidateIPs(host: FleetHost | null) {
+  if (!host) return []
+  const list: { ip: string; label: string; kind: 'public' | 'node' | 'probe' }[] = []
+  const seen = new Set<string>()
+
+  const addIP = (raw: string | undefined, label: string, kind: 'public' | 'node' | 'probe') => {
+    if (!raw) return
+    const clean = raw.trim().replace(/^\[|\]$/g, '')
+    if (!clean || (!clean.includes('.') && !clean.includes(':'))) return
+    if (/^[0-9a-fA-F:.]+$/.test(clean) && !seen.has(clean)) {
+      seen.add(clean)
+      list.push({ ip: clean, label, kind })
+    }
+  }
+
+  if (host.snapshot?.location?.publicIP) {
+    addIP(host.snapshot.location.publicIP, '出口公网 IP', 'public')
+  }
+  if (host.snapshot?.nodes) {
+    for (const n of host.snapshot.nodes) {
+      if (n.server) addIP(n.server, `节点: ${n.name}`, 'node')
+    }
+  }
+  if (host.snapshot?.probeNodes) {
+    for (const p of host.snapshot.probeNodes) {
+      if (p.server) addIP(p.server, `轻量节点: ${p.name || p.rawName || '节点'}`, 'probe')
+    }
+  }
+  return list
+}
+
+const reputationCandidateIPs = computed(() => getHostCandidateIPs(reputationModalHost.value))
+const reputationCurrentState = computed(() => {
+  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
+  return clean ? ipReputationCache[clean] : undefined
+})
+
+function getCachedReputation(ip: string): IPReputationReport | null {
+  const clean = ip.trim().replace(/^\[|\]$/g, '')
+  if (!clean) return null
+  try {
+    const raw = localStorage.getItem(`wukong_ip_rep_${clean}`)
+    if (raw) {
+      const data = JSON.parse(raw)
+      if (data && typeof data === 'object' && Date.now() - (data._savedAt || 0) < 3600_000) {
+        return data.report as IPReputationReport
+      }
+    }
+  } catch {
+    // Ignore localStorage read errors
+  }
+  return null
+}
+
+function saveCachedReputation(ip: string, report: IPReputationReport) {
+  const clean = ip.trim().replace(/^\[|\]$/g, '')
+  if (!clean) return
+  try {
+    localStorage.setItem(`wukong_ip_rep_${clean}`, JSON.stringify({
+      report,
+      _savedAt: Date.now(),
+    }))
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+async function loadReputation(ip: string, force = false): Promise<IPReputationReport | undefined> {
+  const clean = ip.trim().replace(/^\[|\]$/g, '')
+  if (!clean) return undefined
+
+  const existing = ipReputationCache[clean]
+  if (!force) {
+    if (existing?.report && Date.now() - existing.fetchedAt < 3600_000) {
+      return existing.report
+    }
+    const local = getCachedReputation(clean)
+    if (local) {
+      ipReputationCache[clean] = {
+        loading: false,
+        report: local,
+        fetchedAt: Date.now(),
+      }
+      return local
+    }
+  }
+
+  if (existing?.loading) return undefined
+
+  ipReputationCache[clean] = {
+    loading: true,
+    report: existing?.report,
+    fetchedAt: Date.now(),
+  }
+
+  try {
+    const report = await getIPReputation(clean)
+    ipReputationCache[clean] = {
+      loading: false,
+      report,
+      fetchedAt: Date.now(),
+    }
+    saveCachedReputation(clean, report)
+    return report
+  } catch (err: any) {
+    ipReputationCache[clean] = {
+      loading: false,
+      report: existing?.report,
+      error: err?.message || '获取信誉分失败',
+      fetchedAt: Date.now(),
+    }
+    return undefined
+  }
+}
+
+function hostReputationIP(host: FleetHost): string {
+  if (host.snapshot?.location?.publicIP) {
+    return host.snapshot.location.publicIP
+  }
+  const candidates = getHostCandidateIPs(host)
+  return candidates[0]?.ip || ''
+}
+
+function prefetchHostReputation(host: FleetHost) {
+  const ip = hostReputationIP(host)
+  if (!ip) return
+  const local = getCachedReputation(ip)
+  if (local) {
+    if (!ipReputationCache[ip]) {
+      ipReputationCache[ip] = {
+        loading: false,
+        report: local,
+        fetchedAt: Date.now(),
+      }
+    }
+    return
+  }
+  loadReputation(ip)
+}
+
+function reputationBadgeClass(host: FleetHost): string {
+  const ip = hostReputationIP(host)
+  if (!ip) return 'score-none'
+  const state = ipReputationCache[ip]
+  if (state?.loading && !state?.report) return 'loading'
+  if (state?.report?.trust_score !== undefined) {
+    const s = state.report.trust_score
+    if (s >= 80) return 'score-high'
+    if (s >= 50) return 'score-medium'
+    return 'score-low'
+  }
+  if (state?.error) return 'score-error'
+  return 'score-idle'
+}
+
+function reputationBadgeText(host: FleetHost): string {
+  const ip = hostReputationIP(host)
+  if (!ip) return 'IP检测'
+  const state = ipReputationCache[ip]
+  if (state?.loading && !state?.report) return '...'
+  if (state?.report?.trust_score !== undefined) {
+    return `${state.report.trust_score}分`
+  }
+  if (state?.error) return '--分'
+  return 'IP分'
+}
+
+function reputationBadgeTitle(host: FleetHost): string {
+  const ip = hostReputationIP(host)
+  if (!ip) return '未检测到出网 IP，点击手动检测'
+  const state = ipReputationCache[ip]
+  if (state?.report) {
+    const r = state.report
+    const typeStr = r.is_datacenter ? 'IDC机房' : (r.isResidential ? '住宅家宽' : '标准网络')
+    return `IP 信誉分: ${r.trust_score ?? '—'} / 100 · ${typeStr} · ${r.asOrganization || r.isp || ''}\n点击查看完整威胁情报与双栈 IP`
+  }
+  if (state?.loading) return `正在检测 ${ip} 的信誉与威胁情报...`
+  if (state?.error) return `检测失败: ${state.error}，点击重新检测`
+  return `点击检测 IP 信誉与威胁情报 (${ip})`
+}
+
+function openReputationModal(host?: FleetHost, initialIP?: string) {
+  reputationModalHost.value = host || null
+  const targetIP = initialIP || (host ? hostReputationIP(host) : '')
+  reputationModalIP.value = targetIP
+  modal.value = 'ip-reputation'
+  if (targetIP) {
+    loadReputation(targetIP)
+  }
+}
+
+function selectReputationIP(ip: string) {
+  reputationModalIP.value = ip
+  loadReputation(ip)
+}
+
+function lookupCurrentReputation() {
+  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
+  if (clean) {
+    loadReputation(clean)
+  }
+}
+
+function refreshCurrentReputation() {
+  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
+  if (clean) {
+    loadReputation(clean, true)
+  }
+}
+
 function ensureHostWritable() {
   if (!mutationsDisabled.value) return true
   notify(currentFleetHost.value?.compatible ? '该主机离线，修改操作已禁用' : '舰队协议版本不兼容，修改操作已禁用')
@@ -909,6 +1129,11 @@ watch(page, (next, previous) => {
     refreshAll().catch(() => {})
   }
 }, { flush: 'sync' })
+watch(fleetHosts, (hosts) => {
+  for (const host of hosts) {
+    prefetchHostReputation(host)
+  }
+}, { immediate: true })
 async function openNodeForm(kind: 'create' | 'device-create') {
 	if (!ensureHostWritable()) return
   Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
@@ -1171,7 +1396,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     <section class="workspace">
       <header class="topbar">
         <div><p class="breadcrumb">天宫 / {{ navItems.find(item => item.id === page)?.label }}</p><h1>{{ navItems.find(item => item.id === page)?.label }}</h1></div>
-        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
+        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button type="button" class="secondary ip-rep-topbar-btn" title="检测 IP 信誉分与威胁情报" @click="openReputationModal(currentFleetHost || undefined)">🛡️ IP 信誉</button><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
       </header>
 
       <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
@@ -1182,7 +1407,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span>{{ reputationBadgeText(host) }}</span></button><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
@@ -1537,6 +1762,162 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <div class="modal-actions">
         <button type="button" class="secondary" @click="modal = null">完成</button>
+      </div>
+    </div>
+    <div v-else-if="modal === 'ip-reputation'" class="modal-card compact ip-reputation-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal blue">信</span>
+      <p class="eyebrow">IP THREAT & REPUTATION INTELLIGENCE</p>
+      <h2>IP 信誉与威胁情报检测</h2>
+      <p>实时分析公网 IP 的网络信誉评分、机房/家宽属性、恶意行为风险及主流服务风控状态。</p>
+
+      <div v-if="reputationModalHost" class="fleet-host-action-target">
+        <small>关联主机</small><b>{{ reputationModalHost.name }}</b>
+        <span>{{ reputationModalHost.hostname || reputationModalHost.id }} · {{ reputationModalHost.online ? '● 在线' : '○ 离线' }}</span>
+      </div>
+
+      <div v-if="reputationCandidateIPs.length" class="ip-rep-candidates">
+        <small class="ip-rep-label">主机已识别 IP（点击快速切换）：</small>
+        <div class="ip-rep-chips">
+          <button
+            v-for="cand in reputationCandidateIPs"
+            :key="cand.ip"
+            type="button"
+            class="ip-chip"
+            :class="{ active: cand.ip === reputationModalIP }"
+            @click="selectReputationIP(cand.ip)"
+          >
+            <b>{{ cand.ip }}</b>
+            <small>{{ cand.label }}</small>
+          </button>
+        </div>
+      </div>
+
+      <form class="ip-rep-search-bar" @submit.prevent="lookupCurrentReputation">
+        <input
+          v-model="reputationModalIP"
+          type="text"
+          class="ip-rep-input"
+          placeholder="输入任意 IPv4 或 IPv6 地址..."
+          spellcheck="false"
+        >
+        <button type="submit" class="primary" :disabled="reputationCurrentState?.loading || !reputationModalIP.trim()">
+          {{ reputationCurrentState?.loading ? '分析中…' : '查询' }}
+        </button>
+        <button
+          type="button"
+          class="secondary"
+          :disabled="reputationCurrentState?.loading || !reputationModalIP.trim()"
+          title="强制刷新（绕过本地缓存）"
+          @click="refreshCurrentReputation"
+        >
+          ↻
+        </button>
+      </form>
+
+      <div v-if="reputationCurrentState?.loading && !reputationCurrentState?.report" class="ip-rep-loading">
+        <div class="ip-rep-spinner"></div>
+        <span>正在联网查询 Net.Coffee 威胁情报与信誉评级…</span>
+      </div>
+
+      <div v-else-if="reputationCurrentState?.error && !reputationCurrentState?.report" class="ip-rep-error-box">
+        <b>查询失败</b>
+        <p>{{ reputationCurrentState.error }}</p>
+        <button type="button" class="secondary" @click="refreshCurrentReputation">重试</button>
+      </div>
+
+      <div v-else-if="reputationCurrentState?.report" class="ip-rep-result">
+        <div
+          class="ip-rep-banner"
+          :class="{
+            'score-high': (reputationCurrentState.report.trust_score ?? 0) >= 80,
+            'score-medium': (reputationCurrentState.report.trust_score ?? 0) >= 50 && (reputationCurrentState.report.trust_score ?? 0) < 80,
+            'score-low': (reputationCurrentState.report.trust_score ?? 0) < 50
+          }"
+        >
+          <div class="ip-rep-score-ring">
+            <strong>{{ reputationCurrentState.report.trust_score ?? '—' }}</strong>
+            <small>/ 100</small>
+          </div>
+          <div class="ip-rep-verdict">
+            <div class="ip-rep-verdict-title">
+              <h3>{{ (reputationCurrentState.report.trust_score ?? 0) >= 80 ? '高信誉优质 IP' : ((reputationCurrentState.report.trust_score ?? 0) >= 50 ? '中等信誉 IP' : '低信誉 / 潜在风险 IP') }}</h3>
+              <span class="ip-rep-verdict-tag">{{ reputationCurrentState.report.is_datacenter ? 'IDC 机房' : (reputationCurrentState.report.isResidential ? '住宅家宽' : '标准网络') }}</span>
+            </div>
+            <p v-if="reputationCurrentState.report.ai_verdict?.reasoning" class="ip-rep-reasoning">
+              <b>AI 研判：</b>{{ reputationCurrentState.report.ai_verdict.reasoning }}
+            </p>
+          </div>
+        </div>
+
+        <div class="ip-rep-grid">
+          <div class="ip-rep-card">
+            <small>滥用评分</small>
+            <b>{{ reputationCurrentState.report.abuser_score || '0 (极低)' }}</b>
+            <em>{{ reputationCurrentState.report.intelligence?.abuser_level ? `级别: ${reputationCurrentState.report.intelligence.abuser_level}` : '未见滥用记录' }}</em>
+          </div>
+          <div class="ip-rep-card">
+            <small>Reddit 访问</small>
+            <b :class="reputationCurrentState.report.reddit_blocked ? 'text-danger' : 'text-success'">
+              {{ reputationCurrentState.report.reddit_blocked ? '已屏蔽' : '正常访问' }}
+            </b>
+            <em>{{ reputationCurrentState.report.reddit_blocked ? '可能受严格风控拦截' : '无特殊限制' }}</em>
+          </div>
+          <div class="ip-rep-card">
+            <small>网络属性</small>
+            <b>{{ reputationCurrentState.report.is_datacenter ? '数据中心 (IDC)' : (reputationCurrentState.report.isResidential ? '原生住宅' : '常规网络') }}</b>
+            <em>{{ reputationCurrentState.report.is_proxy ? '代理' : '' }} {{ reputationCurrentState.report.is_vpn ? 'VPN' : '' }} {{ reputationCurrentState.report.is_tor ? 'Tor' : '' }} {{ (!reputationCurrentState.report.is_proxy && !reputationCurrentState.report.is_vpn && !reputationCurrentState.report.is_tor) ? '非公开代理' : '' }}</em>
+          </div>
+          <div class="ip-rep-card">
+            <small>RPKI 路由安全</small>
+            <b>{{ (reputationCurrentState.report.rpki_status || 'valid').toUpperCase() }}</b>
+            <em>BGP 路由原语签名验证</em>
+          </div>
+        </div>
+
+        <div class="ip-rep-meta-list">
+          <div class="ip-rep-meta-item">
+            <span>当前 IP</span>
+            <div class="ip-rep-copyable">
+              <code>{{ reputationCurrentState.report.ip }}</code>
+              <button type="button" class="mini-btn secondary" @click="copy(reputationCurrentState.report.ip)">复制</button>
+            </div>
+          </div>
+          <div v-if="reputationCurrentState.report.cidr" class="ip-rep-meta-item">
+            <span>广播 CIDR</span>
+            <code>{{ reputationCurrentState.report.cidr }}</code>
+          </div>
+          <div class="ip-rep-meta-item">
+            <span>自治系统 (ASN)</span>
+            <span>AS{{ reputationCurrentState.report.asn }} · {{ reputationCurrentState.report.asOrganization || reputationCurrentState.report.asname || '—' }}</span>
+          </div>
+          <div class="ip-rep-meta-item">
+            <span>运营商 / ISP</span>
+            <span>{{ reputationCurrentState.report.isp || reputationCurrentState.report.company_name || '—' }}</span>
+          </div>
+          <div class="ip-rep-meta-item">
+            <span>归属地理位置</span>
+            <span>
+              <img
+                v-if="reputationCurrentState.report.countryCode"
+                class="fleet-host-flag"
+                :src="countryFlagURL(reputationCurrentState.report.countryCode)"
+                alt=""
+                aria-hidden="true"
+              >
+              {{ reputationCurrentState.report.country || '' }} {{ reputationCurrentState.report.region ? `· ${reputationCurrentState.report.region}` : '' }} {{ reputationCurrentState.report.city ? `· ${reputationCurrentState.report.city}` : '' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="ip-rep-empty">
+        <p>请输入需要检测的 IP 地址，或点击上方主机已检测到的 IP 芯片。</p>
+      </div>
+
+      <div class="modal-actions ip-rep-actions">
+        <small class="ip-rep-source">数据来源：Net.Coffee 威胁情报引擎 · 结果本地自动缓存 1 小时</small>
+        <button type="button" class="secondary" @click="modal = null">关闭</button>
       </div>
     </div>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
