@@ -1174,7 +1174,7 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 				entries = append(entries, fleetSubscriptionEntry{
 					Node: model.Node{
 						ID:         pn.ID,
-						Name:       host.Name + " · " + pn.Name,
+						Name:       pn.Name,
 						Protocol:   pn.Protocol,
 						Domain:     pn.Domain,
 						Server:     pn.Server,
@@ -1222,8 +1222,16 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 			if hasNodeSelection && !wantedNodes[cached[index].Node.ID] {
 				continue
 			}
-			cached[index].Node.Name = host.Name + " · " + cached[index].Node.Name
 			entries = append(entries, cached[index])
+		}
+	}
+	seenNames := make(map[string]int)
+	for i := range entries {
+		baseName := entries[i].Node.Name
+		count := seenNames[baseName]
+		seenNames[baseName]++
+		if count > 0 {
+			entries[i].Node.Name = fmt.Sprintf("%s (%d)", baseName, count+1)
 		}
 	}
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")

@@ -395,7 +395,7 @@ func TestFleetSubscriptionUsesEncryptedOfflineCache(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/fleet-sub/global-secret/clash.yaml", nil)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "OFFLINE CACHE: Cached Edge") || !strings.Contains(recorder.Body.String(), "Cached Edge · VLESS A") {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "OFFLINE CACHE: Cached Edge") || !strings.Contains(recorder.Body.String(), "name: \"VLESS A\"") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -426,6 +426,55 @@ func TestFleetSubscriptionAcceptsSuccessfulEmptyCache(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "proxies:") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestFleetSubscriptionCleanNodeNamesAndDeduplication(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	enrolled := enrollFleetAgent(t, server, database, "edge-1", "JP-三网直连")
+	selected, _ := json.Marshal([]string{enrolled.HostID})
+	_ = database.SetSetting("fleet_subscription_hosts", string(selected))
+	_ = database.SetSetting("fleet_global_token", "global-clean")
+
+	host, err := database.FleetHost(enrolled.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []fleetSubscriptionEntry{
+		{
+			Node:  model.Node{ID: "node-1", Name: "JP-REALITY-V6优先", Protocol: "vless", Status: "active"},
+			Share: model.Share{URI: "vless://00000000-0000-4000-8000-000000000001@203.0.113.10:443?security=tls&type=tcp#JP-REALITY-V6优先"},
+		},
+		{
+			Node:  model.Node{ID: "node-2", Name: "JP-REALITY-V6优先", Protocol: "vless", Status: "active"},
+			Share: model.Share{URI: "vless://00000000-0000-4000-8000-000000000002@203.0.113.11:443?security=tls&type=tcp#JP-REALITY-V6优先-2"},
+		},
+	}
+	plain, _ := json.Marshal(entries)
+	sealed, err := server.fleetVault.Encrypt(string(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.SaveFleetSubscriptionCache(host.ID, fleetSubscriptionRevision(host), sealed); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/fleet-sub/global-clean/clash.yaml", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, "name: \"JP-三网直连 · ") {
+		t.Fatalf("expected node name without VPS prefix, got: %s", body)
+	}
+	if !strings.Contains(body, "name: \"JP-REALITY-V6优先\"") {
+		t.Fatalf("expected first node name JP-REALITY-V6优先, got: %s", body)
+	}
+	if !strings.Contains(body, "name: \"JP-REALITY-V6优先 (2)\"") {
+		t.Fatalf("expected deduplicated second node name JP-REALITY-V6优先 (2), got: %s", body)
 	}
 }
 
