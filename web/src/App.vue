@@ -741,29 +741,121 @@ interface IPRepState {
 }
 const ipReputationCache = reactive<Record<string, IPRepState>>({})
 const reputationModalHost = ref<FleetHost | null>(null)
-const reputationModalIP = ref('')
+const reputationModalIPv4 = ref('')
+const reputationModalIPv6 = ref('')
+
+function isIPv4(ip: string): boolean {
+  return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ip.trim().replace(/^\[|\]$/g, ''))
+}
+
+function isIPv6(ip: string): boolean {
+  const clean = ip.trim().replace(/^\[|\]$/g, '')
+  return clean.includes(':') && /^[0-9a-fA-F:]+$/.test(clean)
+}
+
+function isPublicIP(ip: string): boolean {
+  const clean = ip.trim().replace(/^\[|\]$/g, '')
+  if (isIPv4(clean)) {
+    const parts = clean.split('.').map(Number)
+    if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return false
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false
+    if (parts[0] === 192 && parts[1] === 168) return false
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return false
+    if (parts[0] >= 224) return false
+    return true
+  }
+  if (isIPv6(clean)) {
+    const lower = clean.toLowerCase()
+    if (lower === '::1' || lower.startsWith('fe80:') || lower.startsWith('fc00:') || lower.startsWith('fd00:')) return false
+    return true
+  }
+  return false
+}
+
+function getHostDualStackIPs(host: FleetHost | null) {
+  let v4 = ''
+  let v6 = ''
+  if (!host) return { v4, v6 }
+
+  const loc = host.snapshot?.location
+  if (loc?.ipv4 && isIPv4(loc.ipv4)) v4 = loc.ipv4
+  if (loc?.ipv6 && isIPv6(loc.ipv6)) v6 = loc.ipv6
+  if (!v4 && loc?.publicIP && isIPv4(loc.publicIP)) v4 = loc.publicIP
+  if (!v6 && loc?.publicIP && isIPv6(loc.publicIP)) v6 = loc.publicIP
+
+  if (!v4 && host.snapshot?.deploymentDefaults?.ipv4) {
+    for (const item of host.snapshot.deploymentDefaults.ipv4) {
+      if (item.address && isIPv4(item.address) && isPublicIP(item.address)) {
+        v4 = item.address
+        break
+      }
+    }
+  }
+  if (!v6 && host.snapshot?.deploymentDefaults?.ipv6) {
+    for (const item of host.snapshot.deploymentDefaults.ipv6) {
+      if (item.address && isIPv6(item.address) && isPublicIP(item.address)) {
+        v6 = item.address
+        break
+      }
+    }
+  }
+
+  if (host.snapshot?.nodes) {
+    for (const n of host.snapshot.nodes) {
+      if (!v4 && n.server && isIPv4(n.server) && isPublicIP(n.server)) v4 = n.server
+      if (!v4 && n.ipv4Bind && isIPv4(n.ipv4Bind) && isPublicIP(n.ipv4Bind)) v4 = n.ipv4Bind
+      if (!v6 && n.server && isIPv6(n.server) && isPublicIP(n.server)) v6 = n.server
+      if (!v6 && n.ipv6Bind && isIPv6(n.ipv6Bind) && isPublicIP(n.ipv6Bind)) v6 = n.ipv6Bind
+    }
+  }
+
+  if (host.snapshot?.probeNodes) {
+    for (const p of host.snapshot.probeNodes) {
+      if (!v4 && p.server && isIPv4(p.server) && isPublicIP(p.server)) v4 = p.server
+      if (!v6 && p.server && isIPv6(p.server) && isPublicIP(p.server)) v6 = p.server
+    }
+  }
+
+  return { v4, v6 }
+}
 
 function getHostCandidateIPs(host: FleetHost | null) {
   if (!host) return []
-  const list: { ip: string; label: string; kind: 'public' | 'node' | 'probe' }[] = []
+  const list: { ip: string; label: string; kind: 'public' | 'node' | 'probe'; family: 'v4' | 'v6' }[] = []
   const seen = new Set<string>()
 
   const addIP = (raw: string | undefined, label: string, kind: 'public' | 'node' | 'probe') => {
     if (!raw) return
     const clean = raw.trim().replace(/^\[|\]$/g, '')
-    if (!clean || (!clean.includes('.') && !clean.includes(':'))) return
-    if (/^[0-9a-fA-F:.]+$/.test(clean) && !seen.has(clean)) {
-      seen.add(clean)
-      list.push({ ip: clean, label, kind })
-    }
+    if (!clean || !isPublicIP(clean) || seen.has(clean)) return
+    seen.add(clean)
+    list.push({ ip: clean, label, kind, family: isIPv6(clean) ? 'v6' : 'v4' })
   }
 
   if (host.snapshot?.location?.publicIP) {
     addIP(host.snapshot.location.publicIP, '出口公网 IP', 'public')
   }
+  if (host.snapshot?.location?.ipv4) {
+    addIP(host.snapshot.location.ipv4, '出口公网 IPv4', 'public')
+  }
+  if (host.snapshot?.location?.ipv6) {
+    addIP(host.snapshot.location.ipv6, '出口公网 IPv6', 'public')
+  }
+  if (host.snapshot?.deploymentDefaults?.ipv4) {
+    for (const item of host.snapshot.deploymentDefaults.ipv4) {
+      addIP(item.address, `本机 IPv4 (${item.interface})`, 'public')
+    }
+  }
+  if (host.snapshot?.deploymentDefaults?.ipv6) {
+    for (const item of host.snapshot.deploymentDefaults.ipv6) {
+      addIP(item.address, `本机 IPv6 (${item.interface})`, 'public')
+    }
+  }
   if (host.snapshot?.nodes) {
     for (const n of host.snapshot.nodes) {
       if (n.server) addIP(n.server, `节点: ${n.name}`, 'node')
+      if (n.ipv4Bind) addIP(n.ipv4Bind, `绑定: ${n.name}`, 'node')
+      if (n.ipv6Bind) addIP(n.ipv6Bind, `绑定: ${n.name}`, 'node')
     }
   }
   if (host.snapshot?.probeNodes) {
@@ -775,9 +867,13 @@ function getHostCandidateIPs(host: FleetHost | null) {
 }
 
 const reputationCandidateIPs = computed(() => getHostCandidateIPs(reputationModalHost.value))
-const reputationCurrentState = computed(() => {
-  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
-  return clean ? ipReputationCache[clean] : undefined
+const reputationStateIPv4 = computed(() => {
+  const ip = reputationModalIPv4.value.trim().replace(/^\[|\]$/g, '')
+  return ip ? ipReputationCache[ip] : undefined
+})
+const reputationStateIPv6 = computed(() => {
+  const ip = reputationModalIPv6.value.trim().replace(/^\[|\]$/g, '')
+  return ip ? ipReputationCache[ip] : undefined
 })
 
 function getCachedReputation(ip: string): IPReputationReport | null {
@@ -792,7 +888,7 @@ function getCachedReputation(ip: string): IPReputationReport | null {
       }
     }
   } catch {
-    // Ignore localStorage read errors
+    // Ignore storage read errors
   }
   return null
 }
@@ -858,98 +954,118 @@ async function loadReputation(ip: string, force = false): Promise<IPReputationRe
   }
 }
 
-function hostReputationIP(host: FleetHost): string {
-  if (host.snapshot?.location?.publicIP) {
-    return host.snapshot.location.publicIP
-  }
-  const candidates = getHostCandidateIPs(host)
-  return candidates[0]?.ip || ''
+function hostReputationDual(host: FleetHost) {
+  const { v4, v6 } = getHostDualStackIPs(host)
+  const state4 = v4 ? ipReputationCache[v4] : undefined
+  const state6 = v6 ? ipReputationCache[v6] : undefined
+  return { v4, v6, state4, state6 }
 }
 
 function prefetchHostReputation(host: FleetHost) {
-  const ip = hostReputationIP(host)
-  if (!ip) return
-  const local = getCachedReputation(ip)
-  if (local) {
-    if (!ipReputationCache[ip]) {
-      ipReputationCache[ip] = {
-        loading: false,
-        report: local,
-        fetchedAt: Date.now(),
-      }
+  const { v4, v6 } = getHostDualStackIPs(host)
+  if (v4) {
+    const local = getCachedReputation(v4)
+    if (local && !ipReputationCache[v4]) {
+      ipReputationCache[v4] = { loading: false, report: local, fetchedAt: Date.now() }
+    } else if (!local) {
+      loadReputation(v4)
     }
-    return
   }
-  loadReputation(ip)
+  if (v6) {
+    const local = getCachedReputation(v6)
+    if (local && !ipReputationCache[v6]) {
+      ipReputationCache[v6] = { loading: false, report: local, fetchedAt: Date.now() }
+    } else if (!local) {
+      loadReputation(v6)
+    }
+  }
 }
 
 function reputationBadgeClass(host: FleetHost): string {
-  const ip = hostReputationIP(host)
-  if (!ip) return 'score-none'
-  const state = ipReputationCache[ip]
-  if (state?.loading && !state?.report) return 'loading'
-  if (state?.report?.trust_score !== undefined) {
-    const s = state.report.trust_score
-    if (s >= 80) return 'score-high'
-    if (s >= 50) return 'score-medium'
+  const { v4, v6, state4, state6 } = hostReputationDual(host)
+  if (!v4 && !v6) return 'score-none'
+  if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return 'loading'
+
+  const scores: number[] = []
+  if (state4?.report?.trust_score !== undefined) scores.push(state4.report.trust_score)
+  if (state6?.report?.trust_score !== undefined) scores.push(state6.report.trust_score)
+
+  if (scores.length > 0) {
+    const minScore = Math.min(...scores)
+    if (minScore >= 80) return 'score-high'
+    if (minScore >= 50) return 'score-medium'
     return 'score-low'
   }
-  if (state?.error) return 'score-error'
+  if (state4?.error || state6?.error) return 'score-error'
   return 'score-idle'
 }
 
-function reputationBadgeText(host: FleetHost): string {
-  const ip = hostReputationIP(host)
-  if (!ip) return 'IP检测'
-  const state = ipReputationCache[ip]
-  if (state?.loading && !state?.report) return '...'
-  if (state?.report?.trust_score !== undefined) {
-    return `${state.report.trust_score}分`
+function reputationBadgeTitle(host: FleetHost): string {
+  const { v4, v6, state4, state6 } = hostReputationDual(host)
+  if (!v4 && !v6) return '未检测到公网 IP，点击手动检测'
+  const lines: string[] = ['IP 双栈信誉与威胁情报（点击打开详情）：']
+  if (v4) {
+    const s = state4?.report?.trust_score !== undefined ? `${state4.report.trust_score}分` : (state4?.loading ? '检测中' : '待检测')
+    lines.push(`IPv4: ${v4} (${s})`)
   }
-  if (state?.error) return '--分'
-  return 'IP分'
+  if (v6) {
+    const s = state6?.report?.trust_score !== undefined ? `${state6.report.trust_score}分` : (state6?.loading ? '检测中' : '待检测')
+    lines.push(`IPv6: ${v6} (${s})`)
+  }
+  return lines.join('\n')
 }
 
-function reputationBadgeTitle(host: FleetHost): string {
-  const ip = hostReputationIP(host)
-  if (!ip) return '未检测到出网 IP，点击手动检测'
-  const state = ipReputationCache[ip]
-  if (state?.report) {
-    const r = state.report
-    const typeStr = r.is_datacenter ? 'IDC机房' : (r.isResidential ? '住宅家宽' : '标准网络')
-    return `IP 信誉分: ${r.trust_score ?? '—'} / 100 · ${typeStr} · ${r.asOrganization || r.isp || ''}\n点击查看完整威胁情报与双栈 IP`
+function reputationBadgeContent(host: FleetHost) {
+  const { v4, v6, state4, state6 } = hostReputationDual(host)
+  if (v4 && v6) {
+    const s4 = state4?.report?.trust_score !== undefined ? `${state4.report.trust_score}` : (state4?.loading ? '..' : '--')
+    const s6 = state6?.report?.trust_score !== undefined ? `${state6.report.trust_score}` : (state6?.loading ? '..' : '--')
+    return { dual: true, s4, s6, text: '' }
   }
-  if (state?.loading) return `正在检测 ${ip} 的信誉与威胁情报...`
-  if (state?.error) return `检测失败: ${state.error}，点击重新检测`
-  return `点击检测 IP 信誉与威胁情报 (${ip})`
+  if (v4) {
+    const s4 = state4?.report?.trust_score !== undefined ? `${state4.report.trust_score}分` : (state4?.loading ? '...' : 'IPv4')
+    return { dual: false, s4: '', s6: '', text: s4 }
+  }
+  if (v6) {
+    const s6 = state6?.report?.trust_score !== undefined ? `${state6.report.trust_score}分` : (state6?.loading ? '...' : 'IPv6')
+    return { dual: false, s4: '', s6: '', text: s6 }
+  }
+  return { dual: false, s4: '', s6: '', text: 'IP检测' }
 }
 
 function openReputationModal(host?: FleetHost, initialIP?: string) {
   reputationModalHost.value = host || null
-  const targetIP = initialIP || (host ? hostReputationIP(host) : '')
-  reputationModalIP.value = targetIP
+  const dual = getHostDualStackIPs(host || null)
+  reputationModalIPv4.value = dual.v4
+  reputationModalIPv6.value = dual.v6
+
+  if (initialIP) {
+    if (isIPv4(initialIP)) reputationModalIPv4.value = initialIP
+    else if (isIPv6(initialIP)) reputationModalIPv6.value = initialIP
+  }
+
   modal.value = 'ip-reputation'
-  if (targetIP) {
-    loadReputation(targetIP)
+
+  if (reputationModalIPv4.value) loadReputation(reputationModalIPv4.value)
+  if (reputationModalIPv6.value) loadReputation(reputationModalIPv6.value)
+}
+
+function checkReputationBoth(force = false) {
+  if (reputationModalIPv4.value.trim()) {
+    loadReputation(reputationModalIPv4.value.trim(), force)
+  }
+  if (reputationModalIPv6.value.trim()) {
+    loadReputation(reputationModalIPv6.value.trim(), force)
   }
 }
 
-function selectReputationIP(ip: string) {
-  reputationModalIP.value = ip
-  loadReputation(ip)
-}
-
-function lookupCurrentReputation() {
-  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
-  if (clean) {
-    loadReputation(clean)
-  }
-}
-
-function refreshCurrentReputation() {
-  const clean = reputationModalIP.value.trim().replace(/^\[|\]$/g, '')
-  if (clean) {
-    loadReputation(clean, true)
+function selectCandidateIP(cand: { ip: string; family: 'v4' | 'v6' }) {
+  if (cand.family === 'v4') {
+    reputationModalIPv4.value = cand.ip
+    loadReputation(cand.ip)
+  } else {
+    reputationModalIPv6.value = cand.ip
+    loadReputation(cand.ip)
   }
 }
 
@@ -1407,7 +1523,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span>{{ reputationBadgeText(host) }}</span></button><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span v-if="reputationBadgeContent(host).dual" class="dual-rep-scores"><small>v4:</small><b>{{ reputationBadgeContent(host).s4 }}</b><em>/</em><small>v6:</small><b>{{ reputationBadgeContent(host).s6 }}</b></span><span v-else><b>{{ reputationBadgeContent(host).text }}</b></span></button><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
@@ -1764,159 +1880,316 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <button type="button" class="secondary" @click="modal = null">完成</button>
       </div>
     </div>
-    <div v-else-if="modal === 'ip-reputation'" class="modal-card compact ip-reputation-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+    <div v-else-if="modal === 'ip-reputation'" class="modal-card ip-reputation-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <span class="modal-seal blue">信</span>
-      <p class="eyebrow">IP THREAT & REPUTATION INTELLIGENCE</p>
-      <h2>IP 信誉与威胁情报检测</h2>
-      <p>实时分析公网 IP 的网络信誉评分、机房/家宽属性、恶意行为风险及主流服务风控状态。</p>
+      <p class="eyebrow">DUAL-STACK IP THREAT & REPUTATION INTELLIGENCE</p>
+      <h2>IP 双栈信誉与威胁情报检测</h2>
+      <p>同时并行检测主机的 IPv4 与 IPv6 公网信誉评分、机房/家宽属性、恶意行为风险及主流服务风控拦截状态。</p>
 
       <div v-if="reputationModalHost" class="fleet-host-action-target">
         <small>关联主机</small><b>{{ reputationModalHost.name }}</b>
-        <span>{{ reputationModalHost.hostname || reputationModalHost.id }} · {{ reputationModalHost.online ? '● 在线' : '○ 离线' }}</span>
+        <span>{{ reputationModalHost.hostname || reputationModalHost.id }} · {{ reputationModalHost.online ? '● 在线' : '○ 离线' }} · {{ reputationModalHost.os || 'Linux' }}</span>
       </div>
 
+      <!-- Quick Chips: Detected Host IPs -->
       <div v-if="reputationCandidateIPs.length" class="ip-rep-candidates">
-        <small class="ip-rep-label">主机已识别 IP（点击快速切换）：</small>
+        <small class="ip-rep-label">主机已识别双栈 IP（点击快速填入对应通道）：</small>
         <div class="ip-rep-chips">
           <button
             v-for="cand in reputationCandidateIPs"
             :key="cand.ip"
             type="button"
             class="ip-chip"
-            :class="{ active: cand.ip === reputationModalIP }"
-            @click="selectReputationIP(cand.ip)"
+            :class="{
+              active: cand.ip === reputationModalIPv4 || cand.ip === reputationModalIPv6,
+              'chip-v4': cand.family === 'v4',
+              'chip-v6': cand.family === 'v6'
+            }"
+            @click="selectCandidateIP(cand)"
           >
-            <b>{{ cand.ip }}</b>
+            <div class="ip-chip-title">
+              <span class="family-tag" :class="cand.family">{{ cand.family.toUpperCase() }}</span>
+              <b>{{ cand.ip }}</b>
+            </div>
             <small>{{ cand.label }}</small>
           </button>
         </div>
       </div>
 
-      <form class="ip-rep-search-bar" @submit.prevent="lookupCurrentReputation">
-        <input
-          v-model="reputationModalIP"
-          type="text"
-          class="ip-rep-input"
-          placeholder="输入任意 IPv4 或 IPv6 地址..."
-          spellcheck="false"
-        >
-        <button type="submit" class="primary" :disabled="reputationCurrentState?.loading || !reputationModalIP.trim()">
-          {{ reputationCurrentState?.loading ? '分析中…' : '查询' }}
-        </button>
-        <button
-          type="button"
-          class="secondary"
-          :disabled="reputationCurrentState?.loading || !reputationModalIP.trim()"
-          title="强制刷新（绕过本地缓存）"
-          @click="refreshCurrentReputation"
-        >
-          ↻
-        </button>
+      <!-- Dual search/input bar -->
+      <form class="ip-rep-dual-search" @submit.prevent="checkReputationBoth(false)">
+        <div class="ip-search-group">
+          <label>IPv4 地址</label>
+          <div class="input-with-tag">
+            <span class="input-family-tag v4">IPv4</span>
+            <input
+              v-model="reputationModalIPv4"
+              type="text"
+              class="ip-rep-input"
+              placeholder="输入或粘贴 IPv4 地址..."
+              spellcheck="false"
+            >
+          </div>
+        </div>
+        <div class="ip-search-group">
+          <label>IPv6 地址</label>
+          <div class="input-with-tag">
+            <span class="input-family-tag v6">IPv6</span>
+            <input
+              v-model="reputationModalIPv6"
+              type="text"
+              class="ip-rep-input"
+              placeholder="输入或粘贴 IPv6 地址..."
+              spellcheck="false"
+            >
+          </div>
+        </div>
+        <div class="ip-search-actions">
+          <button type="submit" class="primary" :disabled="(reputationStateIPv4?.loading || reputationStateIPv6?.loading)">
+            {{ (reputationStateIPv4?.loading || reputationStateIPv6?.loading) ? '分析中…' : '同时检测' }}
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            :disabled="(reputationStateIPv4?.loading || reputationStateIPv6?.loading)"
+            title="强制刷新（绕过本地缓存）"
+            @click="checkReputationBoth(true)"
+          >
+            ↻ 刷新
+          </button>
+        </div>
       </form>
 
-      <div v-if="reputationCurrentState?.loading && !reputationCurrentState?.report" class="ip-rep-loading">
-        <div class="ip-rep-spinner"></div>
-        <span>正在联网查询 Net.Coffee 威胁情报与信誉评级…</span>
-      </div>
-
-      <div v-else-if="reputationCurrentState?.error && !reputationCurrentState?.report" class="ip-rep-error-box">
-        <b>查询失败</b>
-        <p>{{ reputationCurrentState.error }}</p>
-        <button type="button" class="secondary" @click="refreshCurrentReputation">重试</button>
-      </div>
-
-      <div v-else-if="reputationCurrentState?.report" class="ip-rep-result">
-        <div
-          class="ip-rep-banner"
-          :class="{
-            'score-high': (reputationCurrentState.report.trust_score ?? 0) >= 80,
-            'score-medium': (reputationCurrentState.report.trust_score ?? 0) >= 50 && (reputationCurrentState.report.trust_score ?? 0) < 80,
-            'score-low': (reputationCurrentState.report.trust_score ?? 0) < 50
-          }"
-        >
-          <div class="ip-rep-score-ring">
-            <strong>{{ reputationCurrentState.report.trust_score ?? '—' }}</strong>
-            <small>/ 100</small>
-          </div>
-          <div class="ip-rep-verdict">
-            <div class="ip-rep-verdict-title">
-              <h3>{{ (reputationCurrentState.report.trust_score ?? 0) >= 80 ? '高信誉优质 IP' : ((reputationCurrentState.report.trust_score ?? 0) >= 50 ? '中等信誉 IP' : '低信誉 / 潜在风险 IP') }}</h3>
-              <span class="ip-rep-verdict-tag">{{ reputationCurrentState.report.is_datacenter ? 'IDC 机房' : (reputationCurrentState.report.isResidential ? '住宅家宽' : '标准网络') }}</span>
+      <!-- Side-by-Side Dual-Stack Columns -->
+      <div class="ip-rep-dual-columns">
+        <!-- LEFT: IPv4 Column -->
+        <section class="ip-rep-stack-column">
+          <header class="stack-column-header">
+            <div class="column-title">
+              <span class="protocol-pill ipv4">IPv4 通道</span>
+              <code v-if="reputationModalIPv4">{{ reputationModalIPv4 }}</code>
+              <span v-else class="text-muted">未配置</span>
             </div>
-            <p v-if="reputationCurrentState.report.ai_verdict?.reasoning" class="ip-rep-reasoning">
-              <b>AI 研判：</b>{{ reputationCurrentState.report.ai_verdict.reasoning }}
-            </p>
-          </div>
-        </div>
+            <button
+              v-if="reputationModalIPv4"
+              type="button"
+              class="mini-btn secondary"
+              @click="copy(reputationModalIPv4)"
+            >
+              复制
+            </button>
+          </header>
 
-        <div class="ip-rep-grid">
-          <div class="ip-rep-card">
-            <small>滥用评分</small>
-            <b>{{ reputationCurrentState.report.abuser_score || '0 (极低)' }}</b>
-            <em>{{ reputationCurrentState.report.intelligence?.abuser_level ? `级别: ${reputationCurrentState.report.intelligence.abuser_level}` : '未见滥用记录' }}</em>
+          <div v-if="!reputationModalIPv4.trim()" class="ip-rep-empty-column">
+            <p>当前主机未检测到公网 IPv4 地址。<br>你可以在上方输入框填入任意 IPv4 进行检测。</p>
           </div>
-          <div class="ip-rep-card">
-            <small>Reddit 访问</small>
-            <b :class="reputationCurrentState.report.reddit_blocked ? 'text-danger' : 'text-success'">
-              {{ reputationCurrentState.report.reddit_blocked ? '已屏蔽' : '正常访问' }}
-            </b>
-            <em>{{ reputationCurrentState.report.reddit_blocked ? '可能受严格风控拦截' : '无特殊限制' }}</em>
-          </div>
-          <div class="ip-rep-card">
-            <small>网络属性</small>
-            <b>{{ reputationCurrentState.report.is_datacenter ? '数据中心 (IDC)' : (reputationCurrentState.report.isResidential ? '原生住宅' : '常规网络') }}</b>
-            <em>{{ reputationCurrentState.report.is_proxy ? '代理' : '' }} {{ reputationCurrentState.report.is_vpn ? 'VPN' : '' }} {{ reputationCurrentState.report.is_tor ? 'Tor' : '' }} {{ (!reputationCurrentState.report.is_proxy && !reputationCurrentState.report.is_vpn && !reputationCurrentState.report.is_tor) ? '非公开代理' : '' }}</em>
-          </div>
-          <div class="ip-rep-card">
-            <small>RPKI 路由安全</small>
-            <b>{{ (reputationCurrentState.report.rpki_status || 'valid').toUpperCase() }}</b>
-            <em>BGP 路由原语签名验证</em>
-          </div>
-        </div>
 
-        <div class="ip-rep-meta-list">
-          <div class="ip-rep-meta-item">
-            <span>当前 IP</span>
-            <div class="ip-rep-copyable">
-              <code>{{ reputationCurrentState.report.ip }}</code>
-              <button type="button" class="mini-btn secondary" @click="copy(reputationCurrentState.report.ip)">复制</button>
+          <div v-else-if="reputationStateIPv4?.loading && !reputationStateIPv4?.report" class="ip-rep-loading">
+            <div class="ip-rep-spinner"></div>
+            <span>正在分析 IPv4 威胁情报与信誉分…</span>
+          </div>
+
+          <div v-else-if="reputationStateIPv4?.error && !reputationStateIPv4?.report" class="ip-rep-error-box">
+            <b>查询失败</b>
+            <p>{{ reputationStateIPv4.error }}</p>
+            <button type="button" class="secondary" @click="loadReputation(reputationModalIPv4, true)">重试</button>
+          </div>
+
+          <div v-else-if="reputationStateIPv4?.report" class="ip-rep-result">
+            <div
+              class="ip-rep-banner"
+              :class="{
+                'score-high': (reputationStateIPv4.report.trust_score ?? 0) >= 80,
+                'score-medium': (reputationStateIPv4.report.trust_score ?? 0) >= 50 && (reputationStateIPv4.report.trust_score ?? 0) < 80,
+                'score-low': (reputationStateIPv4.report.trust_score ?? 0) < 50
+              }"
+            >
+              <div class="ip-rep-score-ring">
+                <strong>{{ reputationStateIPv4.report.trust_score ?? '—' }}</strong>
+                <small>/ 100</small>
+              </div>
+              <div class="ip-rep-verdict">
+                <div class="ip-rep-verdict-title">
+                  <h3>{{ (reputationStateIPv4.report.trust_score ?? 0) >= 80 ? '高信誉优质 IP' : ((reputationStateIPv4.report.trust_score ?? 0) >= 50 ? '中等信誉 IP' : '低信誉 / 风险 IP') }}</h3>
+                  <span class="ip-rep-verdict-tag">{{ reputationStateIPv4.report.is_datacenter ? 'IDC 机房' : (reputationStateIPv4.report.isResidential ? '住宅家宽' : '标准网络') }}</span>
+                </div>
+                <p v-if="reputationStateIPv4.report.ai_verdict?.reasoning" class="ip-rep-reasoning">
+                  <b>AI 研判：</b>{{ reputationStateIPv4.report.ai_verdict.reasoning }}
+                </p>
+              </div>
+            </div>
+
+            <div class="ip-rep-grid">
+              <div class="ip-rep-card">
+                <small>滥用评分</small>
+                <b>{{ reputationStateIPv4.report.abuser_score || '0 (极低)' }}</b>
+                <em>{{ reputationStateIPv4.report.intelligence?.abuser_level ? `等级: ${reputationStateIPv4.report.intelligence.abuser_level}` : '未见滥用记录' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>Reddit 访问</small>
+                <b :class="reputationStateIPv4.report.reddit_blocked ? 'text-danger' : 'text-success'">
+                  {{ reputationStateIPv4.report.reddit_blocked ? '已屏蔽' : '正常访问' }}
+                </b>
+                <em>{{ reputationStateIPv4.report.reddit_blocked ? '可能受严格风控拦截' : '无特殊限制' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>网络属性</small>
+                <b>{{ reputationStateIPv4.report.is_datacenter ? '数据中心 (IDC)' : (reputationStateIPv4.report.isResidential ? '原生住宅' : '常规网络') }}</b>
+                <em>{{ reputationStateIPv4.report.is_proxy ? '代理' : '' }} {{ reputationStateIPv4.report.is_vpn ? 'VPN' : '' }} {{ reputationStateIPv4.report.is_tor ? 'Tor' : '' }} {{ (!reputationStateIPv4.report.is_proxy && !reputationStateIPv4.report.is_vpn && !reputationStateIPv4.report.is_tor) ? '非公开代理' : '' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>RPKI 路由安全</small>
+                <b>{{ (reputationStateIPv4.report.rpki_status || 'valid').toUpperCase() }}</b>
+                <em>BGP 路由原语验证</em>
+              </div>
+            </div>
+
+            <div class="ip-rep-meta-list">
+              <div v-if="reputationStateIPv4.report.cidr" class="ip-rep-meta-item">
+                <span>广播 CIDR</span>
+                <code>{{ reputationStateIPv4.report.cidr }}</code>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>自治系统 (ASN)</span>
+                <span>AS{{ reputationStateIPv4.report.asn }} · {{ reputationStateIPv4.report.asOrganization || reputationStateIPv4.report.asname || '—' }}</span>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>运营商 / ISP</span>
+                <span>{{ reputationStateIPv4.report.isp || reputationStateIPv4.report.company_name || '—' }}</span>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>归属地理位置</span>
+                <span>
+                  <img
+                    v-if="reputationStateIPv4.report.countryCode"
+                    class="fleet-host-flag"
+                    :src="countryFlagURL(reputationStateIPv4.report.countryCode)"
+                    alt=""
+                    aria-hidden="true"
+                  >
+                  {{ reputationStateIPv4.report.country || '' }} {{ reputationStateIPv4.report.region ? `· ${reputationStateIPv4.report.region}` : '' }} {{ reputationStateIPv4.report.city ? `· ${reputationStateIPv4.report.city}` : '' }}
+                </span>
+              </div>
             </div>
           </div>
-          <div v-if="reputationCurrentState.report.cidr" class="ip-rep-meta-item">
-            <span>广播 CIDR</span>
-            <code>{{ reputationCurrentState.report.cidr }}</code>
-          </div>
-          <div class="ip-rep-meta-item">
-            <span>自治系统 (ASN)</span>
-            <span>AS{{ reputationCurrentState.report.asn }} · {{ reputationCurrentState.report.asOrganization || reputationCurrentState.report.asname || '—' }}</span>
-          </div>
-          <div class="ip-rep-meta-item">
-            <span>运营商 / ISP</span>
-            <span>{{ reputationCurrentState.report.isp || reputationCurrentState.report.company_name || '—' }}</span>
-          </div>
-          <div class="ip-rep-meta-item">
-            <span>归属地理位置</span>
-            <span>
-              <img
-                v-if="reputationCurrentState.report.countryCode"
-                class="fleet-host-flag"
-                :src="countryFlagURL(reputationCurrentState.report.countryCode)"
-                alt=""
-                aria-hidden="true"
-              >
-              {{ reputationCurrentState.report.country || '' }} {{ reputationCurrentState.report.region ? `· ${reputationCurrentState.report.region}` : '' }} {{ reputationCurrentState.report.city ? `· ${reputationCurrentState.report.city}` : '' }}
-            </span>
-          </div>
-        </div>
-      </div>
+        </section>
 
-      <div v-else class="ip-rep-empty">
-        <p>请输入需要检测的 IP 地址，或点击上方主机已检测到的 IP 芯片。</p>
+        <!-- RIGHT: IPv6 Column -->
+        <section class="ip-rep-stack-column">
+          <header class="stack-column-header">
+            <div class="column-title">
+              <span class="protocol-pill ipv6">IPv6 通道</span>
+              <code v-if="reputationModalIPv6">{{ reputationModalIPv6 }}</code>
+              <span v-else class="text-muted">未配置</span>
+            </div>
+            <button
+              v-if="reputationModalIPv6"
+              type="button"
+              class="mini-btn secondary"
+              @click="copy(reputationModalIPv6)"
+            >
+              复制
+            </button>
+          </header>
+
+          <div v-if="!reputationModalIPv6.trim()" class="ip-rep-empty-column">
+            <p>当前主机未检测到公网 IPv6 地址。<br>你可以在上方输入框填入任意 IPv6 进行检测。</p>
+          </div>
+
+          <div v-else-if="reputationStateIPv6?.loading && !reputationStateIPv6?.report" class="ip-rep-loading">
+            <div class="ip-rep-spinner"></div>
+            <span>正在分析 IPv6 威胁情报与信誉分…</span>
+          </div>
+
+          <div v-else-if="reputationStateIPv6?.error && !reputationStateIPv6?.report" class="ip-rep-error-box">
+            <b>查询失败</b>
+            <p>{{ reputationStateIPv6.error }}</p>
+            <button type="button" class="secondary" @click="loadReputation(reputationModalIPv6, true)">重试</button>
+          </div>
+
+          <div v-else-if="reputationStateIPv6?.report" class="ip-rep-result">
+            <div
+              class="ip-rep-banner"
+              :class="{
+                'score-high': (reputationStateIPv6.report.trust_score ?? 0) >= 80,
+                'score-medium': (reputationStateIPv6.report.trust_score ?? 0) >= 50 && (reputationStateIPv6.report.trust_score ?? 0) < 80,
+                'score-low': (reputationStateIPv6.report.trust_score ?? 0) < 50
+              }"
+            >
+              <div class="ip-rep-score-ring">
+                <strong>{{ reputationStateIPv6.report.trust_score ?? '—' }}</strong>
+                <small>/ 100</small>
+              </div>
+              <div class="ip-rep-verdict">
+                <div class="ip-rep-verdict-title">
+                  <h3>{{ (reputationStateIPv6.report.trust_score ?? 0) >= 80 ? '高信誉优质 IP' : ((reputationStateIPv6.report.trust_score ?? 0) >= 50 ? '中等信誉 IP' : '低信誉 / 风险 IP') }}</h3>
+                  <span class="ip-rep-verdict-tag">{{ reputationStateIPv6.report.is_datacenter ? 'IDC 机房' : (reputationStateIPv6.report.isResidential ? '住宅家宽' : '标准网络') }}</span>
+                </div>
+                <p v-if="reputationStateIPv6.report.ai_verdict?.reasoning" class="ip-rep-reasoning">
+                  <b>AI 研判：</b>{{ reputationStateIPv6.report.ai_verdict.reasoning }}
+                </p>
+              </div>
+            </div>
+
+            <div class="ip-rep-grid">
+              <div class="ip-rep-card">
+                <small>滥用评分</small>
+                <b>{{ reputationStateIPv6.report.abuser_score || '0 (极低)' }}</b>
+                <em>{{ reputationStateIPv6.report.intelligence?.abuser_level ? `等级: ${reputationStateIPv6.report.intelligence.abuser_level}` : '未见滥用记录' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>Reddit 访问</small>
+                <b :class="reputationStateIPv6.report.reddit_blocked ? 'text-danger' : 'text-success'">
+                  {{ reputationStateIPv6.report.reddit_blocked ? '已屏蔽' : '正常访问' }}
+                </b>
+                <em>{{ reputationStateIPv6.report.reddit_blocked ? '可能受严格风控拦截' : '无特殊限制' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>网络属性</small>
+                <b>{{ reputationStateIPv6.report.is_datacenter ? '数据中心 (IDC)' : (reputationStateIPv6.report.isResidential ? '原生住宅' : '常规网络') }}</b>
+                <em>{{ reputationStateIPv6.report.is_proxy ? '代理' : '' }} {{ reputationStateIPv6.report.is_vpn ? 'VPN' : '' }} {{ reputationStateIPv6.report.is_tor ? 'Tor' : '' }} {{ (!reputationStateIPv6.report.is_proxy && !reputationStateIPv6.report.is_vpn && !reputationStateIPv6.report.is_tor) ? '非公开代理' : '' }}</em>
+              </div>
+              <div class="ip-rep-card">
+                <small>RPKI 路由安全</small>
+                <b>{{ (reputationStateIPv6.report.rpki_status || 'valid').toUpperCase() }}</b>
+                <em>BGP 路由原语验证</em>
+              </div>
+            </div>
+
+            <div class="ip-rep-meta-list">
+              <div v-if="reputationStateIPv6.report.cidr" class="ip-rep-meta-item">
+                <span>广播 CIDR</span>
+                <code>{{ reputationStateIPv6.report.cidr }}</code>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>自治系统 (ASN)</span>
+                <span>AS{{ reputationStateIPv6.report.asn }} · {{ reputationStateIPv6.report.asOrganization || reputationStateIPv6.report.asname || '—' }}</span>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>运营商 / ISP</span>
+                <span>{{ reputationStateIPv6.report.isp || reputationStateIPv6.report.company_name || '—' }}</span>
+              </div>
+              <div class="ip-rep-meta-item">
+                <span>归属地理位置</span>
+                <span>
+                  <img
+                    v-if="reputationStateIPv6.report.countryCode"
+                    class="fleet-host-flag"
+                    :src="countryFlagURL(reputationStateIPv6.report.countryCode)"
+                    alt=""
+                    aria-hidden="true"
+                  >
+                  {{ reputationStateIPv6.report.country || '' }} {{ reputationStateIPv6.report.region ? `· ${reputationStateIPv6.report.region}` : '' }} {{ reputationStateIPv6.report.city ? `· ${reputationStateIPv6.report.city}` : '' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="modal-actions ip-rep-actions">
-        <small class="ip-rep-source">数据来源：Net.Coffee 威胁情报引擎 · 结果本地自动缓存 1 小时</small>
+        <small class="ip-rep-source">数据来源：Net.Coffee IP 威胁情报引擎 · 双栈结果自动本地缓存 1 小时</small>
         <button type="button" class="secondary" @click="modal = null">关闭</button>
       </div>
     </div>

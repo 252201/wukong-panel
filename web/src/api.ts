@@ -201,7 +201,7 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
-export interface FleetSnapshot { overview: Overview; nodes: NodeItem[]; location?: { publicIP: string; countryCode: string }; probeNodes?: FleetProbeNode[] }
+export interface FleetSnapshot { overview: Overview; nodes: NodeItem[]; location?: { publicIP: string; countryCode: string; ipv4?: string; ipv6?: string }; deploymentDefaults?: NodeDeploymentDefaults; probeNodes?: FleetProbeNode[] }
 export interface FleetProbeNode {
   id: string
   hostId: string
