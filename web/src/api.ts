@@ -305,6 +305,7 @@ export const api = {
   deleteFleetProbeNode: (hostId: string, nodeId: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/probe-nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' }, false),
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
+  ipReputation: (ip: string) => getIPReputation(ip),
 }
 
 export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
@@ -357,3 +358,61 @@ export function componentUpdateAPI(hostId: string, component: 'cloudflared' | 's
 export const cloudflaredAPI = (hostId: string) => componentUpdateAPI(hostId, 'cloudflared')
 
 export type CloudflaredState = ComponentUpdateState
+
+export interface IPReputationReport {
+  ip: string
+  cidr?: string
+  trust_score?: number
+  abuser_score?: string
+  is_datacenter?: boolean
+  isResidential?: boolean
+  is_vpn?: boolean
+  is_proxy?: boolean
+  is_tor?: boolean
+  is_crawler?: boolean
+  is_abuser?: boolean
+  is_mobile?: boolean
+  reddit_blocked?: boolean
+  company_type?: string
+  company_name?: string
+  asn?: number
+  asOrganization?: string
+  asname?: string
+  country?: string
+  countryCode?: string
+  region?: string
+  city?: string
+  isp?: string
+  rpki_status?: string
+  ai_verdict?: {
+    label?: string
+    confidence?: number
+    reasoning?: string
+  }
+  intelligence?: {
+    threats?: string[]
+    abuser_level?: string
+    abuser_score_raw?: string
+  }
+  [key: string]: unknown
+}
+
+export async function getIPReputation(ip: string): Promise<IPReputationReport> {
+  const cleanIP = ip.trim()
+  if (!cleanIP) throw new Error('IP is required')
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    const resp = await fetch(`https://ip.net.coffee/api/ip/lookup/${encodeURIComponent(cleanIP)}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+    clearTimeout(timer)
+    if (resp.ok) {
+      return (await resp.json()) as IPReputationReport
+    }
+  } catch {
+    // Fall back to backend proxy
+  }
+  return request<IPReputationReport>(`system/ip-reputation?ip=${encodeURIComponent(cleanIP)}`, {}, false)
+}
