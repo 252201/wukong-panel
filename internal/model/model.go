@@ -385,6 +385,30 @@ type FleetHostSettingsRequest struct {
 	ExpiresAt         string `json:"expiresAt"`
 }
 
+type FleetProbeNode struct {
+	ID        string    `json:"id"`
+	HostID    string    `json:"hostId"`
+	Name      string    `json:"name"`
+	Protocol  string    `json:"protocol"`
+	Server    string    `json:"server"`
+	Port      int       `json:"port"`
+	Domain    string    `json:"domain,omitempty"`
+	ShareURI  string    `json:"shareUri"`
+	Source    string    `json:"source"` // "scanned" or "manual"
+	RawName   string    `json:"rawName,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type FleetProbeNodeSaveRequest struct {
+	Name     string `json:"name"`
+	ShareURI string `json:"shareUri"`
+	Protocol string `json:"protocol,omitempty"`
+	Server   string `json:"server,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+}
+
 type FleetSnapshot struct {
 	Firewall           *FirewallState             `json:"firewall,omitempty"`
 	Fail2ban           *Fail2banState             `json:"fail2ban,omitempty"`
@@ -392,6 +416,7 @@ type FleetSnapshot struct {
 	Location           *HostLocation              `json:"location,omitempty"`
 	Overview           Overview                   `json:"overview"`
 	Nodes              []Node                     `json:"nodes"`
+	ProbeNodes         []FleetProbeNode           `json:"probeNodes,omitempty"`
 	NodeDetails        map[string]NodeEditDetails `json:"nodeDetails,omitempty"`
 	Jobs               []Job                      `json:"jobs"`
 	Settings           Settings                   `json:"settings"`

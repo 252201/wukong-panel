@@ -166,6 +166,15 @@ CREATE TABLE IF NOT EXISTS fleet_traffic_state (
   updated_at INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS fleet_probe_nodes (
+  id TEXT PRIMARY KEY, host_id TEXT NOT NULL, name TEXT NOT NULL,
+  protocol TEXT NOT NULL, server TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0,
+  domain TEXT NOT NULL DEFAULT '', share_uri TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'scanned', raw_name TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_probe_nodes_host ON fleet_probe_nodes(host_id);
 `
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
