@@ -646,6 +646,7 @@ const dynamicRules: Array<[RegExp, (...parts: string[]) => string]> = [
   [/^(\d+) 台设备 · 独立端口与凭据 · 一个 sing-box 进程$/, (_, count) => `${count} devices · Separate ports and credentials · One sing-box process`],
   [/^(\d+) 条最近任务$/, (_, count) => `${count} recent jobs`],
   [/^(\d+) 个节点$/, (_, count) => `${count} nodes`],
+  [/^节点 (\d+)\/(\d+)$/, (_, online, total) => `Nodes ${online}/${total}`],
   [/^(\d+) 个端点$/, (_, count) => `${count} endpoints`],
   [/^(\d+) 在线$/, (_, count) => `${count} online`],
   [/^(\d+) 已接管$/, (_, count) => `${count} imported`],
