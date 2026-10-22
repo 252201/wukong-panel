@@ -20,6 +20,7 @@ func TestClashProxyYAMLForEveryProtocol(t *testing.T) {
 		{"tuic", "tuic://d342d11e-d424-4583-b36e-524ab1f0afa4:secret@node.example.com:443?sni=node.example.com", []string{"type: tuic", "congestion-controller: bbr"}},
 		{"trojan", "trojan://secret@node.example.com:443?security=tls&sni=node.example.com", []string{"type: trojan", `password: "secret"`}},
 		{"anytls", "anytls://secret@node.example.com:443/?sni=node.example.com", []string{"type: anytls", `password: "secret"`, "client-fingerprint: chrome", "udp: true", "idle-session-check-interval: 30"}},
+		{"vmess", `vmess://eyJhZGQiOiJub2RlLmV4YW1wbGUuY29tIiwicG9ydCI6NDQzLCJpZCI6ImQzNDJkMTFlLWQ0MjQtNDU4My1iMzZlLTUyNGFiMWYwYWZhNCIsIm5ldCI6IndzIiwicGF0aCI6Ii92bWVzcyIsImhvc3QiOiJub2RlLmV4YW1wbGUuY29tIiwidGxzIjoidGxzIn0=`, []string{"type: vmess", `network: ws`, `path: "/vmess"`, `Host: "node.example.com"`}},
 	}
 	for _, test := range tests {
 		t.Run(test.protocol, func(t *testing.T) {

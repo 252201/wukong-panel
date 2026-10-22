@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import ComponentUpdatePanel from './ComponentUpdatePanel.vue'
@@ -90,11 +90,18 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | null>(null)
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
 const fleetHostTarget = ref<FleetHost | null>(null)
 const fleetHostSettingsTarget = ref<FleetHost | null>(null)
+const probeNodesTarget = ref<FleetHost | null>(null)
+const probeNodesList = ref<FleetProbeNode[]>([])
+const probeNodesLoading = ref(false)
+const probeNodeRenameId = ref<string | null>(null)
+const probeNodeRenameDraft = ref('')
+const probeNodeAddShareURI = ref('')
+const probeNodeAddBusy = ref(false)
 const fleetHostSettingsDraft = ref({
   billingResetDay: 1,
   trafficQuotaGB: 0,
@@ -426,7 +433,10 @@ function applyFleetDraft(status: FleetStatus) {
     fleetEnabledDraft.value = status.enabled
     fleetPublicURL.value = status.publicUrl || `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
     fleetSubscriptionPublicURL.value = status.subscriptionPublicUrl || ''
-    fleetSelectedHosts.value = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => !status.hosts.some(host => host.id === id && isProbeHost(host))) : status.hosts.filter(host => !isProbeHost(host)).map(host => host.id)
+    fleetSelectedHosts.value = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => {
+      const h = status.hosts.find(item => item.id === id)
+      return !h || !isProbeHost(h) || (h.snapshot?.nodes || []).length > 0
+    }) : status.hosts.filter(host => !isProbeHost(host) || (host.snapshot?.nodes || []).length > 0).map(host => host.id)
     fleetSelectedNodes.value = selectedNodes
   } finally { syncingFleetDraft = false }
 }
@@ -601,6 +611,117 @@ async function submitFleetHostSettings() {
     notify(error instanceof Error ? error.message : '保存主机设置失败')
   } finally {
     busy.value = false
+  }
+}
+
+async function openProbeNodesModal(host: FleetHost) {
+  probeNodesTarget.value = host
+  probeNodeRenameId.value = null
+  probeNodeRenameDraft.value = ''
+  probeNodeAddShareURI.value = ''
+  modal.value = 'probe-nodes'
+  await loadProbeNodes(host.id)
+}
+
+async function loadProbeNodes(hostId: string) {
+  probeNodesLoading.value = true
+  try {
+    const list = await api.getFleetProbeNodes(hostId)
+    probeNodesList.value = list
+    const host = fleetHosts.value.find(h => h.id === hostId)
+    if (host) {
+      if (!host.snapshot) {
+        host.snapshot = { overview: {} as Overview, nodes: [] }
+      }
+      host.snapshot.probeNodes = list
+      host.snapshot.nodes = list.map(n => ({
+        id: n.id,
+        name: n.name,
+        protocol: n.protocol,
+        domain: n.domain,
+        server: n.server,
+        listenPort: n.port,
+        status: 'active' as NodeStatus,
+        mode: 'prefer_v6',
+        egress: 'direct',
+        autoBind: false,
+        serviceName: '',
+        serviceManager: '',
+        configPath: '',
+        configVersion: '',
+        ownership: 'probe',
+      }))
+      host.snapshot.overview.nodeCount = list.length
+      host.snapshot.overview.onlineNodes = list.length
+      if (fleetSelectedHosts.value.includes(hostId)) {
+        const curNodes = fleetSelectedNodes.value[hostId] || []
+        const allNodeIds = list.map(n => n.id)
+        fleetSelectedNodes.value = { ...fleetSelectedNodes.value, [hostId]: Array.from(new Set([...curNodes, ...allNodeIds])) }
+      }
+    }
+  } catch (e: any) {
+    notify(e.message || (language.value === 'en-US' ? 'Failed to load probe nodes' : '加载探针节点失败'))
+  } finally {
+    probeNodesLoading.value = false
+  }
+}
+
+function startRenameProbeNode(node: FleetProbeNode) {
+  probeNodeRenameId.value = node.id
+  probeNodeRenameDraft.value = node.name
+}
+
+function cancelRenameProbeNode() {
+  probeNodeRenameId.value = null
+  probeNodeRenameDraft.value = ''
+}
+
+async function submitRenameProbeNode(node: FleetProbeNode) {
+  const newName = probeNodeRenameDraft.value.trim()
+  if (!newName) {
+    notify(language.value === 'en-US' ? 'Node name cannot be empty' : '节点名称不能为空')
+    return
+  }
+  if (!probeNodesTarget.value) return
+  try {
+    await api.renameFleetProbeNode(probeNodesTarget.value.id, node.id, newName)
+    notify(language.value === 'en-US' ? 'Node name updated' : '节点名称已更新')
+    probeNodeRenameId.value = null
+    await loadProbeNodes(probeNodesTarget.value.id)
+  } catch (e: any) {
+    notify(e.message || (language.value === 'en-US' ? 'Failed to rename node' : '重命名失败'))
+  }
+}
+
+async function deleteProbeNode(node: FleetProbeNode) {
+  if (!probeNodesTarget.value) return
+  if (!confirm(language.value === 'en-US' ? `Delete node "${node.name}"?` : `确定要删除节点 "${node.name}" 吗？`)) return
+  try {
+    await api.deleteFleetProbeNode(probeNodesTarget.value.id, node.id)
+    notify(language.value === 'en-US' ? 'Node deleted' : '节点已删除')
+    await loadProbeNodes(probeNodesTarget.value.id)
+  } catch (e: any) {
+    notify(e.message || (language.value === 'en-US' ? 'Failed to delete node' : '删除失败'))
+  }
+}
+
+async function addProbeNode() {
+  const text = probeNodeAddShareURI.value.trim()
+  if (!text) {
+    notify(language.value === 'en-US' ? 'Please paste share URIs or config' : '请粘贴节点分享链接或配置')
+    return
+  }
+  if (!probeNodesTarget.value) return
+  probeNodeAddBusy.value = true
+  try {
+    await api.createFleetProbeNode(probeNodesTarget.value.id, { shareUri: text })
+    notify(language.value === 'en-US' ? 'Nodes added successfully' : '节点添加成功')
+    probeNodeAddShareURI.value = ''
+    await loadProbeNodes(probeNodesTarget.value.id)
+  } catch (e: any) {
+    notify(e.message || (language.value === 'en-US' ? 'Failed to add node' : '添加节点失败'))
+  } finally {
+    probeNodeAddBusy.value = false
   }
 }
 
@@ -1059,7 +1180,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.txBps || 0) : '0 B/s' }}</b></span>
                 </div>
-                <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? '轻量探针' : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+                <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? ((host.snapshot?.nodes || []).length > 0 ? `轻量探针 (节点 ${host.snapshot?.nodes?.length})` : '轻量探针') : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
               </aside>
             </header>
             <div class="fleet-host-body">
@@ -1080,12 +1201,12 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </section>
             </div>
-            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '仅监控'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
+            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '轻量探针'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
         </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
-        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
+        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item) || (item.snapshot?.nodes || []).length > 0)" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : isProbeHost(host) ? '离线 · 节点已就绪' : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
         <section v-if="enrollmentCommand" id="fleet-enrollment" class="panel-card enrollment-card"><div><span class="section-mark">令</span><div><h3>{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div><button @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>{{ enrollmentMode === 'probe' ? '在远端 VPS 以 root 执行；仅安装探针，不安装面板、Nginx 或 sing-box。探针只主动连接可信 HTTPS 主控。' : '在远端 VPS 以 root 执行；将安装完整面板、Nginx 与 sing-box，Agent 主动连接可信 HTTPS 主控。' }}</small><div class="enrollment-leave"><div class="enrollment-leave-head"><div class="enrollment-leave-title"><span class="section-mark red">撤</span><div><h4>{{ enrollmentMode === 'probe' ? '卸载轻量探针' : '取消中央接入' }}</h4><p>{{ enrollmentMode === 'probe' ? '停止服务并删除探针文件；中央记录需在舰队卡片中另行移除。' : '仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。' }}</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
       </div>
 
@@ -1335,6 +1456,81 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <button class="primary" :disabled="busy">{{ busy ? '保存中…' : '保存设置' }}</button>
       </div>
     </form>
+    <div v-else-if="modal === 'probe-nodes' && probeNodesTarget" class="modal-card compact probe-nodes-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal blue">探</span>
+      <p class="eyebrow">PROBE NODES MANAGEMENT</p>
+      <h2>{{ probeNodesTarget.name }} · 节点管理</h2>
+      <p>管理轻量探针上的代理节点，修改节点名称，或手动录入节点。这些节点均可纳入全局订阅范围。</p>
+      <div class="fleet-host-action-target">
+        <small>目标主机</small><b>{{ probeNodesTarget.name }}</b>
+        <span>{{ probeNodesTarget.hostname || probeNodesTarget.id }} · {{ probeNodesTarget.online ? '● 在线' : '○ 离线' }} · 节点数：{{ probeNodesList.length }}</span>
+      </div>
+
+      <div class="probe-nodes-list-section">
+        <div class="probe-nodes-list-head">
+          <h4>已识别节点</h4>
+          <button type="button" class="mini-btn secondary" :disabled="probeNodesLoading" @click="loadProbeNodes(probeNodesTarget.id)">
+            {{ probeNodesLoading ? '刷新中…' : '↻ 刷新列表' }}
+          </button>
+        </div>
+
+        <div v-if="probeNodesLoading && !probeNodesList.length" class="probe-nodes-hint-box">
+          正在读取探针节点…
+        </div>
+        <div v-else-if="!probeNodesList.length" class="probe-nodes-hint-box">
+          暂未发现节点。探针会自动扫描本地 <code>/etc/s-box</code>、<code>/etc/sing-box</code>、<code>/etc/xray</code> 中的配置；您也可以在下方手动粘贴分享链接添加。
+        </div>
+        <div v-else class="probe-nodes-items">
+          <article v-for="node in probeNodesList" :key="node.id" class="probe-node-item">
+            <div class="probe-node-info">
+              <div class="probe-node-title-row">
+                <span class="protocol-badge" :class="node.protocol">{{ node.protocol.toUpperCase() }}</span>
+                <div v-if="probeNodeRenameId === node.id" class="inline-rename-wrap">
+                  <input v-model="probeNodeRenameDraft" type="text" class="inline-rename-input" maxlength="60" @keyup.enter="submitRenameProbeNode(node)" @keyup.esc="cancelRenameProbeNode" autofocus />
+                  <button type="button" class="mini-btn primary" @click="submitRenameProbeNode(node)">保存</button>
+                  <button type="button" class="mini-btn secondary" @click="cancelRenameProbeNode">取消</button>
+                </div>
+                <b v-else class="probe-node-name" :title="node.name">{{ node.name }}</b>
+                <span class="source-tag" :class="node.source === 'scan' ? 'source-scan' : 'source-manual'">{{ node.source === 'scan' ? '自动扫描' : '手动' }}</span>
+              </div>
+              <div class="probe-node-detail-row">
+                <code>:{{ node.port }}</code>
+                <span v-if="node.domain && node.domain !== node.server">{{ node.domain }}</span>
+                <span v-else>{{ node.server }}</span>
+              </div>
+            </div>
+            <div class="probe-node-actions">
+              <button v-if="probeNodeRenameId !== node.id" type="button" class="mini-btn" @click="startRenameProbeNode(node)">重命名</button>
+              <button v-if="node.source === 'manual'" type="button" class="mini-btn danger" @click="deleteProbeNode(node)">删除</button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div class="probe-nodes-add-section">
+        <label>
+          <b>手动添加节点</b>
+          <small>支持粘贴 VLESS / Hysteria2 / Shadowsocks / TUIC / Trojan / AnyTLS / VMess 分享链接，支持每行一个批量粘贴。</small>
+        </label>
+        <textarea
+          v-model="probeNodeAddShareURI"
+          class="probe-share-input"
+          rows="3"
+          placeholder="vless://... 或 hysteria2://... 或 ss://... (可粘贴多行)"
+          spellcheck="false"
+        ></textarea>
+        <div class="probe-nodes-add-btn-wrap">
+          <button type="button" class="primary" :disabled="probeNodeAddBusy || !probeNodeAddShareURI.trim()" @click="addProbeNode">
+            {{ probeNodeAddBusy ? '解析添加中…' : '＋ 添加到此探针' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" @click="modal = null">完成</button>
+      </div>
+    </div>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else-if="modal === 'socks-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeSOCKSExit"><span class="modal-seal red">撤</span><p class="eyebrow">SOCKS EGRESS REMOVAL</p><h2>移除 SOCKS 出站？</h2><p>这会删除 Root Agent 加密保存的 SOCKS 服务器与认证信息，不会修改上游代理。</p><p v-if="socksNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用 SOCKS 出站：{{ socksNodesInUse.map(node => node.name).join('、') }}。请先将它们切回其他出口。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="socksRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="socksBusy" @click="modal = null">保留 SOCKS 出站</button><button class="danger-button" :disabled="socksBusy || socksRemoveConfirm !== 'REMOVE' || socksNodesInUse.length > 0">{{ socksBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>

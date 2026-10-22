@@ -114,6 +114,11 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 	if !isProbe && strings.TrimSpace(heartbeat.Snapshot.Settings.ExpiresAt) != "" {
 		_, _ = tx.ExecContext(ctx, `UPDATE fleet_hosts SET expires_at=? WHERE id=? AND archived_at=0`, strings.TrimSpace(heartbeat.Snapshot.Settings.ExpiresAt), hostID)
 	}
+	if isProbe && heartbeat.Snapshot.ProbeNodes != nil {
+		if err := syncScannedProbeNodesTx(ctx, tx, hostID, heartbeat.Snapshot.ProbeNodes); err != nil {
+			return err
+		}
+	}
 	count, _ := result.RowsAffected()
 	if count != 1 {
 		return sql.ErrNoRows
@@ -485,4 +490,100 @@ func (s *Store) FleetSubscriptionCache(hostID string) (revision, cipher string, 
 func (s *Store) ClearFleetSubscriptionCaches() error {
 	_, err := s.DB.Exec(`DELETE FROM fleet_subscription_cache`)
 	return err
+}
+
+func (s *Store) FleetProbeNodes(ctx context.Context, hostID string) ([]model.FleetProbeNode, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, host_id, name, protocol, server, port, domain, share_uri, source, raw_name, created_at, updated_at FROM fleet_probe_nodes WHERE host_id=? ORDER BY created_at ASC`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var nodes []model.FleetProbeNode
+	for rows.Next() {
+		var n model.FleetProbeNode
+		var created, updated int64
+		if err := rows.Scan(&n.ID, &n.HostID, &n.Name, &n.Protocol, &n.Server, &n.Port, &n.Domain, &n.ShareURI, &n.Source, &n.RawName, &created, &updated); err != nil {
+			return nil, err
+		}
+		n.CreatedAt = time.Unix(created, 0)
+		n.UpdatedAt = time.Unix(updated, 0)
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
+func (s *Store) SaveFleetProbeNode(ctx context.Context, node model.FleetProbeNode) error {
+	now := time.Now().Unix()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO fleet_probe_nodes(id, host_id, name, protocol, server, port, domain, share_uri, source, raw_name, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, protocol=excluded.protocol, server=excluded.server, port=excluded.port, domain=excluded.domain, share_uri=excluded.share_uri, source=excluded.source, updated_at=excluded.updated_at`,
+		node.ID, node.HostID, node.Name, node.Protocol, node.Server, node.Port, node.Domain, node.ShareURI, node.Source, node.RawName, now, now)
+	return err
+}
+
+func (s *Store) RenameFleetProbeNode(ctx context.Context, hostID, nodeID, newName string) error {
+	now := time.Now().Unix()
+	res, err := s.DB.ExecContext(ctx, `UPDATE fleet_probe_nodes SET name=?, updated_at=? WHERE id=? AND host_id=?`, strings.TrimSpace(newName), now, nodeID, hostID)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) DeleteFleetProbeNode(ctx context.Context, hostID, nodeID string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM fleet_probe_nodes WHERE id=? AND host_id=?`, nodeID, hostID)
+	return err
+}
+
+func syncScannedProbeNodesTx(ctx context.Context, tx *sql.Tx, hostID string, scanned []model.FleetProbeNode) error {
+	now := time.Now().Unix()
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, raw_name, source FROM fleet_probe_nodes WHERE host_id=?`, hostID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type existingNode struct {
+		id      string
+		name    string
+		rawName string
+		source  string
+	}
+	existing := make(map[string]existingNode)
+	for rows.Next() {
+		var en existingNode
+		if err := rows.Scan(&en.id, &en.name, &en.rawName, &en.source); err == nil {
+			existing[en.id] = en
+		}
+	}
+	rows.Close()
+
+	activeIDs := make(map[string]bool)
+	for _, sc := range scanned {
+		activeIDs[sc.ID] = true
+		if en, ok := existing[sc.ID]; ok {
+			nameToKeep := en.name
+			if strings.TrimSpace(nameToKeep) == "" {
+				nameToKeep = sc.Name
+			}
+			_, _ = tx.ExecContext(ctx, `UPDATE fleet_probe_nodes SET protocol=?, server=?, port=?, domain=?, share_uri=?, raw_name=?, updated_at=? WHERE id=? AND host_id=?`,
+				sc.Protocol, sc.Server, sc.Port, sc.Domain, sc.ShareURI, sc.RawName, now, sc.ID, hostID)
+		} else {
+			_, _ = tx.ExecContext(ctx, `INSERT INTO fleet_probe_nodes(id, host_id, name, protocol, server, port, domain, share_uri, source, raw_name, created_at, updated_at)
+				VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+				sc.ID, hostID, sc.Name, sc.Protocol, sc.Server, sc.Port, sc.Domain, sc.ShareURI, "scanned", sc.RawName, now, now)
+		}
+	}
+
+	for id, en := range existing {
+		if en.source == "scanned" && !activeIDs[id] {
+			_, _ = tx.ExecContext(ctx, `DELETE FROM fleet_probe_nodes WHERE id=? AND host_id=?`, id, hostID)
+		}
+	}
+
+	return nil
 }

@@ -201,7 +201,21 @@ export interface SingBoxMigrationPlan {
   errors: number
 }
 
-export interface FleetSnapshot { overview: Overview; nodes: NodeItem[]; location?: { publicIP: string; countryCode: string } }
+export interface FleetSnapshot { overview: Overview; nodes: NodeItem[]; location?: { publicIP: string; countryCode: string }; probeNodes?: FleetProbeNode[] }
+export interface FleetProbeNode {
+  id: string
+  hostId: string
+  name: string
+  protocol: string
+  server: string
+  port: number
+  domain: string
+  shareUri: string
+  source: 'scan' | 'manual'
+  rawName: string
+  createdAt: string
+  updatedAt: string
+}
 export interface FleetHost {
   id: string; name: string; hostname: string; os: string; arch: string; serviceManager: string
   panelVersion: string; singBoxVersion: string; protocolVersion: number; capabilities: string[]
@@ -285,6 +299,10 @@ export const api = {
   createFleetEnrollment: (mode: 'panel' | 'probe' = 'panel') => request<{token: string; expiresAt: string; command: string}>(`fleet/enrollments?type=${mode}`, { method: 'POST', body: '{}' }, false),
   renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
   updateFleetHostSettings: (hostId: string, data: { billingResetDay: number; trafficQuotaBytes: number; trafficCalcMode: string; expiresAt: string }) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/quota`, { method: 'PUT', body: JSON.stringify(data) }, false),
+  getFleetProbeNodes: (hostId: string) => request<FleetProbeNode[]>(`fleet/hosts/${encodeURIComponent(hostId)}/probe-nodes`, {}, false),
+  createFleetProbeNode: (hostId: string, data: { shareUri: string; name?: string }) => request<FleetProbeNode | FleetProbeNode[]>(`fleet/hosts/${encodeURIComponent(hostId)}/probe-nodes`, { method: 'POST', body: JSON.stringify(data) }, false),
+  renameFleetProbeNode: (hostId: string, nodeId: string, name: string) => request<FleetProbeNode>(`fleet/hosts/${encodeURIComponent(hostId)}/probe-nodes/${encodeURIComponent(nodeId)}`, { method: 'PUT', body: JSON.stringify({ name }) }, false),
+  deleteFleetProbeNode: (hostId: string, nodeId: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/probe-nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' }, false),
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
 }

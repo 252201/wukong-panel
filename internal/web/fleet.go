@@ -115,6 +115,27 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 		if _, _, cachedAt, cacheErr := s.store.FleetSubscriptionCache(host.ID); cacheErr == nil {
 			host.SubscriptionCachedAt = cachedAt
 		}
+		if fleetHasCapability(host, "probe") {
+			pNodes, err := s.store.FleetProbeNodes(ctx, host.ID)
+			if err == nil {
+				host.Snapshot.ProbeNodes = pNodes
+				modelNodes := make([]model.Node, len(pNodes))
+				for j, pn := range pNodes {
+					modelNodes[j] = model.Node{
+						ID:         pn.ID,
+						Name:       pn.Name,
+						Protocol:   pn.Protocol,
+						Domain:     pn.Domain,
+						Server:     pn.Server,
+						ListenPort: pn.Port,
+						Status:     "active",
+					}
+				}
+				host.Snapshot.Nodes = modelNodes
+				host.Snapshot.Overview.NodeCount = len(modelNodes)
+				host.Snapshot.Overview.OnlineNodes = len(modelNodes)
+			}
+		}
 		if host.Archived {
 			archivedHosts = append(archivedHosts, host)
 		} else {
@@ -1142,6 +1163,29 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if fleetHasCapability(host, "probe") {
+			pNodes, err := s.store.FleetProbeNodes(r.Context(), host.ID)
+			if err != nil {
+				continue
+			}
+			for _, pn := range pNodes {
+				if hasNodeSelection && !wantedNodes[pn.ID] {
+					continue
+				}
+				entries = append(entries, fleetSubscriptionEntry{
+					Node: model.Node{
+						ID:         pn.ID,
+						Name:       host.Name + " · " + pn.Name,
+						Protocol:   pn.Protocol,
+						Domain:     pn.Domain,
+						Server:     pn.Server,
+						ListenPort: pn.Port,
+						Status:     "active",
+					},
+					Share: model.Share{
+						URI: pn.ShareURI,
+					},
+				})
+			}
 			continue
 		}
 		var cached []fleetSubscriptionEntry
