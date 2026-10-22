@@ -129,3 +129,36 @@ func TestScanXrayConfig(t *testing.T) {
 		t.Errorf("unexpected domain: %s", node.Domain)
 	}
 }
+
+func TestScanHysteria2YAML(t *testing.T) {
+	tempDir := t.TempDir()
+
+	hy2YAML := `
+listen: :44332
+tls:
+  cert: /etc/hysteria/server.crt
+  key: /etc/hysteria/server.key
+  sni: hy2-yaml.example.com
+auth:
+  type: password
+  password: my-yaml-secret
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "config.yaml"), []byte(hy2YAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes := ScanDirectories("198.51.100.9", tempDir)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	node := nodes[0]
+	if node.Protocol != "hysteria2" || node.Port != 44332 {
+		t.Fatalf("unexpected node: %+v", node)
+	}
+	if node.Domain != "hy2-yaml.example.com" {
+		t.Errorf("unexpected domain: %s", node.Domain)
+	}
+	if node.ShareURI == "" {
+		t.Errorf("missing share URI")
+	}
+}
