@@ -152,6 +152,14 @@ const mutationsDisabled = computed(() => remoteHost.value && (!currentFleetHost.
 const fleetHosts = computed(() => fleetStatus.value?.hosts || [])
 const remoteFleetHosts = computed(() => fleetHosts.value.filter(host => host.id !== 'local'))
 const isProbeHost = (host: FleetHost) => host.capabilities?.includes('probe') || false
+function fleetHostNodeSummary(host: FleetHost): string {
+  if (isProbeHost(host)) {
+    const total = (host.snapshot?.nodes || []).length || host.snapshot?.overview?.nodeCount || 0
+    const online = host.online ? ((host.snapshot?.nodes || []).length || host.snapshot?.overview?.onlineNodes || 0) : 0
+    return `${online}/${total}`
+  }
+  return `${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}`
+}
 const fleetAggregate = computed(() => summarizeFleet(fleetHosts.value))
 
 const trafficPercent = computed(() => {
@@ -1180,7 +1188,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.txBps || 0) : '0 B/s' }}</b></span>
                 </div>
-                <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ isProbeHost(host) ? ((host.snapshot?.nodes || []).length > 0 ? `轻量探针 (节点 ${host.snapshot?.nodes?.length})` : '轻量探针') : `节点 ${host.snapshot?.overview?.onlineNodes || 0}/${host.snapshot?.overview?.nodeCount || 0}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
+                <em><span class="fleet-host-status"><span class="fleet-node-summary">{{ `节点 ${fleetHostNodeSummary(host)}` }}</span><span class="fleet-online-state">· {{ host.online ? '在线' : '离线' }}</span></span><span class="fleet-uptime">运行：{{ uptime(host.snapshot?.overview?.now?.uptime) }}</span></em>
               </aside>
             </header>
             <div class="fleet-host-body">
