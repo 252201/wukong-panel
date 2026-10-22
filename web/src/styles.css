@@ -1033,8 +1033,20 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
-.fleet-network-heading { grid-column: 1 / -1; }
-.fleet-network-heading, .fleet-network-region {
+.fleet-network-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+.fleet-network-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fleet-network-region {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
