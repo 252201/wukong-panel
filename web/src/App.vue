@@ -1031,13 +1031,25 @@ function reputationBadgeText(host: FleetHost): string {
   const { v4, v6, state4, state6 } = hostReputationDual(host)
   if (!v4 && !v6) return 'IP检测'
 
-  const scores: number[] = []
-  if (state4?.report?.trust_score !== undefined) scores.push(state4.report.trust_score)
-  if (state6?.report?.trust_score !== undefined) scores.push(state6.report.trust_score)
+  const score4 = state4?.report?.trust_score
+  const score6 = state6?.report?.trust_score
 
-  if (scores.length > 0) {
-    return `${Math.min(...scores)}分`
+  if (score4 !== undefined && score6 !== undefined) {
+    return `v4:${score4}分 / v6:${score6}分`
   }
+  if (score4 !== undefined) {
+    if (v6 && state6?.loading && !state6?.report) {
+      return `v4:${score4}分 / v6:...`
+    }
+    return `v4:${score4}分`
+  }
+  if (score6 !== undefined) {
+    if (v4 && state4?.loading && !state4?.report) {
+      return `v4:... / v6:${score6}分`
+    }
+    return `v6:${score6}分`
+  }
+
   if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return '...'
   if (state4?.error || state6?.error) return '--分'
   return 'IP分'
