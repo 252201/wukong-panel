@@ -926,6 +926,31 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .fleet-host-reputation-badge span {
   white-space: nowrap;
 }
+.fleet-host-reputation-badge .rep-badge-content {
+  display: inline-flex;
+  align-items: center;
+}
+.fleet-host-reputation-badge .rep-lbl {
+  color: var(--muted);
+  font-weight: 500;
+}
+.fleet-host-reputation-badge .rep-slash {
+  color: var(--jade);
+  font-weight: 600;
+  margin: 0 3px;
+}
+.fleet-host-reputation-badge .rep-val {
+  font-weight: 600;
+}
+.fleet-host-reputation-badge .rep-val.score-high {
+  color: #34c759;
+}
+.fleet-host-reputation-badge .rep-val.score-medium {
+  color: #ea9932;
+}
+.fleet-host-reputation-badge .rep-val.score-low {
+  color: #e84545;
+}
 .fleet-host-reputation-badge:hover {
   background: rgba(var(--wash-rgb), 0.08);
   border-color: rgba(211, 169, 77, 0.4);

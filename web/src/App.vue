@@ -1027,6 +1027,70 @@ function reputationBadgeTitle(host: FleetHost): string {
   return lines.join('\n')
 }
 
+interface ReputationBadgePart {
+  mode: 'dual' | 'single' | 'text'
+  tag4?: string
+  score4?: string
+  class4?: string
+  tag6?: string
+  score6?: string
+  class6?: string
+  singleTag?: string
+  singleScore?: string
+  singleClass?: string
+  text?: string
+}
+
+function scoreColorClass(score: number | undefined): string {
+  if (score === undefined) return ''
+  if (score >= 80) return 'score-high'
+  if (score >= 50) return 'score-medium'
+  return 'score-low'
+}
+
+function reputationBadgeParts(host: FleetHost): ReputationBadgePart {
+  const { v4, v6, state4, state6 } = hostReputationDual(host)
+  if (!v4 && !v6) return { mode: 'text', text: 'IP检测' }
+
+  const score4 = state4?.report?.trust_score
+  const score6 = state6?.report?.trust_score
+
+  const s4Text = score4 !== undefined ? `${score4}分` : (v4 && state4?.loading && !state4?.report ? '...' : (v4 && state4?.error ? '--分' : ''))
+  const s6Text = score6 !== undefined ? `${score6}分` : (v6 && state6?.loading && !state6?.report ? '...' : (v6 && state6?.error ? '--分' : ''))
+
+  if (s4Text && s6Text) {
+    return {
+      mode: 'dual',
+      tag4: 'v4：',
+      score4: s4Text,
+      class4: scoreColorClass(score4),
+      tag6: 'v6：',
+      score6: s6Text,
+      class6: scoreColorClass(score6)
+    }
+  }
+  if (s4Text) {
+    return {
+      mode: 'single',
+      singleTag: 'v4：',
+      singleScore: s4Text,
+      singleClass: scoreColorClass(score4)
+    }
+  }
+  if (s6Text) {
+    return {
+      mode: 'single',
+      singleTag: 'v6：',
+      singleScore: s6Text,
+      singleClass: scoreColorClass(score6)
+    }
+  }
+
+  if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return { mode: 'text', text: '...' }
+  if (state4?.error || state6?.error) return { mode: 'text', text: '--分' }
+  return { mode: 'text', text: 'IP分' }
+}
+
 function reputationBadgeText(host: FleetHost): string {
   const { v4, v6, state4, state6 } = hostReputationDual(host)
   if (!v4 && !v6) return 'IP检测'
@@ -1035,19 +1099,19 @@ function reputationBadgeText(host: FleetHost): string {
   const score6 = state6?.report?.trust_score
 
   if (score4 !== undefined && score6 !== undefined) {
-    return `v4:${score4}分 / v6:${score6}分`
+    return `v4：${score4}分 / v6：${score6}分`
   }
   if (score4 !== undefined) {
     if (v6 && state6?.loading && !state6?.report) {
-      return `v4:${score4}分 / v6:...`
+      return `v4：${score4}分 / v6：...`
     }
-    return `v4:${score4}分`
+    return `v4：${score4}分`
   }
   if (score6 !== undefined) {
     if (v4 && state4?.loading && !state4?.report) {
-      return `v4:... / v6:${score6}分`
+      return `v4：... / v6：${score6}分`
     }
-    return `v6:${score6}分`
+    return `v6：${score6}分`
   }
 
   if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return '...'
@@ -1562,7 +1626,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <div v-if="isProbeHost(host)" class="fleet-resource fleet-resource-clickable" :title="language === 'en-US' ? 'Click to configure quota and VPS expiry' : '点击配置配额与到期时间'" @click="openFleetHostSettings(host)"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }} · {{ host.snapshot?.overview?.now?.interface || '—' }}</em></div><div v-else class="fleet-resource"><small>本账期流量</small><b :title="fleetBillingUsage(host.snapshot?.overview)">{{ fleetBillingUsage(host.snapshot?.overview) }}</b><em>{{ fleetBillingPercent(host.snapshot?.overview) }}</em></div>
               </section>
               <section class="fleet-host-network" aria-label="网络质量">
-                <div class="fleet-network-heading"><div class="fleet-network-title-wrap"><strong>网络质量</strong><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span>{{ reputationBadgeText(host) }}</span></button></div><small>ICMP · 近 30 分钟</small></div>
+                <div class="fleet-network-heading"><div class="fleet-network-title-wrap"><strong>网络质量</strong><button type="button" class="fleet-host-reputation-badge" :class="reputationBadgeClass(host)" :title="reputationBadgeTitle(host)" @click.stop="openReputationModal(host)"><i class="reputation-dot" aria-hidden="true"></i><span v-if="reputationBadgeParts(host).mode === 'dual'" class="rep-badge-content"><span class="rep-lbl">{{ reputationBadgeParts(host).tag4 }}</span><span class="rep-val" :class="reputationBadgeParts(host).class4">{{ reputationBadgeParts(host).score4 }}</span><span class="rep-slash">/</span><span class="rep-lbl">{{ reputationBadgeParts(host).tag6 }}</span><span class="rep-val" :class="reputationBadgeParts(host).class6">{{ reputationBadgeParts(host).score6 }}</span></span><span v-else-if="reputationBadgeParts(host).mode === 'single'" class="rep-badge-content"><span class="rep-lbl">{{ reputationBadgeParts(host).singleTag }}</span><span class="rep-val" :class="reputationBadgeParts(host).singleClass">{{ reputationBadgeParts(host).singleScore }}</span></span><span v-else>{{ reputationBadgeParts(host).text }}</span></button></div><small>ICMP · 近 30 分钟</small></div>
                 <div v-for="group in networkGroups" :key="group" class="fleet-network-group">
                   <div class="fleet-network-summary" :title="fleetNetworkHint(host, group)">
                     <div class="fleet-network-region"><strong>{{ networkGroupLabel(group) }}</strong><small>{{ fleetNetworkStateLabel(host, group) }}</small></div>
