@@ -112,7 +112,10 @@ test('getHostCandidateIPs discovers multiple interface IPv6 addresses and node p
       seen.add(clean)
       list.push({ ip: clean, label, kind, family: isIPv6(clean) ? 'v6' : 'v4' })
     }
-    if (host.snapshot?.location?.publicIP) addIP(host.snapshot.location.publicIP, '出口公网 IP', 'public')
+    if (host.snapshot?.location?.publicIP) {
+      const raw = host.snapshot.location.publicIP
+      addIP(raw, isIPv6(raw) ? '出口公网 IPv6' : '出口公网 IPv4', 'public')
+    }
     if (host.snapshot?.location?.ipv4) addIP(host.snapshot.location.ipv4, '出口公网 IPv4', 'public')
     if (host.snapshot?.location?.ipv6) addIP(host.snapshot.location.ipv6, '出口公网 IPv6', 'public')
     if (host.snapshot?.deploymentDefaults?.ipv4) {
@@ -129,7 +132,9 @@ test('getHostCandidateIPs discovers multiple interface IPv6 addresses and node p
         if (n.probeExitIp) addIP(n.probeExitIp, `节点出口: ${n.name}`, 'node')
       }
     }
-    return list
+    const v4List = list.filter(item => item.family === 'v4')
+    const v6List = list.filter(item => item.family === 'v6')
+    return [...v4List, ...v6List]
   }
 
   // Simulated host: ac (has 3 v6 on interface eth0)
@@ -151,6 +156,8 @@ test('getHostCandidateIPs discovers multiple interface IPv6 addresses and node p
   }
 
   const acCandidates = getHostCandidateIPs(acHost)
+  assert.equal(acCandidates[0].ip, '23.246.167.100', 'IPv4 must be sorted first')
+  assert.equal(acCandidates[0].family, 'v4', 'first candidate must be IPv4')
   const acV6s = acCandidates.filter(c => c.family === 'v6')
   assert.equal(acV6s.length, 3, 'all 3 IPv6 addresses on ac must be discovered')
   assert(acV6s.some(c => c.ip === '2600:1700:443:580f:a::3188'))

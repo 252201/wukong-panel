@@ -839,7 +839,8 @@ function getHostCandidateIPs(host: FleetHost | null) {
   }
 
   if (host.snapshot?.location?.publicIP) {
-    addIP(host.snapshot.location.publicIP, '出口公网 IP', 'public')
+    const raw = host.snapshot.location.publicIP
+    addIP(raw, isIPv6(raw) ? '出口公网 IPv6' : '出口公网 IPv4', 'public')
   }
   if (host.snapshot?.location?.ipv4) {
     addIP(host.snapshot.location.ipv4, '出口公网 IPv4', 'public')
@@ -872,7 +873,9 @@ function getHostCandidateIPs(host: FleetHost | null) {
       if (p.domain) addIP(p.domain, `轻量解析: ${p.name || p.rawName || '节点'}`, 'probe')
     }
   }
-  return list
+  const v4List = list.filter(item => item.family === 'v4')
+  const v6List = list.filter(item => item.family === 'v6')
+  return [...v4List, ...v6List]
 }
 
 const reputationCandidateIPs = computed(() => getHostCandidateIPs(reputationModalHost.value))
@@ -1820,7 +1823,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <p>管理轻量探针上的代理节点，修改节点名称，或手动录入节点。这些节点均可纳入全局订阅范围。</p>
       <div class="fleet-host-action-target">
         <small>目标主机</small><b>{{ probeNodesTarget.name }}</b>
-        <span>{{ probeNodesTarget.hostname || probeNodesTarget.id }} · {{ probeNodesTarget.online ? '● 在线' : '○ 离线' }} · 节点数：{{ probeNodesList.length }}</span>
+        <span>{{ probeNodesTarget.hostname || probeNodesTarget.id }} · <span class="host-online-tag" :class="{ online: probeNodesTarget.online }">{{ probeNodesTarget.online ? '● 在线' : '○ 离线' }}</span> · 节点数：{{ probeNodesList.length }}</span>
       </div>
 
       <div class="probe-nodes-list-section">
@@ -1896,7 +1899,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <div v-if="reputationModalHost" class="fleet-host-action-target">
         <small>关联主机</small><b>{{ reputationModalHost.name }}</b>
-        <span>{{ reputationModalHost.hostname || reputationModalHost.id }} · {{ reputationModalHost.online ? '● 在线' : '○ 离线' }} · {{ reputationModalHost.os || 'Linux' }}</span>
+        <span>{{ reputationModalHost.hostname || reputationModalHost.id }} · <span class="host-online-tag" :class="{ online: reputationModalHost.online }">{{ reputationModalHost.online ? '● 在线' : '○ 离线' }}</span> · {{ reputationModalHost.os || 'Linux' }}</span>
       </div>
 
       <!-- Quick Chips: Detected Host IPs -->
