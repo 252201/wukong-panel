@@ -888,6 +888,8 @@ const reputationStateIPv6 = computed(() => {
   return ip ? ipReputationCache[ip] : undefined
 })
 
+const IP_REPUTATION_CACHE_TTL = 24 * 3600_000 // 自动检测周期与本地缓存有效期设为 24 小时
+
 function getCachedReputation(ip: string): IPReputationReport | null {
   const clean = ip.trim().replace(/^\[|\]$/g, '')
   if (!clean) return null
@@ -895,7 +897,7 @@ function getCachedReputation(ip: string): IPReputationReport | null {
     const raw = localStorage.getItem(`wukong_ip_rep_${clean}`)
     if (raw) {
       const data = JSON.parse(raw)
-      if (data && typeof data === 'object' && Date.now() - (data._savedAt || 0) < 3600_000) {
+      if (data && typeof data === 'object' && Date.now() - (data._savedAt || 0) < IP_REPUTATION_CACHE_TTL) {
         return data.report as IPReputationReport
       }
     }
@@ -924,7 +926,7 @@ async function loadReputation(ip: string, force = false): Promise<IPReputationRe
 
   const existing = ipReputationCache[clean]
   if (!force) {
-    if (existing?.report && Date.now() - existing.fetchedAt < 3600_000) {
+    if (existing?.report && Date.now() - existing.fetchedAt < IP_REPUTATION_CACHE_TTL) {
       return existing.report
     }
     const local = getCachedReputation(clean)
@@ -2275,7 +2277,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       </div>
 
       <div class="modal-actions ip-rep-actions">
-        <small class="ip-rep-source">数据来源：Net.Coffee IP 威胁情报引擎 · 双栈结果自动本地缓存 1 小时</small>
+        <small class="ip-rep-source">数据来源：Net.Coffee IP 威胁情报引擎 · 双栈结果自动本地缓存 24 小时</small>
         <button type="button" class="secondary" @click="modal = null">关闭</button>
       </div>
     </div>
