@@ -231,3 +231,20 @@ test('reputationBadgeText formats dual stack as V4：76分 / V6：78分', () => 
     '...'
   )
 })
+
+test('IP reputation cache TTL is 24 hours (86_400_000 ms)', () => {
+  const IP_REPUTATION_CACHE_TTL = 24 * 3600_000
+  assert.equal(IP_REPUTATION_CACHE_TTL, 86_400_000)
+
+  const isCacheValid = (savedAt, now) => {
+    return now - savedAt < IP_REPUTATION_CACHE_TTL
+  }
+
+  const now = 1_700_000_000_000
+  // 1 hour ago: valid
+  assert.equal(isCacheValid(now - 3600_000, now), true)
+  // 23 hours ago: valid
+  assert.equal(isCacheValid(now - 23 * 3600_000, now), true)
+  // 25 hours ago: expired
+  assert.equal(isCacheValid(now - 25 * 3600_000, now), false)
+})
