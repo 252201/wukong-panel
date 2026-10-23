@@ -740,6 +740,83 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .fleet-probe-result,
 :root[data-effective-theme="light"] .fleet-scope-hosts > article { background: #f6f8f7; }
 
+/* Light theme overrides for IP reputation modal & probe nodes modal */
+:root[data-effective-theme="light"] .ip-chip {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.1);
+}
+:root[data-effective-theme="light"] .ip-chip:hover {
+  background: #f8faf9;
+  border-color: var(--gold);
+}
+:root[data-effective-theme="light"] .ip-chip.active {
+  background: rgba(242, 138, 11, 0.08);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+:root[data-effective-theme="light"] .ip-rep-dual-search {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.08);
+}
+:root[data-effective-theme="light"] .input-with-tag {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.15);
+  box-shadow: inset 0 1px 2px rgba(24, 32, 45, 0.02);
+}
+:root[data-effective-theme="light"] .input-with-tag:focus-within {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(242, 138, 11, 0.15);
+}
+:root[data-effective-theme="light"] .input-family-tag {
+  background: #f2f4f4;
+  border-right-color: rgba(24, 32, 45, 0.1);
+}
+:root[data-effective-theme="light"] .ip-rep-stack-column {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.08);
+  box-shadow: 0 1px 3px rgba(25, 35, 45, 0.03);
+}
+:root[data-effective-theme="light"] .stack-column-header {
+  border-bottom-color: rgba(24, 32, 45, 0.08);
+}
+:root[data-effective-theme="light"] .ip-rep-score-ring {
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(25, 35, 45, 0.05);
+}
+:root[data-effective-theme="light"] .ip-rep-card {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.08);
+}
+:root[data-effective-theme="light"] .ip-rep-meta-list {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.08);
+}
+:root[data-effective-theme="light"] .probe-nodes-list-section {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.08);
+  border-radius: 6px;
+}
+:root[data-effective-theme="light"] .probe-node-item {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.08);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(25, 35, 45, 0.02);
+}
+:root[data-effective-theme="light"] .probe-nodes-hint-box {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.15);
+}
+:root[data-effective-theme="light"] .probe-share-input {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.15);
+}
+:root[data-effective-theme="light"] .mini-btn {
+  border-color: rgba(24, 32, 45, 0.16);
+}
+:root[data-effective-theme="light"] .mini-btn:hover {
+  background: #f2f4f4;
+}
+
 :root[lang="en-US"] .sidebar nav button span { font-size: 13px; letter-spacing: -.01em; }
 :root[lang="en-US"] .device-entry b,
 :root[lang="en-US"] .primary,
