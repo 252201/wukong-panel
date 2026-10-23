@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/252201/wukong-panel/internal/hostlocation"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/singboxconfig"
@@ -172,6 +173,14 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	if s.hostLocation != nil {
 		local.Snapshot.Location = s.hostLocation.Current()
 	}
+	if s.agent != nil {
+		if defaults, err := s.agent.DeploymentDefaults(ctx); err == nil {
+			local.Snapshot.DeploymentDefaults = defaults
+		}
+	}
+	v4, v6 := hostlocation.GetInterfaceAddresses()
+	local.Snapshot.DeploymentDefaults.IPv4 = hostlocation.MergeBindAddresses(local.Snapshot.DeploymentDefaults.IPv4, v4)
+	local.Snapshot.DeploymentDefaults.IPv6 = hostlocation.MergeBindAddresses(local.Snapshot.DeploymentDefaults.IPv6, v6)
 	if source, ok := s.agent.(networkHealthAgent); ok {
 		local.Snapshot.Overview.Network, _ = source.NetworkHealth(ctx)
 	}

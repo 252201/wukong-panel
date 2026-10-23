@@ -278,6 +278,9 @@ func (c *FleetConnector) snapshot(ctx context.Context, full bool) (model.FleetSn
 	jobs, _ := c.store.Jobs(30)
 	settings.SubscriptionToken = ""
 	defaults, _ := c.manager.DeploymentDefaults(ctx)
+	v4, v6 := hostlocation.GetInterfaceAddresses()
+	defaults.IPv4 = hostlocation.MergeBindAddresses(defaults.IPv4, v4)
+	defaults.IPv6 = hostlocation.MergeBindAddresses(defaults.IPv6, v6)
 	residential, _ := c.manager.ResidentialExit(ctx)
 	residential.InstallScript = ""
 	socks, _ := c.manager.SOCKSExit(ctx)
