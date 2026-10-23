@@ -192,7 +192,18 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 		serverHost = c.Config.HostName
 	}
 	scannedNodes := ScanDirectories(serverHost)
-	snapshot := model.FleetSnapshot{Full: true, Overview: model.Overview{Now: now, Network: c.Network.Current()}, Location: c.Location.Current(), Nodes: []model.Node{}, ProbeNodes: scannedNodes}
+	v4, v6 := hostlocation.GetInterfaceAddresses()
+	snapshot := model.FleetSnapshot{
+		Full:     true,
+		Overview: model.Overview{Now: now, Network: c.Network.Current()},
+		Location: c.Location.Current(),
+		Nodes:    []model.Node{},
+		ProbeNodes: scannedNodes,
+		DeploymentDefaults: model.NodeDeploymentDefaults{
+			IPv4: v4,
+			IPv6: v6,
+		},
+	}
 	heartbeat := model.FleetHeartbeat{ProtocolVersion: model.FleetProtocolVersion, PanelVersion: c.Version, Capabilities: Capabilities, Snapshot: snapshot}
 	body, _ := json.Marshal(heartbeat)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Config.ControllerURL+"api/v1/fleet/agent/heartbeat", bytes.NewReader(body))

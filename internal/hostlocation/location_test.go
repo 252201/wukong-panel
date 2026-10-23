@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/252201/wukong-panel/internal/model"
 )
 
 func TestParseTrace(t *testing.T) {
@@ -30,6 +32,39 @@ func TestParseTrace(t *testing.T) {
 				t.Fatalf("country code=%q", location.CountryCode)
 			}
 		})
+	}
+}
+
+func TestParseTraceIPAndPlain(t *testing.T) {
+	ip, country, err := parseTraceIP(strings.NewReader("ip=1.1.1.1\nloc=T1\n"))
+	if err != nil || ip != "1.1.1.1" || country != "T1" {
+		t.Fatalf("unexpected parseTraceIP: ip=%s, country=%s, err=%v", ip, country, err)
+	}
+
+	plain, err := parsePlainIP(" 2606:4700:4700::1111 \n")
+	if err != nil || plain != "2606:4700:4700::1111" {
+		t.Fatalf("unexpected parsePlainIP: plain=%s, err=%v", plain, err)
+	}
+
+	_, err = parsePlainIP("10.0.0.1")
+	if err == nil {
+		t.Fatal("expected error for private IP in parsePlainIP")
+	}
+}
+
+func TestMergeBindAddresses(t *testing.T) {
+	a := []model.BindAddress{
+		{Address: "1.1.1.1", Interface: "eth0"},
+		{Address: "2600::1", Interface: "eth0"},
+	}
+	b := []model.BindAddress{
+		{Address: "1.1.1.1", Interface: "eth0"},
+		{Address: "2600::2", Interface: "eth0"},
+		{Address: "2600::3", Interface: "wg0"},
+	}
+	merged := MergeBindAddresses(a, b)
+	if len(merged) != 4 {
+		t.Fatalf("expected 4 merged addresses, got %d: %+v", len(merged), merged)
 	}
 }
 

@@ -804,15 +804,21 @@ function getHostDualStackIPs(host: FleetHost | null) {
     for (const n of host.snapshot.nodes) {
       if (!v4 && n.server && isIPv4(n.server) && isPublicIP(n.server)) v4 = n.server
       if (!v4 && n.ipv4Bind && isIPv4(n.ipv4Bind) && isPublicIP(n.ipv4Bind)) v4 = n.ipv4Bind
+      if (!v4 && n.probeExitIp && isIPv4(n.probeExitIp) && isPublicIP(n.probeExitIp)) v4 = n.probeExitIp
+      if (!v4 && n.preferredServer && isIPv4(n.preferredServer) && isPublicIP(n.preferredServer)) v4 = n.preferredServer
       if (!v6 && n.server && isIPv6(n.server) && isPublicIP(n.server)) v6 = n.server
       if (!v6 && n.ipv6Bind && isIPv6(n.ipv6Bind) && isPublicIP(n.ipv6Bind)) v6 = n.ipv6Bind
+      if (!v6 && n.probeExitIp && isIPv6(n.probeExitIp) && isPublicIP(n.probeExitIp)) v6 = n.probeExitIp
+      if (!v6 && n.preferredServer && isIPv6(n.preferredServer) && isPublicIP(n.preferredServer)) v6 = n.preferredServer
     }
   }
 
   if (host.snapshot?.probeNodes) {
     for (const p of host.snapshot.probeNodes) {
       if (!v4 && p.server && isIPv4(p.server) && isPublicIP(p.server)) v4 = p.server
+      if (!v4 && p.domain && isIPv4(p.domain) && isPublicIP(p.domain)) v4 = p.domain
       if (!v6 && p.server && isIPv6(p.server) && isPublicIP(p.server)) v6 = p.server
+      if (!v6 && p.domain && isIPv6(p.domain) && isPublicIP(p.domain)) v6 = p.domain
     }
   }
 
@@ -856,11 +862,14 @@ function getHostCandidateIPs(host: FleetHost | null) {
       if (n.server) addIP(n.server, `节点: ${n.name}`, 'node')
       if (n.ipv4Bind) addIP(n.ipv4Bind, `绑定: ${n.name}`, 'node')
       if (n.ipv6Bind) addIP(n.ipv6Bind, `绑定: ${n.name}`, 'node')
+      if (n.probeExitIp) addIP(n.probeExitIp, `节点出口: ${n.name}`, 'node')
+      if (n.preferredServer) addIP(n.preferredServer, `节点解析: ${n.name}`, 'node')
     }
   }
   if (host.snapshot?.probeNodes) {
     for (const p of host.snapshot.probeNodes) {
       if (p.server) addIP(p.server, `轻量节点: ${p.name || p.rawName || '节点'}`, 'probe')
+      if (p.domain) addIP(p.domain, `轻量解析: ${p.name || p.rawName || '节点'}`, 'probe')
     }
   }
   return list
