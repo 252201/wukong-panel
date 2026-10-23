@@ -1061,10 +1061,10 @@ function reputationBadgeParts(host: FleetHost): ReputationBadgePart {
   if (s4Text && s6Text) {
     return {
       mode: 'dual',
-      tag4: 'v4：',
+      tag4: 'V4：',
       score4: s4Text,
       class4: scoreColorClass(score4),
-      tag6: 'v6：',
+      tag6: 'V6：',
       score6: s6Text,
       class6: scoreColorClass(score6)
     }
@@ -1072,7 +1072,7 @@ function reputationBadgeParts(host: FleetHost): ReputationBadgePart {
   if (s4Text) {
     return {
       mode: 'single',
-      singleTag: 'v4：',
+      singleTag: 'V4：',
       singleScore: s4Text,
       singleClass: scoreColorClass(score4)
     }
@@ -1080,7 +1080,7 @@ function reputationBadgeParts(host: FleetHost): ReputationBadgePart {
   if (s6Text) {
     return {
       mode: 'single',
-      singleTag: 'v6：',
+      singleTag: 'V6：',
       singleScore: s6Text,
       singleClass: scoreColorClass(score6)
     }
@@ -1099,19 +1099,19 @@ function reputationBadgeText(host: FleetHost): string {
   const score6 = state6?.report?.trust_score
 
   if (score4 !== undefined && score6 !== undefined) {
-    return `v4：${score4}分 / v6：${score6}分`
+    return `V4：${score4}分 / V6：${score6}分`
   }
   if (score4 !== undefined) {
     if (v6 && state6?.loading && !state6?.report) {
-      return `v4：${score4}分 / v6：...`
+      return `V4：${score4}分 / V6：...`
     }
-    return `v4：${score4}分`
+    return `V4：${score4}分`
   }
   if (score6 !== undefined) {
     if (v4 && state4?.loading && !state4?.report) {
-      return `v4：... / v6：${score6}分`
+      return `V4：... / V6：${score6}分`
     }
-    return `v6：${score6}分`
+    return `V6：${score6}分`
   }
 
   if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return '...'
