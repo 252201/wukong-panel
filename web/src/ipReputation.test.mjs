@@ -183,3 +183,51 @@ test('getHostCandidateIPs discovers multiple interface IPv6 addresses and node p
   assert(frogV4, 'public IPv4 probeExitIp must be discovered')
   assert.equal(frogV4.ip, '65.108.71.229')
 })
+
+test('reputationBadgeText formats dual stack as v4:76分 / v6:78分', () => {
+  const formatBadge = (v4, v6, state4, state6) => {
+    if (!v4 && !v6) return 'IP检测'
+    const score4 = state4?.report?.trust_score
+    const score6 = state6?.report?.trust_score
+
+    if (score4 !== undefined && score6 !== undefined) {
+      return `v4:${score4}分 / v6:${score6}分`
+    }
+    if (score4 !== undefined) {
+      if (v6 && state6?.loading && !state6?.report) {
+        return `v4:${score4}分 / v6:...`
+      }
+      return `v4:${score4}分`
+    }
+    if (score6 !== undefined) {
+      if (v4 && state4?.loading && !state4?.report) {
+        return `v4:... / v6:${score6}分`
+      }
+      return `v6:${score6}分`
+    }
+    if ((state4?.loading && !state4?.report) || (state6?.loading && !state6?.report)) return '...'
+    if (state4?.error || state6?.error) return '--分'
+    return 'IP分'
+  }
+
+  assert.equal(
+    formatBadge('23.246.167.100', '2602:faa8:502:5a::a', { report: { trust_score: 76 } }, { report: { trust_score: 78 } }),
+    'v4:76分 / v6:78分'
+  )
+  assert.equal(
+    formatBadge('23.246.167.100', '', { report: { trust_score: 76 } }, null),
+    'v4:76分'
+  )
+  assert.equal(
+    formatBadge('', '2602:faa8:502:5a::a', null, { report: { trust_score: 78 } }),
+    'v6:78分'
+  )
+  assert.equal(
+    formatBadge('23.246.167.100', '2602:faa8:502:5a::a', { report: { trust_score: 76 } }, { loading: true }),
+    'v4:76分 / v6:...'
+  )
+  assert.equal(
+    formatBadge('23.246.167.100', '2602:faa8:502:5a::a', { loading: true }, { loading: true }),
+    '...'
+  )
+})
