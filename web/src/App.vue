@@ -13,6 +13,7 @@ import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
 import { fleetHostRateHint, networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
+import { realityPresets, flattenRealityPresets, findRealityPreset } from './realityPresets'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -330,9 +331,21 @@ const protocolCatalog = {
   trojan: { badge: 'TROJAN', label: 'Trojan TLS', transport: 'TCP', domainLabel: 'TLS 域名', note: '基于标准 TLS 的 TCP 兼容节点。' },
   anytls: { badge: 'ANYTLS', label: 'AnyTLS', transport: 'TCP', domainLabel: 'TLS 域名', note: '基于标准 TLS 的复用与填充协议，适合 UDP 受限网络。' },
 } as const
-function protocolInfo(protocol: string) { return protocolCatalog[protocol as keyof typeof protocolCatalog] || protocolCatalog.hysteria2 }
+const protocolInfo = (protocol: string) => protocolCatalog[protocol as keyof typeof protocolCatalog] || protocolCatalog.hysteria2
 const selectedProtocolInfo = computed(() => protocolInfo(createForm.protocol))
 const isTunnelProtocol = computed(() => createForm.protocol === 'vless-ws-tunnel')
+
+const flattenedRealityPresets = computed(() => flattenRealityPresets(realityPresets))
+const activeRealityPreset = computed(() => findRealityPreset(createForm.domain, realityPresets))
+function selectRealityPreset(e: Event) {
+  const target = e.target as HTMLSelectElement
+  if (target && target.value && target.value !== '__custom__') {
+    createForm.domain = target.value
+  }
+}
+function setRealityDomain(domain: string) {
+  createForm.domain = domain
+}
 
 function bytes(value = 0, fractionDigits?: number) {
   if (!Number.isFinite(value)) return '—'
@@ -1826,7 +1839,68 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <label>出站策略<input v-if="createForm.egress === 'socks'" value="由 SOCKS 代理接管" disabled><select v-else v-model="createForm.mode" :disabled="createForm.egress === 'residential'"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
         <label v-if="!deviceMode">{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
         <label v-if="!isTunnelProtocol || !deviceMode">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
-        <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol">{{ selectedProtocolInfo.domainLabel }}<input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"><small v-if="createForm.protocol === 'vless'">默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点</small><small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small></label>
+        <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="domain-input-group">
+          <span v-if="createForm.protocol !== 'vless'">{{ selectedProtocolInfo.domainLabel }}</span>
+          <div v-else class="field-title-row">
+            <span>{{ selectedProtocolInfo.domainLabel }}</span>
+            <select
+              class="reality-quick-select"
+              :value="activeRealityPreset ? activeRealityPreset.domain : ''"
+              title="快速选用推荐伪装域名"
+              @change="selectRealityPreset"
+            >
+              <option value="" disabled>✨ 快捷选用推荐域名…</option>
+              <optgroup v-for="cat in realityPresets" :key="cat.category" :label="cat.category">
+                <option v-for="item in cat.items" :key="item.domain" :value="item.domain">
+                  {{ item.title }} · {{ item.domain }}
+                </option>
+              </optgroup>
+              <option v-if="!activeRealityPreset && createForm.domain" value="__custom__">
+                自定义域名：{{ createForm.domain }}
+              </option>
+            </select>
+          </div>
+          <input
+            v-model="createForm.domain"
+            :list="createForm.protocol === 'vless' ? 'reality-domain-presets' : undefined"
+            :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <datalist v-if="createForm.protocol === 'vless'" id="reality-domain-presets">
+            <option v-for="item in flattenedRealityPresets" :key="item.domain" :value="item.domain">
+              {{ item.category }} · {{ item.title }}
+            </option>
+          </datalist>
+          <div v-if="createForm.protocol === 'vless'" class="reality-preset-chips" role="group" aria-label="推荐伪装域名">
+            <button
+              v-for="item in flattenedRealityPresets"
+              :key="item.domain"
+              type="button"
+              class="reality-chip"
+              :class="{ active: createForm.domain.trim().toLowerCase() === item.domain.toLowerCase() }"
+              :title="`${item.category} · ${item.title}：${item.desc}`"
+              @click="setRealityDomain(item.domain)"
+            >
+              <span class="reality-chip-title">{{ item.title }}</span>
+              <span class="reality-chip-domain">{{ item.domain }}</span>
+            </button>
+          </div>
+          <small v-if="createForm.protocol === 'vless'" class="reality-desc">
+            <template v-if="activeRealityPreset">
+              <span class="reality-badge">{{ activeRealityPreset.category }}</span>
+              {{ activeRealityPreset.desc }}
+            </template>
+            <template v-else-if="createForm.domain">
+              <span class="reality-badge custom">自定义</span>
+              客户端与 VPS 均可达的 TLS 1.3 站点（已填入自定义域名）
+            </template>
+            <template v-else>
+              默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点
+            </template>
+          </small>
+          <small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small>
+        </label>
         <label v-if="isTunnelProtocol && !deviceMode">WebSocket 路径<input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off"><small>自定义时必须以 / 开头</small></label>
         <label v-if="isTunnelProtocol && !deviceMode" class="span-2 preferred-endpoint-field"><span>优选连接域名 / IP <em>OPTIONAL</em></span><input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false"><small>只替换客户端 server；TLS SNI、WebSocket Host 与 Tunnel 路由仍使用上方 Cloudflare 节点域名。留空则保持标准 Anycast 接入。</small></label>
         <label v-if="isTunnelProtocol && !isEditing" class="span-2 tunnel-token-field">{{ deviceMode ? '共享 Tunnel Token' : 'Tunnel Token' }}<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>{{ deviceMode ? '整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口' : '仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key' }}</small></label>
