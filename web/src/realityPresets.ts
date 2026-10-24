@@ -22,7 +22,6 @@ export const realityPresets: RealityPresetCategory[] = [
     category: 'Microsoft 系',
     items: [
       { domain: 'learn.microsoft.com', title: '微软技术文档', desc: '微软官方技术文档站点，大流量访问自然，适合长期稳定连接。' },
-      { domain: 'dl.delivery.mp.microsoft.com', title: 'Windows Update 分发', desc: '微软补丁与应用交付分发，支持大流量传输，即使跑满带宽也不违和。' },
     ],
   },
   {
