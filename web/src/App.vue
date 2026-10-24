@@ -339,8 +339,9 @@ const flattenedRealityPresets = computed(() => flattenRealityPresets(realityPres
 const activeRealityPreset = computed(() => findRealityPreset(createForm.domain, realityPresets))
 function selectRealityPreset(e: Event) {
   const target = e.target as HTMLSelectElement
-  if (target && target.value && target.value !== '__custom__') {
+  if (target && target.value) {
     createForm.domain = target.value
+    target.value = ''
   }
 }
 
@@ -1842,33 +1843,24 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <span>{{ selectedProtocolInfo.domainLabel }}</span>
             <select
               class="reality-quick-select"
-              :value="activeRealityPreset ? activeRealityPreset.domain : ''"
+              value=""
               title="快速选用推荐伪装域名"
               @change="selectRealityPreset"
             >
-              <option value="" disabled>✨ 快捷选用推荐域名…</option>
+              <option value="" disabled selected>快捷选用推荐域名</option>
               <optgroup v-for="cat in realityPresets" :key="cat.category" :label="cat.category">
                 <option v-for="item in cat.items" :key="item.domain" :value="item.domain">
                   {{ item.title }} · {{ item.domain }}
                 </option>
               </optgroup>
-              <option v-if="!activeRealityPreset && createForm.domain" value="__custom__">
-                自定义域名：{{ createForm.domain }}
-              </option>
             </select>
           </div>
           <input
             v-model="createForm.domain"
-            :list="createForm.protocol === 'vless' ? 'reality-domain-presets' : undefined"
             :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"
             autocomplete="off"
             spellcheck="false"
           >
-          <datalist v-if="createForm.protocol === 'vless'" id="reality-domain-presets">
-            <option v-for="item in flattenedRealityPresets" :key="item.domain" :value="item.domain">
-              {{ item.category }} · {{ item.title }}
-            </option>
-          </datalist>
           <small v-if="createForm.protocol === 'vless'" class="reality-desc">
             <template v-if="activeRealityPreset">
               <span class="reality-badge">{{ activeRealityPreset.category }}</span>

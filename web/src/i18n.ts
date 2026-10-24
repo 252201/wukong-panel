@@ -443,6 +443,7 @@ const english: Record<string, string> = {
   '已采用面板域名，可按节点需要修改': 'Using the panel domain; change it if this node requires another value',
   'TLS 域名': 'TLS domain',
   'REALITY 伪装域名': 'REALITY camouflage domain',
+  '快捷选用推荐域名': 'Quick preset camouflage domains',
   '✨ 快捷选用推荐域名…': 'Quick preset camouflage domains…',
   '快速选用推荐伪装域名': 'Quick preset camouflage domains',
   '推荐伪装域名': 'Preset camouflage domains',

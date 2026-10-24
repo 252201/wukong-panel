@@ -10,14 +10,13 @@ test('realityPresets contains all required categories and domains from requireme
   assert.ok(categories.includes('Cloudflare'))
 
   const flattened = flattenRealityPresets(realityPresets)
-  assert.equal(flattened.length, 9)
+  assert.equal(flattened.length, 8)
 
   const expectedDomains = [
     'swdist.apple.com',
     'itunes.apple.com',
     'mensura.cdn-apple.com',
     'learn.microsoft.com',
-    'dl.delivery.mp.microsoft.com',
     's0.awsstatic.com',
     'd1.awsstatic.com',
     'aws.amazon.com',
