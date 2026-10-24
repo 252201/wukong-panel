@@ -826,32 +826,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   color: #1f2937;
   background: #ffffff;
 }
-:root[data-effective-theme="light"] .reality-chip {
-  border-color: #e5e7eb;
-  background: #f9fafb;
-  color: #1f2937;
-}
-:root[data-effective-theme="light"] .reality-chip:hover {
-  border-color: #d4ad57;
-  background: #fffdf7;
-}
-:root[data-effective-theme="light"] .reality-chip.active {
-  border-color: #b88e28;
-  background: #fef8eb;
-  box-shadow: inset 0 0 0 1px #b88e28, 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-:root[data-effective-theme="light"] .reality-chip-title {
-  color: #6b7280;
-}
-:root[data-effective-theme="light"] .reality-chip.active .reality-chip-title {
-  color: #8c6d1f;
-}
-:root[data-effective-theme="light"] .reality-chip-domain {
-  color: #374151;
-}
-:root[data-effective-theme="light"] .reality-chip.active .reality-chip-domain {
-  color: #78580f;
-}
 :root[data-effective-theme="light"] .reality-desc {
   color: #4b5563;
 }
@@ -872,14 +846,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .reality-quick-select:hover { border-color: var(--gold); background: rgba(212, 173, 87, 0.14); }
 .reality-quick-select:focus { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); outline: none; }
 .reality-quick-select option, .reality-quick-select optgroup { color: var(--paper); background: var(--surface-input); }
-.reality-preset-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 6px; margin-top: 6px; }
-.reality-chip { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 6px 8px; border: 1px solid rgba(var(--wash-rgb), 0.1); background: rgba(var(--wash-rgb), 0.03); color: var(--paper); border-radius: 3px; cursor: pointer; text-align: left; transition: all .18s ease; }
-.reality-chip:hover { border-color: rgba(212, 173, 87, 0.45); background: rgba(212, 173, 87, 0.08); }
-.reality-chip.active { border-color: var(--gold); background: rgba(212, 173, 87, 0.16); box-shadow: inset 0 0 0 1px var(--gold), 0 2px 6px rgba(0, 0, 0, 0.25); }
-.reality-chip-title { font-size: 10px; font-weight: 600; color: var(--muted); margin-bottom: 2px; line-height: 1.2; }
-.reality-chip.active .reality-chip-title { color: var(--gold-bright); }
-.reality-chip-domain { font: 500 10px/1.2 "IBM Plex Mono", monospace; color: var(--paper); word-break: break-all; }
-.reality-chip.active .reality-chip-domain { color: var(--gold-bright); font-weight: 600; }
 .reality-desc { display: flex; align-items: baseline; gap: 6px; margin-top: 5px; line-height: 1.5; color: var(--muted-2); font-size: 11px; }
 .reality-badge { display: inline-block; padding: 1px 5px; font-size: 9px; font-weight: 700; border-radius: 2px; background: rgba(212, 173, 87, 0.15); color: var(--gold); border: 1px solid rgba(212, 173, 87, 0.3); flex-shrink: 0; }
 .reality-badge.custom { background: rgba(var(--wash-rgb), 0.08); color: var(--muted); border-color: rgba(var(--wash-rgb), 0.2); }

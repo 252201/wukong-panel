@@ -343,9 +343,6 @@ function selectRealityPreset(e: Event) {
     createForm.domain = target.value
   }
 }
-function setRealityDomain(domain: string) {
-  createForm.domain = domain
-}
 
 function bytes(value = 0, fractionDigits?: number) {
   if (!Number.isFinite(value)) return '—'
@@ -1872,20 +1869,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               {{ item.category }} · {{ item.title }}
             </option>
           </datalist>
-          <div v-if="createForm.protocol === 'vless'" class="reality-preset-chips" role="group" aria-label="推荐伪装域名">
-            <button
-              v-for="item in flattenedRealityPresets"
-              :key="item.domain"
-              type="button"
-              class="reality-chip"
-              :class="{ active: createForm.domain.trim().toLowerCase() === item.domain.toLowerCase() }"
-              :title="`${item.category} · ${item.title}：${item.desc}`"
-              @click="setRealityDomain(item.domain)"
-            >
-              <span class="reality-chip-title">{{ item.title }}</span>
-              <span class="reality-chip-domain">{{ item.domain }}</span>
-            </button>
-          </div>
           <small v-if="createForm.protocol === 'vless'" class="reality-desc">
             <template v-if="activeRealityPreset">
               <span class="reality-badge">{{ activeRealityPreset.category }}</span>
