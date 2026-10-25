@@ -35,11 +35,14 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertScopes([path], "installers")
 
-    def test_docs_and_posters_need_no_business_tests(self):
-        self.assertScopes(["README.md", "docs/host-security.md", "assets/poster.jpg"])
+    def test_docs_and_repo_metadata_need_no_business_tests(self):
+        self.assertScopes(["README.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore", "docs/host-security.md", "assets/poster.jpg"])
+
+    def test_repo_metadata_with_frontend_only_runs_frontend(self):
+        self.assertScopes([".gitignore", "web/src/App.vue", "internal/web/dist/index.html"], "frontend")
 
     def test_unknown_inputs_toolchain_and_ci_expand_to_all(self):
-        for path in ("go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", "scripts/ci_scope.py", "scripts/ci_scope_test.py", "scripts/build-release.sh", ".gitignore", "new-build-tool", "internal/newshared/helper.go"):
+        for path in ("go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", "scripts/ci_scope.py", "scripts/ci_scope_test.py", "scripts/build-release.sh", "new-build-tool", "internal/newshared/helper.go"):
             with self.subTest(path=path):
                 self.assertScopes([path], *SCOPES)
         self.assertScopes([], *SCOPES)

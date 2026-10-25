@@ -65,7 +65,7 @@ def classify(paths, read_blob=lambda revision, path: None):
             selected["backend"] = selected["security"] = True
         elif path.startswith(("internal/monitor/", "internal/probe/", "internal/netcheck/", "internal/hostlocation/", "internal/singboxconfig/", "cmd/wukong-probe/")):
             selected["backend"] = True
-        elif path == "README.md" or path.startswith(("docs/", "assets/")) or path.endswith(".md"):
+        elif path in ("README.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore") or path.startswith(("docs/", "assets/")) or path.endswith(".md"):
             continue
         else:
             # A new script, toolchain file or unclassified build input must not
