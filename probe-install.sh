@@ -91,8 +91,9 @@ ExecStart=/usr/local/bin/wukong-probe run
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW CAP_DAC_OVERRIDE
 ProtectSystem=strict
+ReadWritePaths=/usr/local/bin /etc/wukong-probe
 ProtectHome=yes
 PrivateTmp=yes
 

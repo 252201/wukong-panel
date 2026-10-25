@@ -47,6 +47,19 @@ func (s *Server) ListenAndServe(ctx context.Context, socket string) error {
 		return err
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /panel-update", s.authorize(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			TargetVersion string `json:"targetVersion"`
+		}
+		if !decode(w, r, &req) {
+			return
+		}
+		if err := s.manager.PanelUpdate(r.Context(), req.TargetVersion); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	}))
 	mux.HandleFunc("POST /sing-box-update", s.authorize(func(w http.ResponseWriter, r *http.Request) {
 		var req model.ComponentUpdateRequest
 		if !decode(w, r, &req) {
@@ -358,6 +371,13 @@ func (c *Client) Health(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.request(ctx, "GET", "/health", nil, &result)
 	return result, err
+}
+func (c *Client) PanelUpdate(ctx context.Context, targetVersion string) error {
+	copyHTTP := *c.http
+	copyHTTP.Timeout = 10 * time.Minute
+	copyClient := *c
+	copyClient.http = &copyHTTP
+	return copyClient.request(ctx, "POST", "/panel-update", map[string]string{"targetVersion": targetVersion}, nil)
 }
 func (c *Client) NetworkHealth(ctx context.Context) (*model.NetworkHealth, error) {
 	var result *model.NetworkHealth

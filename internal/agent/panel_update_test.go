@@ -1,0 +1,109 @@
+package agent
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+
+	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/store"
+)
+
+func TestPanelUpdateDemoMode(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := store.Open(filepath.Join(dataDir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	m := NewManager(config.Config{DataDir: dataDir, Demo: true}, db, nil)
+	if err := m.PanelUpdate(context.Background(), "1.7.30"); err != nil {
+		t.Fatalf("unexpected error in demo mode: %v", err)
+	}
+}
+
+func TestPanelUpdateSuccessWithValidSHA256(t *testing.T) {
+	dataDir := t.TempDir()
+	db, err := store.Open(filepath.Join(dataDir, "wukong.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	arch := runtime.GOARCH
+	assetName := fmt.Sprintf("wukong-panel-linux-%s", arch)
+
+	// Create mock binary that outputs "wukong-panel 1.7.30\n" when executed with version
+	mockBinaryContent := []byte("#!/bin/sh\necho 'wukong-panel 1.7.30'\n")
+	hasher := sha256.New()
+	hasher.Write(mockBinaryContent)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	sumsContent := fmt.Sprintf("%s  %s\n", expectedHash, assetName)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch filepath.Base(r.URL.Path) {
+		case "SHA256SUMS":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(sumsContent))
+		case assetName:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(mockBinaryContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("WUKONG_TEST_PANEL_DOWNLOAD_URL", server.URL)
+	testDestBin := filepath.Join(dataDir, "bin", "wukong-panel")
+	_ = os.MkdirAll(filepath.Dir(testDestBin), 0755)
+	_ = os.WriteFile(testDestBin, []byte("#!/bin/sh\necho 'old version'\n"), 0755)
+	t.Setenv("WUKONG_TEST_PANEL_BIN", testDestBin)
+	t.Setenv("WUKONG_TEST_NO_RESTART", "1")
+
+	m := NewManager(config.Config{DataDir: dataDir, Demo: false}, db, nil)
+	if err := m.PanelUpdate(context.Background(), "1.7.30"); err != nil {
+		t.Fatalf("panel update failed: %v", err)
+	}
+
+	// Verify new binary is installed
+	newContent, err := os.ReadFile(testDestBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(newContent) != string(mockBinaryContent) {
+		t.Fatalf("installed content mismatch, got %q", string(newContent))
+	}
+
+	// Verify backup was created
+	backups, err := filepath.Glob(filepath.Join(dataDir, "backups", "update-*"))
+	if err != nil || len(backups) == 0 {
+		t.Fatalf("expected backup directory to be created, got %v", backups)
+	}
+	oldSaved, err := os.ReadFile(filepath.Join(backups[0], "wukong-panel"))
+	if err != nil || !stringsContains(string(oldSaved), "old version") {
+		t.Fatalf("expected backup to contain old binary, got %s", string(oldSaved))
+	}
+}
+
+func stringsContains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || (len(s) > 0 && len(sub) > 0 && containsHelper(s, sub)))
+}
+
+func containsHelper(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

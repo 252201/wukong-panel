@@ -128,3 +128,22 @@ test('fetchLatestRelease fetches and parses release response', async () => {
   assert.equal(release.version, '1.7.26');
   assert.equal(release.tag, 'v1.7.26');
 });
+
+test('hostUpdateOnlineSupported accurately detects panel and probe online update support', () => {
+  const isProbeHost = (host) => (host.capabilities || []).includes('probe');
+  const hostUpdateOnlineSupported = (host) => {
+    if (host.id === 'local') return true;
+    if (isProbeHost(host)) {
+      return (host.capabilities || []).includes('probe.update');
+    }
+    return false;
+  };
+
+  const localPanel = { id: 'local', name: '青蛙', capabilities: ['overview'] };
+  const legacyProbe = { id: 'probe-1', name: 'JP-三网直连', capabilities: ['overview', 'probe'] };
+  const modernProbe = { id: 'probe-2', name: 'JP-三网直连-新版', capabilities: ['overview', 'probe', 'probe.update'] };
+
+  assert.equal(hostUpdateOnlineSupported(localPanel), true, 'Local panel always supports online update');
+  assert.equal(hostUpdateOnlineSupported(legacyProbe), false, 'Legacy probe without probe.update requires terminal command');
+  assert.equal(hostUpdateOnlineSupported(modernProbe), true, 'Modern probe with probe.update supports online update');
+});

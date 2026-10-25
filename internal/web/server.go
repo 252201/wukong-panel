@@ -135,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/system/ip-location", s.auth(s.securityIPLocation, false))
 	mux.HandleFunc("GET /api/v1/system/ip-reputation", s.auth(s.ipReputation, false))
 	mux.HandleFunc("GET /api/v1/system/latest-release", s.auth(s.latestRelease, false))
+	mux.HandleFunc("POST /api/v1/system/panel/update", s.auth(s.panelUpdate, true))
 	mux.HandleFunc("POST /api/v1/system/{kind}/{action}", s.auth(s.hostSecurity, true))
 	mux.HandleFunc("GET /api/v1/system/security-transactions/{id}", s.auth(s.hostSecurityTransaction, false))
 	mux.HandleFunc("POST /api/v1/system/security-transactions/{id}/confirm", s.auth(s.hostSecurityTransaction, true))
