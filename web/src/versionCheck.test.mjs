@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parseSemver,
   isNewerVersion,
@@ -147,3 +148,31 @@ test('hostUpdateOnlineSupported accurately detects panel and probe online update
   assert.equal(hostUpdateOnlineSupported(legacyProbe), false, 'Legacy probe without probe.update requires terminal command');
   assert.equal(hostUpdateOnlineSupported(modernProbe), true, 'Modern probe with probe.update supports online update');
 });
+
+test('mobile view removes the "可" character from update pill via responsive CSS', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // Verify App.vue encapsulates the "可" character in .fleet-update-lead
+  assert.ok(
+    appVue.includes('<span class="fleet-update-lead">可</span>更新 v{{ latestReleaseVersion }}'),
+    'App.vue must wrap "可" in .fleet-update-lead for panel and probe updates'
+  );
+  assert.ok(
+    appVue.includes('<span class="fleet-update-lead">可</span>更新 {{ latestSingBoxVersion }}'),
+    'App.vue must wrap "可" in .fleet-update-lead for sing-box updates'
+  );
+
+  // Verify styles.css defines default inline display and hides on mobile (max-width: 700px)
+  assert.match(
+    stylesCss,
+    /\.fleet-update-pill\s+\.fleet-update-lead\s*\{\s*display:\s*inline;\s*\}/,
+    'styles.css must define default inline display for .fleet-update-lead'
+  );
+  assert.match(
+    stylesCss,
+    /@media\s*\(max-width:\s*700px\)[^{]*\{[\s\S]*?\.fleet-update-pill\s+\.fleet-update-lead\s*\{\s*display:\s*none;\s*\}/,
+    'styles.css must hide .fleet-update-lead at <= 700px mobile breakpoint'
+  );
+});
+

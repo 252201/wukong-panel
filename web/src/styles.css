@@ -1265,6 +1265,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .fleet-host-card footer .fleet-footer-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   .fleet-host-card footer .fleet-footer-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
   .fleet-host-card footer .fleet-host-expiry-footer { display: inline-flex; margin-left: auto; }
+  .fleet-update-pill .fleet-update-lead { display: none; }
 }
 
 .security-rule-family { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
@@ -1314,6 +1315,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   font-style: normal;
   font-size: 10px;
   line-height: 1;
+}
+.fleet-update-pill .fleet-update-lead {
+  display: inline;
 }
 
 .fleet-version-dot {
