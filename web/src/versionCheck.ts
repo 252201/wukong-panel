@@ -110,7 +110,8 @@ export async function fetchLatestRelease(
 
   // 2. Fetch from backend proxy endpoint
   try {
-    const res = await f('/api/v1/system/latest-release', {
+    const res = await f('api/v1/system/latest-release', {
+      credentials: 'same-origin',
       headers: { Accept: 'application/json' }
     });
     if (res.ok) {
