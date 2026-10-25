@@ -14,6 +14,13 @@ import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
 import { fleetHostRateHint, networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
 import { realityPresets, flattenRealityPresets, findRealityPreset } from './realityPresets'
+import {
+  fetchLatestRelease,
+  isNewerVersion,
+  getProbeUpdateCommand,
+  getPanelUpdateCommand,
+  type ReleaseInfo
+} from './versionCheck'
 
 type Page = 'fleet' | 'overview' | 'nodes' | 'traffic' | 'system' | 'security' | 'jobs' | 'settings'
 type DeviceDraft = { key: number; name: string; listenPort: number; server: string; preferredServer: string; webSocketPath: string }
@@ -91,7 +98,12 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | null>(null)
+const hostUpdateTarget = ref<FleetHost | null>(null)
+const latestRelease = ref<ReleaseInfo | null>(null)
+const latestReleaseVersion = computed(() => latestRelease.value?.version || '')
+const latestReleaseNotes = computed(() => latestRelease.value?.body || '')
+const latestReleaseUrl = computed(() => latestRelease.value?.htmlUrl || '')
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
 const fleetHostTarget = ref<FleetHost | null>(null)
@@ -630,6 +642,51 @@ async function submitFleetHostSettings() {
     notify(error instanceof Error ? error.message : '保存主机设置失败')
   } finally {
     busy.value = false
+  }
+}
+
+function hostVersionString(host: FleetHost): string {
+  if (isProbeHost(host)) {
+    return host.panelVersion || ''
+  }
+  return host.panelVersion || host.snapshot?.overview?.panelVersion || ''
+}
+
+function hasHostUpdate(host: FleetHost): boolean {
+  if (!latestReleaseVersion.value) return false
+  const current = hostVersionString(host)
+  return isNewerVersion(current, latestReleaseVersion.value)
+}
+
+function hostUpdateCurrentVersion(host: FleetHost): string {
+  const v = hostVersionString(host)
+  if (!v) return '—'
+  return v.startsWith('v') || v.startsWith('V') ? v : `v${v}`
+}
+
+function hostUpdateCommand(host: FleetHost): string {
+  return isProbeHost(host) ? getProbeUpdateCommand() : getPanelUpdateCommand()
+}
+
+function openHostUpdateModal(host: FleetHost) {
+  hostUpdateTarget.value = host
+  modal.value = 'host-update'
+}
+
+async function copyHostUpdateCommand(host: FleetHost) {
+  const cmd = hostUpdateCommand(host)
+  await copy(cmd)
+  notify(isProbeHost(host) ? '已复制探针升级命令' : '已复制面板升级命令')
+}
+
+async function checkLatestRelease() {
+  try {
+    const res = await fetchLatestRelease()
+    if (res && res.version) {
+      latestRelease.value = res
+    }
+  } catch {
+    // Ignore error
   }
 }
 
@@ -1178,13 +1235,13 @@ async function bootstrap() {
   loading.value = true
   try {
     const me = await api.me(); setCSRF(me.csrf); authenticated.value = true; username.value = me.username; mustChange.value = me.mustChange
-    if (!me.mustChange) { await refreshFleetStatus(); await refreshAll() }
+    if (!me.mustChange) { await refreshFleetStatus(); await refreshAll(); checkLatestRelease().catch(() => {}) }
   } catch { authenticated.value = false }
   finally { loading.value = false }
 }
 async function login() {
   busy.value = true; loginError.value = ''
-  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; if (!result.mustChange) { await refreshFleetStatus(); await refreshAll() } }
+  try { const result = await api.login(username.value, password.value); setCSRF(result.csrf); mustChange.value = result.mustChange; authenticated.value = true; password.value = ''; if (!result.mustChange) { await refreshFleetStatus(); await refreshAll(); checkLatestRelease().catch(() => {}) } }
   catch (error) { loginError.value = error instanceof Error ? error.message : '登录失败' }
   finally { busy.value = false }
 }
@@ -1649,7 +1706,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </section>
             </div>
-            <footer><span>{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '轻量探针'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
+            <footer><div class="fleet-host-version-meta"><span class="fleet-host-version-text">{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '轻量探针'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 v{{ latestReleaseVersion }}</span></button></div><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
         </section>
@@ -2328,6 +2385,63 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <div class="modal-actions ip-rep-actions">
         <small class="ip-rep-source">数据来源：Net.Coffee IP 威胁情报引擎 · 双栈结果自动本地缓存 24 小时</small>
         <button type="button" class="secondary" @click="modal = null">关闭</button>
+      </div>
+    </div>
+    <div v-else-if="modal === 'host-update' && hostUpdateTarget" class="modal-card compact host-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal jade">升</span>
+      <p class="eyebrow">VERSION UPGRADE</p>
+      <h2>{{ isProbeHost(hostUpdateTarget) ? '轻量探针升级' : '面板服务升级' }}</h2>
+      <p>{{ isProbeHost(hostUpdateTarget) ? '探针运行在远端 VPS 上，升级将自动替换二进制并保留全部连接凭据与节点配置。' : '面板运行在控制中心，升级将自动备份当前数据与配置，无缝升级二进制与前端资源。' }}</p>
+
+      <div class="fleet-host-action-target">
+        <small>目标主机</small><b>{{ hostUpdateTarget.name }}</b>
+        <span>{{ hostUpdateTarget.hostname || hostUpdateTarget.id }} · {{ isProbeHost(hostUpdateTarget) ? '轻量探针' : '面板主控' }}</span>
+      </div>
+
+      <div class="version-diff-card">
+        <div class="version-diff-box current">
+          <span class="diff-label">当前运行版本</span>
+          <span class="diff-val">{{ hostUpdateCurrentVersion(hostUpdateTarget) }}</span>
+        </div>
+        <div class="version-diff-arrow">➔</div>
+        <div class="version-diff-box latest">
+          <span class="diff-label">可升级至版本</span>
+          <span class="diff-val">v{{ latestReleaseVersion }}</span>
+          <span class="diff-tag">最新发布</span>
+        </div>
+      </div>
+
+      <div class="host-update-command-section">
+        <div class="update-command-header">
+          <h4>{{ isProbeHost(hostUpdateTarget) ? '远端一键升级命令' : '服务器一键升级命令' }}</h4>
+          <small>请登录目标机器终端以 <code>root</code> 执行：</small>
+        </div>
+        <div class="update-command-box">
+          <code>{{ hostUpdateCommand(hostUpdateTarget) }}</code>
+          <button type="button" class="mini-btn primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
+            📋 复制命令
+          </button>
+        </div>
+      </div>
+
+      <div v-if="latestReleaseNotes" class="host-update-notes-section">
+        <h4>更新日志摘要 (v{{ latestReleaseVersion }})</h4>
+        <div class="update-notes-body">
+          <pre>{{ latestReleaseNotes }}</pre>
+        </div>
+      </div>
+
+      <div class="modal-actions host-update-modal-actions">
+        <a v-if="latestReleaseUrl" :href="latestReleaseUrl" target="_blank" rel="noopener noreferrer" class="release-external-link">
+          查看 GitHub Release ↗
+        </a>
+        <div class="actions-right">
+          <button type="button" class="secondary" @click="modal = null">关闭</button>
+          <button type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
+            复制升级命令
+          </button>
+        </div>
       </div>
     </div>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
