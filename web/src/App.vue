@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, getIPReputation, setCSRF, setFleetHost, type Candidate, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, componentUpdateAPI, getIPReputation, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { startComponentUpdateJob, refreshComponentUpdateJob, pendingComponentUpdateJob } from './componentUpdateJobs'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import ComponentUpdatePanel from './ComponentUpdatePanel.vue'
@@ -19,6 +20,7 @@ import {
   isNewerVersion,
   getProbeUpdateCommand,
   getPanelUpdateCommand,
+  getSingBoxUpdateCommand,
   type ReleaseInfo
 } from './versionCheck'
 
@@ -98,12 +100,20 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const latestRelease = ref<ReleaseInfo | null>(null)
 const latestReleaseVersion = computed(() => latestRelease.value?.version || '')
 const latestReleaseNotes = computed(() => latestRelease.value?.body || '')
 const latestReleaseUrl = computed(() => latestRelease.value?.htmlUrl || '')
+const latestSingBoxVersion = computed(() => latestRelease.value?.singBoxVersion || '1.14.4')
+const latestSingBoxUrl = computed(() => latestRelease.value?.singBoxUrl || 'https://github.com/SagerNet/sing-box/releases')
+const singBoxUpdateTarget = ref<FleetHost | null>(null)
+const singBoxUpdateState = ref<ComponentUpdateState | null>(null)
+const singBoxUpdating = ref(false)
+const singBoxUpdateJob = ref<Job | null>(null)
+const singBoxUpdateError = ref('')
+let singBoxPollTimer: ReturnType<typeof setTimeout> | undefined
 type FleetHostAction = 'rename' | 'remove' | 'purge'
 const fleetHostAction = ref<FleetHostAction | null>(null)
 const fleetHostTarget = ref<FleetHost | null>(null)
@@ -677,6 +687,123 @@ async function copyHostUpdateCommand(host: FleetHost) {
   const cmd = hostUpdateCommand(host)
   await copy(cmd)
   notify(isProbeHost(host) ? '已复制探针升级命令' : '已复制面板升级命令')
+}
+
+function hostSingBoxVersion(host: FleetHost): string {
+  return host.singBoxVersion || host.snapshot?.overview?.singBoxVersion || ''
+}
+
+function hasSingBoxUpdate(host: FleetHost): boolean {
+  if (isProbeHost(host)) return false
+  if (!latestSingBoxVersion.value) return false
+  const current = hostSingBoxVersion(host)
+  if (!current) return false
+  return isNewerVersion(current, latestSingBoxVersion.value)
+}
+
+function singBoxUpdateSupported(host: FleetHost): boolean {
+  if (isProbeHost(host)) return false
+  return host.id === 'local' || (host.capabilities || []).includes('sing-box.update')
+}
+
+async function openSingBoxUpdateModal(host: FleetHost) {
+  singBoxUpdateTarget.value = host
+  singBoxUpdateState.value = null
+  singBoxUpdating.value = false
+  singBoxUpdateJob.value = null
+  singBoxUpdateError.value = ''
+  if (singBoxPollTimer) {
+    clearTimeout(singBoxPollTimer)
+    singBoxPollTimer = undefined
+  }
+  modal.value = 'singbox-update'
+
+  const pending = pendingComponentUpdateJob(host.id, 'sing-box')
+  if (pending) {
+    singBoxUpdateJob.value = pending
+    singBoxUpdating.value = true
+    void pollSingBoxJob(host, pending.id)
+  }
+
+  if (singBoxUpdateSupported(host) && host.online) {
+    try {
+      const client = componentUpdateAPI(host.id, 'sing-box')
+      singBoxUpdateState.value = await client.status()
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function copySingBoxUpdateCommand() {
+  const cmd = getSingBoxUpdateCommand()
+  await copy(cmd)
+  notify('已复制 sing-box 内核升级命令')
+}
+
+async function startSingBoxUpgrade(host: FleetHost) {
+  if (singBoxUpdating.value) return
+  singBoxUpdating.value = true
+  singBoxUpdateError.value = ''
+  try {
+    const client = componentUpdateAPI(host.id, 'sing-box')
+    const currentVer = hostSingBoxVersion(host) || singBoxUpdateState.value?.currentVersion || '1.14.3'
+    const targetVer = latestSingBoxVersion.value || singBoxUpdateState.value?.latestVersion || '1.14.4'
+    const res = await client.update(currentVer, targetVer)
+    const queued: Job = {
+      id: res.jobId,
+      kind: 'sing-box.update',
+      target: host.id,
+      status: 'queued',
+      progress: 0,
+      message: '等待更新 sing-box…',
+      createdAt: '',
+      updatedAt: ''
+    }
+    startComponentUpdateJob(host.id, 'sing-box', queued)
+    singBoxUpdateJob.value = queued
+    void pollSingBoxJob(host, res.jobId)
+  } catch (err) {
+    singBoxUpdating.value = false
+    singBoxUpdateError.value = err instanceof Error ? err.message : '启动更新失败'
+  }
+}
+
+async function pollSingBoxJob(host: FleetHost, jobId: string) {
+  try {
+    const client = componentUpdateAPI(host.id, 'sing-box')
+    const job = await client.job(jobId)
+    refreshComponentUpdateJob(host.id, 'sing-box', job)
+    singBoxUpdateJob.value = job
+    if (job.status === 'success') {
+      singBoxUpdating.value = false
+      const targetVer = latestSingBoxVersion.value || '1.14.4'
+      host.singBoxVersion = targetVer
+      if (host.snapshot?.overview) {
+        host.snapshot.overview.singBoxVersion = targetVer
+      }
+      if (host.id === 'local' && overview.value) {
+        overview.value.singBoxVersion = targetVer
+      }
+      notify(`sing-box 已成功升级至 ${targetVer}`)
+      try {
+        singBoxUpdateState.value = await client.status()
+      } catch {
+        // ignore
+      }
+      return
+    }
+    if (job.status === 'failed') {
+      singBoxUpdating.value = false
+      singBoxUpdateError.value = job.error || job.message || '更新失败'
+      return
+    }
+  } catch (err) {
+    singBoxUpdateError.value = err instanceof Error ? err.message : '查询更新进度失败'
+  }
+  if (modal.value === 'singbox-update') {
+    singBoxPollTimer = setTimeout(() => pollSingBoxJob(host, jobId), 1500)
+  }
 }
 
 async function checkLatestRelease() {
@@ -1633,7 +1760,7 @@ let timer = 0
 let stopObservingTheme = () => {}
 let stopLocalizing = () => {}
 onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}) } }, 10_000) })
-onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); window.removeEventListener('resize', updateDeviceLimit) })
+onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); if (singBoxPollTimer) clearTimeout(singBoxPollTimer); window.removeEventListener('resize', updateDeviceLimit) })
 </script>
 
 <template>
@@ -1706,7 +1833,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </section>
             </div>
-            <footer><div class="fleet-host-version-meta"><span class="fleet-host-version-text">{{ isProbeHost(host) ? `Probe ${host.panelVersion || '—'} · ${language === 'en-US' ? 'Monitoring only' : '轻量探针'}` : `Panel ${host.panelVersion || host.snapshot?.overview?.panelVersion || '—'} · sing-box ${host.singBoxVersion || '—'}` }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 v{{ latestReleaseVersion }}</span></button></div><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
+            <footer><div class="fleet-host-version-meta"><template v-if="isProbeHost(host)"><span class="fleet-host-version-text">Probe {{ host.panelVersion || '—' }} · {{ language === 'en-US' ? 'Monitoring only' : '轻量探针' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 v{{ latestReleaseVersion }}</span></button></template><template v-else><span class="fleet-host-version-text">Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 v{{ latestReleaseVersion }}</span></button><span class="fleet-version-dot">·</span><span class="fleet-host-version-text">sing-box {{ host.singBoxVersion || '—' }}</span><button v-if="hasSingBoxUpdate(host)" type="button" class="fleet-update-pill singbox-update-pill" :title="`发现新版本 ${latestSingBoxVersion}，点击更新`" @click.stop="openSingBoxUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 {{ latestSingBoxVersion }}</span></button></template></div><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
         </section>
@@ -1749,7 +1876,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
         <section class="overview-lower">
           <article class="panel-card node-preview"><div class="card-head"><div><span class="section-mark red">阵</span><div><h3>节点兵器谱</h3><p>按服务状态实时排列</p></div></div><button class="text-button" @click="navigateTo('nodes')">查看全部 →</button></div><div class="compact-nodes"><div v-for="node in nodes.slice(0, 4)" :key="node.id"><i :class="node.status"></i><span><b>{{ node.name }}</b><small>{{ protocolInfo(node.protocol).badge }} · {{ nodePublicPort(node) }}/{{ protocolInfo(node.protocol).transport }}</small></span><em>{{ node.status === 'active' ? t('online') : t('offline') }}</em></div><p v-if="!nodes.length" class="empty">尚无节点，点击右上角部署第一座节点。</p></div></article>
-          <article class="panel-card system-glance"><div class="card-head"><div><span class="section-mark jade">脉</span><div><h3>主机气脉</h3><p>资源水位</p></div></div><span class="uptime">运行 {{ uptime(overview?.now.uptime) }}</span></div><div class="resource-row"><span>CPU</span><div><i :style="{ width: `${overview?.now.cpu || 0}%` }"></i></div><b>{{ overview?.now.cpu.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>内存</span><div><i :style="{ width: `${overview?.now.memory || 0}%` }"></i></div><b>{{ overview?.now.memory.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>磁盘</span><div><i :style="{ width: `${overview?.now.disk || 0}%` }"></i></div><b>{{ overview?.now.disk.toFixed(1) || 0 }}%</b></div><div class="version-strip"><span>Panel {{ overview?.panelVersion }}</span><span>sing-box {{ overview?.singBoxVersion }}</span></div></article>
+          <article class="panel-card system-glance"><div class="card-head"><div><span class="section-mark jade">脉</span><div><h3>主机气脉</h3><p>资源水位</p></div></div><span class="uptime">运行 {{ uptime(overview?.now.uptime) }}</span></div><div class="resource-row"><span>CPU</span><div><i :style="{ width: `${overview?.now.cpu || 0}%` }"></i></div><b>{{ overview?.now.cpu.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>内存</span><div><i :style="{ width: `${overview?.now.memory || 0}%` }"></i></div><b>{{ overview?.now.memory.toFixed(1) || 0 }}%</b></div><div class="resource-row"><span>磁盘</span><div><i :style="{ width: `${overview?.now.disk || 0}%` }"></i></div><b>{{ overview?.now.disk.toFixed(1) || 0 }}%</b></div><div class="version-strip"><span>Panel {{ overview?.panelVersion }}<button v-if="currentFleetHost && hasHostUpdate(currentFleetHost)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(currentFleetHost)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 v{{ latestReleaseVersion }}</span></button></span><span>sing-box {{ overview?.singBoxVersion }}<button v-if="currentFleetHost && hasSingBoxUpdate(currentFleetHost)" type="button" class="fleet-update-pill singbox-update-pill" :title="`发现新版本 ${latestSingBoxVersion}，点击更新`" @click.stop="openSingBoxUpdateModal(currentFleetHost)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span>可更新 {{ latestSingBoxVersion }}</span></button></span></div></article>
         </section>
       </div>
 
@@ -2439,6 +2566,89 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <div class="actions-right">
           <button type="button" class="secondary" @click="modal = null">关闭</button>
           <button type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
+            复制升级命令
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="modal === 'singbox-update' && singBoxUpdateTarget" class="modal-card compact host-update-modal singbox-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal jade">核</span>
+      <p class="eyebrow">RUNTIME UPGRADE</p>
+      <h2>sing-box 代理内核升级</h2>
+      <p>更新将自动校验并安全迁移托管节点配置、备份当前程序并平滑重启运行中的节点；更新后执行本地代理探测，失败将自动回滚。</p>
+
+      <div class="fleet-host-action-target">
+        <small>目标主机</small><b>{{ singBoxUpdateTarget.name }}</b>
+        <span>{{ singBoxUpdateTarget.hostname || singBoxUpdateTarget.id }} · sing-box 内核</span>
+      </div>
+
+      <div class="version-diff-card">
+        <div class="version-diff-box current">
+          <span class="diff-label">当前运行版本</span>
+          <span class="diff-val">{{ hostSingBoxVersion(singBoxUpdateTarget) || '—' }}</span>
+        </div>
+        <div class="version-diff-arrow">➔</div>
+        <div class="version-diff-box latest">
+          <span class="diff-label">可升级至版本</span>
+          <span class="diff-val">{{ latestSingBoxVersion }}</span>
+          <span class="diff-tag">官方稳定版</span>
+        </div>
+      </div>
+
+      <!-- 在线一键更新进度或控制区 -->
+      <div v-if="singBoxUpdateSupported(singBoxUpdateTarget)" class="singbox-online-update-section">
+        <div v-if="singBoxUpdating || singBoxUpdateJob" class="singbox-update-progress-card">
+          <div class="progress-header">
+            <span class="progress-status">
+              <i :class="singBoxUpdateJob?.status === 'success' ? 'status-icon success' : (singBoxUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning')"></i>
+              <b>{{ singBoxUpdateJob?.message || (singBoxUpdating ? '正在执行更新…' : '更新完成') }}</b>
+            </span>
+            <span class="progress-pct">{{ singBoxUpdateJob?.progress ?? 0 }}%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" :style="{ width: `${singBoxUpdateJob?.progress ?? 0}%` }" :class="{ success: singBoxUpdateJob?.status === 'success', failed: singBoxUpdateJob?.status === 'failed' }"></div>
+          </div>
+          <p v-if="singBoxUpdateError" class="singbox-update-err-msg">{{ singBoxUpdateError }}</p>
+          <div v-if="singBoxUpdateJob?.status === 'failed'" class="progress-retry-action">
+            <button type="button" class="mini-btn" @click="startSingBoxUpgrade(singBoxUpdateTarget)">重新尝试升级</button>
+          </div>
+        </div>
+        <div v-else class="singbox-update-action-box">
+          <div class="action-desc">
+            <h4>在线一键升级</h4>
+            <small>无需登录终端，点击后由中央控制台向主机调度自动化升级管道：</small>
+          </div>
+          <button type="button" class="primary singbox-start-btn" :disabled="singBoxUpdating || !singBoxUpdateTarget.online" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
+            🚀 立即升级内核至 {{ latestSingBoxVersion }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 终端升级命令备选区 -->
+      <div class="host-update-command-section">
+        <div class="update-command-header">
+          <h4>服务器终端一键升级命令</h4>
+          <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
+        </div>
+        <div class="update-command-box">
+          <code>{{ getSingBoxUpdateCommand() }}</code>
+          <button type="button" class="mini-btn primary" @click="copySingBoxUpdateCommand">
+            📋 复制命令
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-actions host-update-modal-actions">
+        <a v-if="latestSingBoxUrl" :href="latestSingBoxUrl" target="_blank" rel="noopener noreferrer" class="release-external-link">
+          查看 sing-box Release ↗
+        </a>
+        <div class="actions-right">
+          <button type="button" class="secondary" @click="modal = null">关闭</button>
+          <button v-if="!singBoxUpdating && singBoxUpdateJob?.status !== 'success' && singBoxUpdateSupported(singBoxUpdateTarget)" type="button" class="primary" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
+            立即升级内核
+          </button>
+          <button v-else type="button" class="primary" @click="copySingBoxUpdateCommand">
             复制升级命令
           </button>
         </div>

@@ -6,6 +6,9 @@ export interface ReleaseInfo {
   publishedAt?: string;
   htmlUrl?: string;
   body?: string;
+  singBoxVersion?: string;
+  singBoxTag?: string;
+  singBoxUrl?: string;
 }
 
 export interface ParsedSemver {
@@ -62,12 +65,19 @@ export const OFFICIAL_PROBE_UPDATE_COMMAND =
 export const OFFICIAL_PANEL_UPDATE_COMMAND =
   'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --update';
 
+export const OFFICIAL_SINGBOX_UPDATE_COMMAND =
+  'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --update-sing-box';
+
 export function getProbeUpdateCommand(): string {
   return OFFICIAL_PROBE_UPDATE_COMMAND;
 }
 
 export function getPanelUpdateCommand(): string {
   return OFFICIAL_PANEL_UPDATE_COMMAND;
+}
+
+export function getSingBoxUpdateCommand(): string {
+  return OFFICIAL_SINGBOX_UPDATE_COMMAND;
 }
 
 const RELEASE_CACHE_KEY = 'wukong_latest_release_cache';
@@ -122,6 +132,25 @@ export async function fetchLatestRelease(
     if (ghRes.ok) {
       const gh = await ghRes.json();
       if (gh && gh.tag_name) {
+        let sbVersion = '1.14.4';
+        let sbTag = 'v1.14.4';
+        let sbUrl = 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.4';
+        try {
+          const sbRes = await f('https://api.github.com/repos/SagerNet/sing-box/releases/latest', {
+            headers: { Accept: 'application/vnd.github.v3+json' }
+          });
+          if (sbRes.ok) {
+            const sb = await sbRes.json();
+            if (sb && sb.tag_name) {
+              sbTag = sb.tag_name;
+              sbVersion = sb.tag_name.replace(/^v/i, '');
+              sbUrl = sb.html_url || sbUrl;
+            }
+          }
+        } catch {
+          // ignore sing-box fetch error, use fallback
+        }
+
         const info: ReleaseInfo = {
           ok: true,
           version: gh.tag_name.replace(/^v/i, ''),
@@ -129,7 +158,10 @@ export async function fetchLatestRelease(
           name: gh.name || gh.tag_name,
           publishedAt: gh.published_at,
           htmlUrl: gh.html_url,
-          body: gh.body
+          body: gh.body,
+          singBoxVersion: sbVersion,
+          singBoxTag: sbTag,
+          singBoxUrl: sbUrl
         };
         saveCache(info);
         return info;
