@@ -10,6 +10,7 @@ import subprocess
 
 SCOPES = ("frontend", "backend", "installers", "security")
 VERSION_LINE = re.compile(r"^(VERSION[ \t]+\?=[ \t]+)\d+\.\d+\.\d+([ \t]*)$", re.M)
+RELEASE_GO_VERSION_LINE = re.compile(r'([ \t]*cleanVer[ \t]*=[ \t]*")\d+\.\d+\.\d+(")', re.M)
 SECURITY_PREFIXES = (
     "internal/hostsecurity/", "internal/agent/", "internal/model/",
     "internal/config/", "internal/store/", "internal/security/", "internal/web/", "cmd/wukong-panel/",
@@ -23,6 +24,10 @@ def version_only(path, before, after):
         if len(VERSION_LINE.findall(before)) != 1 or len(VERSION_LINE.findall(after)) != 1:
             return False
         return VERSION_LINE.sub(r"\1<version>\2", before) == VERSION_LINE.sub(r"\1<version>\2", after)
+    if path == "internal/web/release.go":
+        if len(RELEASE_GO_VERSION_LINE.findall(before)) != 1 or len(RELEASE_GO_VERSION_LINE.findall(after)) != 1:
+            return False
+        return RELEASE_GO_VERSION_LINE.sub(r"\1<version>\2", before) == RELEASE_GO_VERSION_LINE.sub(r"\1<version>\2", after)
     if path not in ("web/package.json", "web/package-lock.json"):
         return False
     try:
@@ -45,7 +50,7 @@ def classify(paths, read_blob=lambda revision, path: None):
     selected = {scope: False for scope in SCOPES}
     for path in paths:
         # Generated web resources are UI changes, not host-security Go changes.
-        if path in ("Makefile", "web/package.json", "web/package-lock.json"):
+        if path in ("Makefile", "web/package.json", "web/package-lock.json", "internal/web/release.go"):
             if version_only(path, read_blob("base", path), read_blob("head", path)):
                 continue
         if path.startswith(("web/", "internal/web/dist/")):
@@ -82,6 +87,11 @@ def validate_versions(root):
     readme = (root / "README.md").read_text()
     if f"version-v{version}-" not in readme or f"--version v{version}" not in readme:
         raise ValueError("README version badge or installation example disagrees")
+    release_go = root / "internal/web/release.go"
+    if release_go.exists():
+        go_matches = re.findall(r'cleanVer[ \t]*=[ \t]*"(\d+\.\d+\.\d+)"', release_go.read_text())
+        if len(go_matches) == 1 and go_matches[0] != version:
+            raise ValueError("internal/web/release.go fallback version disagrees")
 
 
 def check_jobs(needs):
