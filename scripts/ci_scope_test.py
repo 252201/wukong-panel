@@ -73,6 +73,25 @@ class ScopeTests(unittest.TestCase):
         self.assertFalse(version_only("Makefile", None, after))
         self.assertFalse(version_only("web/package.json", "{}", "invalid"))
 
+    def test_release_go_fallback_version_does_not_trigger_security(self):
+        before = 'package web\nfunc fallback() {\n\tcleanVer := "v"\n\tcleanVer = "1.7.5"\n}\n'
+        after = before.replace("1.7.5", "1.7.6")
+        self.assertTrue(version_only("internal/web/release.go", before, after))
+        self.assertEqual(
+            classify(["internal/web/release.go"], lambda revision, _: before if revision == "base" else after),
+            dict.fromkeys(SCOPES, False),
+        )
+
+        # Modifying logic or other lines in release.go MUST trigger backend and security
+        logic_change = after + "// extra comment\n"
+        self.assertFalse(version_only("internal/web/release.go", before, logic_change))
+        self.assertScopes(["internal/web/release.go"], "backend", "security")
+
+        # Multiple matches or missing matches should return False
+        multi_match = before + '\tcleanVer = "1.7.5"\n'
+        self.assertFalse(version_only("internal/web/release.go", multi_match, multi_match.replace("1.7.5", "1.7.6")))
+        self.assertFalse(version_only("internal/web/release.go", None, after))
+
 
 def needs_fixture(selected):
     return {
@@ -196,6 +215,11 @@ class GitDiffTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_versions(Path.cwd())
         self.write("web/package-lock.json", '{"version":"1.7.6","packages":{"":{"version":"1.7.6"}}}')
+        validate_versions(Path.cwd())
+        self.write("internal/web/release.go", '\t\tcleanVer = "1.7.5"\n')
+        with self.assertRaises(ValueError):
+            validate_versions(Path.cwd())
+        self.write("internal/web/release.go", '\t\tcleanVer = "1.7.6"\n')
         validate_versions(Path.cwd())
         self.write("README.md", "version-v1.7.5-color --version v1.7.5")
         with self.assertRaises(ValueError):
