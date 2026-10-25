@@ -112,8 +112,9 @@ test('fetchLatestRelease fetches and parses release response', async () => {
     body: 'Release notes for 1.7.26'
   };
 
-  const mockFetch = async (url) => {
-    if (url.includes('/api/v1/system/latest-release')) {
+  const mockFetch = async (url, options) => {
+    if (url.includes('api/v1/system/latest-release')) {
+      assert.equal(options?.credentials, 'same-origin');
       return {
         ok: true,
         json: async () => mockRelease

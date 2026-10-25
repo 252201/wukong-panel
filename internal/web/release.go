@@ -64,8 +64,8 @@ func (s *Server) latestRelease(w http.ResponseWriter, r *http.Request, _ store.S
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	client := s.fleetProbeClient
-	if client == nil {
-		client = http.DefaultClient
+	if client == nil || client.CheckRedirect != nil {
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
