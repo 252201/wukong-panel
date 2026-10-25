@@ -29,8 +29,22 @@ func TestLatestRelease_Success(t *testing.T) {
 		"body": "Test release notes"
 	}`
 
+	mockSingBoxRelease := `{
+		"tag_name": "v1.14.4",
+		"name": "v1.14.4",
+		"published_at": "2026-10-25T00:00:00Z",
+		"html_url": "https://github.com/SagerNet/sing-box/releases/tag/v1.14.4"
+	}`
+
 	server.fleetProbeClient = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) *http.Response {
+			if strings.Contains(req.URL.Path, "SagerNet/sing-box") {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(mockSingBoxRelease)),
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+				}
+			}
 			if strings.Contains(req.URL.Path, "/releases/latest") {
 				return &http.Response{
 					StatusCode: http.StatusOK,
@@ -70,6 +84,9 @@ func TestLatestRelease_Success(t *testing.T) {
 	}
 	if data.Body != "Test release notes" {
 		t.Fatalf("expected body 'Test release notes', got %s", data.Body)
+	}
+	if data.SingBoxVersion != "1.14.4" {
+		t.Fatalf("expected singBoxVersion 1.14.4, got %s", data.SingBoxVersion)
 	}
 }
 
@@ -111,5 +128,8 @@ func TestLatestRelease_Fallback(t *testing.T) {
 	}
 	if data.Version == "" {
 		t.Fatalf("expected non-empty fallback version")
+	}
+	if data.SingBoxVersion != "1.14.4" {
+		t.Fatalf("expected fallback singBoxVersion 1.14.4, got %s", data.SingBoxVersion)
 	}
 }

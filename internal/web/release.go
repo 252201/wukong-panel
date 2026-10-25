@@ -22,13 +22,16 @@ type githubReleasePayload struct {
 }
 
 type latestReleaseResult struct {
-	OK          bool   `json:"ok"`
-	Version     string `json:"version"`
-	Tag         string `json:"tag"`
-	Name        string `json:"name"`
-	PublishedAt string `json:"publishedAt,omitempty"`
-	HTMLURL     string `json:"htmlUrl,omitempty"`
-	Body        string `json:"body,omitempty"`
+	OK             bool   `json:"ok"`
+	Version        string `json:"version"`
+	Tag            string `json:"tag"`
+	Name           string `json:"name"`
+	PublishedAt    string `json:"publishedAt,omitempty"`
+	HTMLURL        string `json:"htmlUrl,omitempty"`
+	Body           string `json:"body,omitempty"`
+	SingBoxVersion string `json:"singBoxVersion,omitempty"`
+	SingBoxTag     string `json:"singBoxTag,omitempty"`
+	SingBoxURL     string `json:"singBoxUrl,omitempty"`
 }
 
 type releaseCache struct {
@@ -97,6 +100,33 @@ func (s *Server) latestRelease(w http.ResponseWriter, r *http.Request, _ store.S
 		Body:        gh.Body,
 	}
 
+	// Fetch latest sing-box release
+	reqSB, errSB := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/SagerNet/sing-box/releases/latest", nil)
+	if errSB == nil {
+		reqSB.Header.Set("User-Agent", "Wukong-Panel/"+s.version)
+		reqSB.Header.Set("Accept", "application/vnd.github.v3+json")
+		respSB, errDo := client.Do(reqSB)
+		if errDo == nil && respSB.StatusCode == http.StatusOK {
+			defer respSB.Body.Close()
+			bodySB, errRead := io.ReadAll(io.LimitReader(respSB.Body, 128*1024))
+			if errRead == nil {
+				var ghSB githubReleasePayload
+				if json.Unmarshal(bodySB, &ghSB) == nil && ghSB.TagName != "" {
+					res.SingBoxTag = ghSB.TagName
+					res.SingBoxVersion = strings.TrimPrefix(ghSB.TagName, "v")
+					res.SingBoxURL = ghSB.HTMLURL
+				}
+			}
+		} else if respSB != nil && respSB.Body != nil {
+			_ = respSB.Body.Close()
+		}
+	}
+	if res.SingBoxVersion == "" {
+		res.SingBoxVersion = "1.14.4"
+		res.SingBoxTag = "v1.14.4"
+		res.SingBoxURL = "https://github.com/SagerNet/sing-box/releases/tag/v1.14.4"
+	}
+
 	globalReleaseCache.mu.Lock()
 	globalReleaseCache.fetchedAt = time.Now()
 	globalReleaseCache.result = res
@@ -120,11 +150,14 @@ func (s *Server) respondWithFallbackRelease(w http.ResponseWriter) {
 		cleanVer = "1.7.27"
 	}
 	fallback := latestReleaseResult{
-		OK:      true,
-		Version: cleanVer,
-		Tag:     "v" + cleanVer,
-		Name:    "v" + cleanVer,
-		HTMLURL: fmt.Sprintf("https://github.com/252201/wukong-panel/releases/tag/v%s", cleanVer),
+		OK:             true,
+		Version:        cleanVer,
+		Tag:            "v" + cleanVer,
+		Name:           "v" + cleanVer,
+		HTMLURL:        fmt.Sprintf("https://github.com/252201/wukong-panel/releases/tag/v%s", cleanVer),
+		SingBoxVersion: "1.14.4",
+		SingBoxTag:     "v1.14.4",
+		SingBoxURL:     "https://github.com/SagerNet/sing-box/releases/tag/v1.14.4",
 	}
 	writeJSON(w, http.StatusOK, fallback)
 }

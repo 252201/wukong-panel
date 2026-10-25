@@ -5,6 +5,7 @@ import {
   isNewerVersion,
   getProbeUpdateCommand,
   getPanelUpdateCommand,
+  getSingBoxUpdateCommand,
   fetchLatestRelease
 } from './versionCheck.ts';
 
@@ -83,11 +84,22 @@ test('host fleet update detection matches actual probe and panel scenarios', () 
 test('official update commands return correct curl scripts', () => {
   const probeCmd = getProbeUpdateCommand();
   const panelCmd = getPanelUpdateCommand();
+  const singBoxCmd = getSingBoxUpdateCommand();
 
   assert.match(probeCmd, /probe-install\.sh/);
   assert.match(probeCmd, /--update/);
   assert.match(panelCmd, /install\.sh/);
   assert.match(panelCmd, /--update/);
+  assert.match(singBoxCmd, /install\.sh/);
+  assert.match(singBoxCmd, /--update-sing-box/);
+});
+
+test('sing-box version comparison detects new sing-box releases', () => {
+  // Current host runs 1.14.3, latest is 1.14.4
+  assert.equal(isNewerVersion('1.14.3', '1.14.4'), true);
+  assert.equal(isNewerVersion('v1.14.3', 'v1.14.4'), true);
+  assert.equal(isNewerVersion('1.14.4', '1.14.4'), false);
+  assert.equal(isNewerVersion('1.14.5', '1.14.4'), false);
 });
 
 test('fetchLatestRelease fetches and parses release response', async () => {

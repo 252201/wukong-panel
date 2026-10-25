@@ -1316,6 +1316,27 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   line-height: 1;
 }
 
+.fleet-version-dot {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.6;
+  margin: 0 1px;
+}
+
+.singbox-update-pill {
+  border-color: rgba(99, 102, 241, 0.45);
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+}
+.singbox-update-pill:hover,
+.singbox-update-pill:focus-visible {
+  border-color: #818cf8;
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);
+}
+
 /* Host update modal */
 .host-update-modal {
   width: min(600px, 94vw);
@@ -1462,6 +1483,107 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   gap: 8px;
 }
 
+/* sing-box online update styles */
+.singbox-online-update-section {
+  margin: 16px 0;
+}
+.singbox-update-action-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 4px;
+}
+.singbox-update-action-box .action-desc h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--paper);
+}
+.singbox-update-action-box .action-desc small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.singbox-start-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.singbox-update-progress-card {
+  padding: 14px 16px;
+  background: rgba(var(--shadow-rgb), 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.progress-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--paper);
+}
+.progress-pct {
+  font-family: var(--mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: #818cf8;
+}
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(var(--wash-rgb), 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  transition: width 0.3s ease;
+  border-radius: 9999px;
+}
+.progress-bar-fill.success {
+  background: var(--jade);
+}
+.progress-bar-fill.failed {
+  background: var(--danger-text, #ef4444);
+}
+.singbox-update-err-msg {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger-text, #ef4444);
+  word-break: break-all;
+}
+.progress-retry-action {
+  display: flex;
+  justify-content: flex-end;
+}
+.status-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.status-icon.spinning {
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-top-color: #818cf8;
+  animation: spin 0.8s linear infinite;
+}
+.status-icon.success {
+  background: var(--jade);
+}
+.status-icon.failed {
+  background: var(--danger-text, #ef4444);
+}
+
 /* Light mode overrides for version update */
 :root[data-effective-theme="light"] .fleet-update-pill {
   border-color: rgba(16, 185, 129, 0.4);
@@ -1497,4 +1619,24 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .update-notes-body {
   background: #fcfdfc;
   border-color: rgba(24, 32, 45, 0.08);
+}
+:root[data-effective-theme="light"] .singbox-update-pill {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
+}
+:root[data-effective-theme="light"] .singbox-update-pill:hover,
+:root[data-effective-theme="light"] .singbox-update-pill:focus-visible {
+  border-color: #4338ca;
+  background: rgba(99, 102, 241, 0.16);
+  color: #3730a3;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15);
+}
+:root[data-effective-theme="light"] .singbox-update-action-box {
+  background: #f5f6ff;
+  border-color: rgba(99, 102, 241, 0.2);
+}
+:root[data-effective-theme="light"] .singbox-update-progress-card {
+  background: #f8fafc;
+  border-color: rgba(99, 102, 241, 0.25);
 }
