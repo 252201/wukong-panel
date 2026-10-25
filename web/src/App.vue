@@ -102,6 +102,13 @@ const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
 const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
+const hostUpdating = ref(false)
+const hostUpdateJob = ref<Job | null>(null)
+const hostUpdateError = ref('')
+const hostReconnecting = ref(false)
+const hostReconnectAttempts = ref(0)
+let hostPollTimer: ReturnType<typeof setTimeout> | undefined
+let hostReconnectTimer: ReturnType<typeof setTimeout> | undefined
 const latestRelease = ref<ReleaseInfo | null>(null)
 const latestReleaseVersion = computed(() => latestRelease.value?.version || '')
 const latestReleaseNotes = computed(() => latestRelease.value?.body || '')
@@ -674,13 +681,136 @@ function hostUpdateCurrentVersion(host: FleetHost): string {
   return v.startsWith('v') || v.startsWith('V') ? v : `v${v}`
 }
 
+function hostUpdateOnlineSupported(host: FleetHost): boolean {
+  if (host.id === 'local') return true
+  if (isProbeHost(host)) {
+    return (host.capabilities || []).includes('probe.update')
+  }
+  return false
+}
+
 function hostUpdateCommand(host: FleetHost): string {
   return isProbeHost(host) ? getProbeUpdateCommand() : getPanelUpdateCommand()
 }
 
 function openHostUpdateModal(host: FleetHost) {
   hostUpdateTarget.value = host
+  hostUpdating.value = false
+  hostUpdateJob.value = null
+  hostUpdateError.value = ''
+  hostReconnecting.value = false
+  hostReconnectAttempts.value = 0
+  if (hostPollTimer) {
+    clearTimeout(hostPollTimer)
+    hostPollTimer = undefined
+  }
+  if (hostReconnectTimer) {
+    clearTimeout(hostReconnectTimer)
+    hostReconnectTimer = undefined
+  }
   modal.value = 'host-update'
+
+  const comp = isProbeHost(host) ? 'probe' : 'panel'
+  const pending = pendingComponentUpdateJob(host.id, comp)
+  if (pending) {
+    hostUpdateJob.value = pending
+    hostUpdating.value = true
+    void pollHostJob(host, pending.id)
+  }
+}
+
+async function startHostUpgrade(host: FleetHost) {
+  if (hostUpdating.value || hostReconnecting.value) return
+  hostUpdating.value = true
+  hostUpdateError.value = ''
+  hostReconnecting.value = false
+  hostReconnectAttempts.value = 0
+  try {
+    const comp = isProbeHost(host) ? 'probe' : 'panel'
+    const client = componentUpdateAPI(host.id, comp)
+    const currentVer = hostUpdateCurrentVersion(host).replace(/^v/i, '')
+    const targetVer = latestReleaseVersion.value
+    const res = await client.update(currentVer, targetVer)
+    const queued: Job = {
+      id: res.jobId,
+      kind: isProbeHost(host) ? 'probe.update' : 'panel.update',
+      target: host.id,
+      status: 'queued',
+      progress: 0,
+      message: `等待更新${isProbeHost(host) ? '轻量探针' : '面板服务'}…`,
+      createdAt: '',
+      updatedAt: '',
+    }
+    startComponentUpdateJob(host.id, comp, queued)
+    hostUpdateJob.value = queued
+    void pollHostJob(host, res.jobId)
+  } catch (err) {
+    hostUpdating.value = false
+    hostUpdateError.value = err instanceof Error ? err.message : '启动更新失败'
+  }
+}
+
+async function pollHostJob(host: FleetHost, jobId: string) {
+  const comp = isProbeHost(host) ? 'probe' : 'panel'
+  try {
+    const client = componentUpdateAPI(host.id, comp)
+    const job = await client.job(jobId)
+    refreshComponentUpdateJob(host.id, comp, job)
+    hostUpdateJob.value = job
+    if (job.status === 'success') {
+      hostUpdating.value = false
+      if (host.id === 'local') {
+        hostReconnecting.value = true
+        hostReconnectAttempts.value = 0
+        void startPanelReconnect()
+      } else {
+        const targetVer = latestReleaseVersion.value
+        host.panelVersion = targetVer
+        if (host.snapshot?.overview) {
+          host.snapshot.overview.panelVersion = targetVer
+        }
+        notify(`轻量探针升级成功，已更新至 v${targetVer}`)
+      }
+      return
+    }
+    if (job.status === 'failed') {
+      hostUpdating.value = false
+      hostUpdateError.value = job.error || job.message || '更新执行失败'
+      return
+    }
+    hostPollTimer = setTimeout(() => void pollHostJob(host, jobId), host.id === 'local' ? 1000 : 1500)
+  } catch {
+    if (host.id === 'local' && hostUpdateJob.value && (hostUpdateJob.value.progress >= 80 || hostUpdateJob.value.status === 'running')) {
+      hostUpdating.value = false
+      hostReconnecting.value = true
+      hostReconnectAttempts.value = 0
+      void startPanelReconnect()
+      return
+    }
+    hostPollTimer = setTimeout(() => void pollHostJob(host, jobId), 1500)
+  }
+}
+
+function startPanelReconnect() {
+  if (!hostReconnecting.value) return
+  hostReconnectAttempts.value++
+  api.overview()
+    .then(() => {
+      hostReconnecting.value = false
+      notify(`面板已成功升级至 v${latestReleaseVersion.value}！`)
+      modal.value = null
+      setTimeout(() => {
+        window.location.reload()
+      }, 500)
+    })
+    .catch(() => {
+      if (hostReconnectAttempts.value >= 60) {
+        hostReconnecting.value = false
+        hostUpdateError.value = '面板服务重启超时，请登录终端检查状态'
+        return
+      }
+      hostReconnectTimer = setTimeout(() => void startPanelReconnect(), 2000)
+    })
 }
 
 async function copyHostUpdateCommand(host: FleetHost) {
@@ -2541,10 +2671,42 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
       </div>
 
+      <!-- 在线一键升级进度或控制区 -->
+      <div v-if="hostUpdateOnlineSupported(hostUpdateTarget)" class="host-online-update-section">
+        <div v-if="hostUpdating || hostUpdateJob || hostReconnecting" class="singbox-update-progress-card">
+          <div class="progress-header">
+            <span class="progress-status">
+              <i :class="hostReconnecting ? 'status-icon spinning' : (hostUpdateJob?.status === 'success' ? 'status-icon success' : (hostUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning'))"></i>
+              <b>{{ hostReconnecting ? `面板服务正在平滑重启，正在等待重新连接 (第 ${hostReconnectAttempts} 次重试)…` : (hostUpdateJob?.message || (hostUpdating ? '正在执行更新…' : '更新完成')) }}</b>
+            </span>
+            <span class="progress-pct">{{ hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0) }}%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" :style="{ width: `${hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0)}%` }" :class="{ success: hostUpdateJob?.status === 'success' || hostReconnecting, failed: hostUpdateJob?.status === 'failed' }"></div>
+          </div>
+          <p v-if="hostUpdateError" class="singbox-update-err-msg">{{ hostUpdateError }}</p>
+          <div v-if="hostUpdateJob?.status === 'failed'" class="progress-retry-action">
+            <button type="button" class="mini-btn" @click="startHostUpgrade(hostUpdateTarget)">重新尝试升级</button>
+          </div>
+        </div>
+        <div v-else class="singbox-update-action-box">
+          <div class="action-desc">
+            <h4>在线一键升级</h4>
+            <small>{{ isProbeHost(hostUpdateTarget) ? '由中央控制台向远端探针下发安全自更新指令：' : '自动备份当前数据库与配置，无需登录终端无缝升级：' }}</small>
+          </div>
+          <button type="button" class="primary singbox-start-btn" :disabled="hostUpdating || !hostUpdateTarget.online" @click="startHostUpgrade(hostUpdateTarget)">
+            🚀 立即升级{{ isProbeHost(hostUpdateTarget) ? '探针' : '面板' }}至 v{{ latestReleaseVersion }}
+          </button>
+        </div>
+      </div>
+      <div v-else-if="isProbeHost(hostUpdateTarget)" class="host-update-warning-banner">
+        <p><b>提示：</b>当前探针版本（{{ hostUpdateCurrentVersion(hostUpdateTarget) }}）尚未包含在线升级管道。请登录该机器终端执行下方升级命令，更新后将自动启用面板在线一键更新支持。</p>
+      </div>
+
       <div class="host-update-command-section">
         <div class="update-command-header">
-          <h4>{{ isProbeHost(hostUpdateTarget) ? '远端一键升级命令' : '服务器一键升级命令' }}</h4>
-          <small>请登录目标机器终端以 <code>root</code> 执行：</small>
+          <h4>{{ isProbeHost(hostUpdateTarget) ? '远端终端升级命令（备选）' : '服务器终端升级命令（备选）' }}</h4>
+          <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
         </div>
         <div class="update-command-box">
           <code>{{ hostUpdateCommand(hostUpdateTarget) }}</code>
@@ -2567,7 +2729,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </a>
         <div class="actions-right">
           <button type="button" class="secondary" @click="modal = null">关闭</button>
-          <button type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
+          <button v-if="!hostUpdating && hostUpdateJob?.status !== 'success' && !hostReconnecting && hostUpdateOnlineSupported(hostUpdateTarget)" type="button" class="primary" @click="startHostUpgrade(hostUpdateTarget)">
+            立即在线升级
+          </button>
+          <button v-else type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
             复制升级命令
           </button>
         </div>

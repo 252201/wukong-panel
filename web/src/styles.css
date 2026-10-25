@@ -1483,9 +1483,23 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   gap: 8px;
 }
 
-/* sing-box online update styles */
-.singbox-online-update-section {
+/* sing-box and host online update styles */
+.singbox-online-update-section,
+.host-online-update-section {
   margin: 16px 0;
+}
+.host-update-warning-banner {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--paper);
+  line-height: 1.5;
+}
+.host-update-warning-banner p {
+  margin: 0;
 }
 .singbox-update-action-box {
   display: flex;

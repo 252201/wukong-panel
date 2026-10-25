@@ -46,7 +46,7 @@ func TestJoinAndHeartbeatUseReadOnlyFleetProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.HostID != "host-1" || enroll.Name != "Probe VPS" || enroll.Token != "one-time" || strings.Join(enroll.Capabilities, ",") != "overview,probe" || enroll.PanelVersion != "" {
+	if config.HostID != "host-1" || enroll.Name != "Probe VPS" || enroll.Token != "one-time" || strings.Join(enroll.Capabilities, ",") != "overview,probe,probe.update" || enroll.PanelVersion != "" {
 		t.Fatalf("enrollment=%+v config=%+v", enroll, config)
 	}
 	for _, name := range []string{"config.json", "token"} {
@@ -67,7 +67,7 @@ func TestJoinAndHeartbeatUseReadOnlyFleetProtocol(t *testing.T) {
 	if err = client.Heartbeat(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !heartbeat.Snapshot.Full || heartbeat.Snapshot.Overview.Now.Timestamp == 0 || heartbeat.Snapshot.Overview.NodeCount != 0 || len(heartbeat.Snapshot.Nodes) != 0 || heartbeat.PanelVersion != "1.7.0" || strings.Join(heartbeat.Capabilities, ",") != "overview,probe" {
+	if !heartbeat.Snapshot.Full || heartbeat.Snapshot.Overview.Now.Timestamp == 0 || heartbeat.Snapshot.Overview.NodeCount != 0 || len(heartbeat.Snapshot.Nodes) != 0 || heartbeat.PanelVersion != "1.7.0" || strings.Join(heartbeat.Capabilities, ",") != "overview,probe,probe.update" {
 		t.Fatalf("heartbeat=%+v", heartbeat)
 	}
 }

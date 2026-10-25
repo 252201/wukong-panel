@@ -564,7 +564,7 @@ func (s *Server) fleetAgentNextCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, err := s.store.FleetHost(hostID)
-	if err != nil || !host.Compatible || fleetHasCapability(host, "probe") {
+	if err != nil || !host.Compatible || (fleetHasCapability(host, "probe") && !fleetHasCapability(host, "probe.update")) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -787,7 +787,11 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, 409, "远端 Agent 不支持此安全功能，请更新完整面板")
 		return
 	}
-	if fleetHasCapability(host, "probe") {
+	if (resource == "system/probe" || resource == "system/probe/update") && !fleetHasCapability(host, "probe.update") {
+		writeError(w, 409, "Remote Probe does not support online updates")
+		return
+	}
+	if fleetHasCapability(host, "probe") && resource != "system/probe/update" && resource != "system/probe" {
 		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
 		return
 	}
@@ -977,6 +981,8 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 		req.Operation = parts[2]
 		payload, _ := json.Marshal(req)
 		return parts[1] + "." + parts[2], payload, parts[2] == "update", nil
+	case len(parts) == 3 && parts[0] == "system" && parts[1] == "probe" && parts[2] == "update" && r.Method == http.MethodPost:
+		return "probe.update", body, true, nil
 	case r.Method == http.MethodGet && (resource == "system/firewall" || resource == "system/fail2ban"):
 		payload, _ := json.Marshal(model.SecurityRequest{Zone: r.URL.Query().Get("zone")})
 		return "security." + parts[1] + ".status", payload, false, nil

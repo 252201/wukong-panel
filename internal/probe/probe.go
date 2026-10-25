@@ -1,8 +1,11 @@
 package probe
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -25,7 +29,7 @@ import (
 
 const Capability = "probe"
 
-var Capabilities = []string{"overview", Capability}
+var Capabilities = []string{"overview", Capability, "probe.update"}
 
 type Config struct {
 	ControllerURL                string `json:"controllerUrl"`
@@ -228,6 +232,7 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 func (c *Client) Run(ctx context.Context) {
 	go c.Network.Run(ctx)
 	go c.Location.Run(ctx)
+	go c.pollCommands(ctx)
 	backoff := time.Second
 	for ctx.Err() == nil {
 		delay := 10 * time.Second
@@ -247,6 +252,238 @@ func (c *Client) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+	}
+}
+
+func (c *Client) pollCommands(ctx context.Context) {
+	for ctx.Err() == nil {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Config.ControllerURL+"api/v1/fleet/agent/commands/next?wait=25", nil)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		req.Header.Set("X-Wukong-Host-ID", c.Config.HostID)
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		if resp.StatusCode == http.StatusNoContent {
+			resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		var command model.FleetCommand
+		err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&command)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		if command.Kind == "probe.update" {
+			c.handleProbeUpdate(ctx, command)
+		}
+	}
+}
+
+func (c *Client) sendCommandResult(ctx context.Context, id, status, resultErr string, resultData any) {
+	var raw json.RawMessage
+	if resultData != nil {
+		b, _ := json.Marshal(resultData)
+		raw = b
+	}
+	res := model.FleetCommandResult{
+		Status: status,
+		Result: raw,
+		Error:  resultErr,
+	}
+	body, _ := json.Marshal(res)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Config.ControllerURL+"api/v1/fleet/agent/commands/"+url.PathEscape(id)+"/result", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("X-Wukong-Host-ID", c.Config.HostID)
+	resp, err := c.HTTP.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetCommand) {
+	var req struct {
+		TargetVersion string `json:"targetVersion"`
+	}
+	_ = json.Unmarshal(command.Payload, &req)
+	cleanVer := strings.TrimPrefix(strings.TrimSpace(req.TargetVersion), "v")
+
+	if cleanVer == "" || cleanVer == "latest" {
+		ghReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/252201/wukong-panel/releases/latest", nil)
+		if err == nil {
+			ghReq.Header.Set("User-Agent", "wukong-probe/updater")
+			ghReq.Header.Set("Accept", "application/vnd.github.v3+json")
+			if ghResp, err := c.HTTP.Do(ghReq); err == nil && ghResp.StatusCode == http.StatusOK {
+				var payload struct {
+					TagName string `json:"tag_name"`
+				}
+				if json.NewDecoder(ghResp.Body).Decode(&payload) == nil && payload.TagName != "" {
+					cleanVer = strings.TrimPrefix(payload.TagName, "v")
+				}
+				ghResp.Body.Close()
+			}
+		}
+	}
+
+	if cleanVer == "" {
+		c.sendCommandResult(ctx, command.ID, "failed", "无法确定目标版本", nil)
+		return
+	}
+
+	arch := runtime.GOARCH
+	assetName := fmt.Sprintf("wukong-probe-linux-%s", arch)
+	baseURL := fmt.Sprintf("https://github.com/252201/wukong-panel/releases/download/v%s", cleanVer)
+	if override := os.Getenv("WUKONG_TEST_PROBE_DOWNLOAD_URL"); override != "" {
+		baseURL = override
+	}
+
+	// 1. Download SHA256SUMS
+	sumsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/SHA256SUMS", nil)
+	if err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", err.Error(), nil)
+		return
+	}
+	sumsReq.Header.Set("User-Agent", "wukong-probe/updater")
+	sumsResp, err := c.HTTP.Do(sumsReq)
+	if err != nil || sumsResp.StatusCode != http.StatusOK {
+		if sumsResp != nil && sumsResp.Body != nil {
+			sumsResp.Body.Close()
+		}
+		c.sendCommandResult(ctx, command.ID, "failed", "下载校验清单失败", nil)
+		return
+	}
+	defer sumsResp.Body.Close()
+
+	expectedSHA := ""
+	scanner := bufio.NewScanner(io.LimitReader(sumsResp.Body, 1<<20))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && filepath.Base(fields[1]) == assetName {
+			expectedSHA = strings.ToLower(fields[0])
+			break
+		}
+	}
+	if len(expectedSHA) != 64 {
+		c.sendCommandResult(ctx, command.ID, "failed", "校验清单缺少有效哈希", nil)
+		return
+	}
+
+	// 2. Download probe asset
+	tmpFile, err := os.CreateTemp("", ".probe-stage-*")
+	if err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", err.Error(), nil)
+		return
+	}
+	stagePath := tmpFile.Name()
+	defer os.Remove(stagePath)
+
+	binReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/"+assetName, nil)
+	if err != nil {
+		tmpFile.Close()
+		c.sendCommandResult(ctx, command.ID, "failed", err.Error(), nil)
+		return
+	}
+	binReq.Header.Set("User-Agent", "wukong-probe/updater")
+	binResp, err := c.HTTP.Do(binReq)
+	if err != nil || binResp.StatusCode != http.StatusOK {
+		tmpFile.Close()
+		if binResp != nil && binResp.Body != nil {
+			binResp.Body.Close()
+		}
+		c.sendCommandResult(ctx, command.ID, "failed", "下载探针二进制失败", nil)
+		return
+	}
+	defer binResp.Body.Close()
+
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(tmpFile, hasher), io.LimitReader(binResp.Body, 64<<20))
+	if err != nil || written <= 0 {
+		tmpFile.Close()
+		c.sendCommandResult(ctx, command.ID, "failed", "保存探针文件失败", nil)
+		return
+	}
+
+	actualSHA := hex.EncodeToString(hasher.Sum(nil))
+	if actualSHA != expectedSHA {
+		tmpFile.Close()
+		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("哈希不匹配 (期望: %s, 实际: %s)", expectedSHA, actualSHA), nil)
+		return
+	}
+
+	_ = tmpFile.Chmod(0755)
+	_ = tmpFile.Sync()
+	_ = tmpFile.Close()
+
+	// 3. Test execution
+	testCmd := exec.CommandContext(ctx, stagePath, "version")
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("新版二进制测试执行失败: %s", strings.TrimSpace(string(out))), nil)
+		return
+	}
+
+	// 4. Replace binary
+	destBin := "/usr/local/bin/wukong-probe"
+	if override := os.Getenv("WUKONG_TEST_PROBE_BIN"); override != "" {
+		destBin = override
+	} else if ex, err := os.Executable(); err == nil {
+		if realEx, err := filepath.EvalSymlinks(ex); err == nil && filepath.Base(realEx) == "wukong-probe" {
+			destBin = realEx
+		}
+	}
+
+	in, err := os.Open(stagePath)
+	if err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", err.Error(), nil)
+		return
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(destBin, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("写入目标二进制失败: %v", err), nil)
+		return
+	}
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close()
+		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("复制二进制失败: %v", err), nil)
+		return
+	}
+	_ = out.Sync()
+	out.Close()
+
+	c.sendCommandResult(ctx, command.ID, "success", "", map[string]any{"ok": true, "version": cleanVer})
+
+	if os.Getenv("WUKONG_TEST_NO_EXIT") != "1" {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
 	}
 }
 

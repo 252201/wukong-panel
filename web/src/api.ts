@@ -342,7 +342,7 @@ export interface ComponentUpdateState {
  autoUpdate: boolean; writable: boolean; reason?: string; checkedAt: string; updatedAt: string; lastError?: string
 }
 // Bind every request to the component's host, including after asynchronous work.
-export function componentUpdateAPI(hostId: string, component: 'cloudflared' | 'sing-box') {
+export function componentUpdateAPI(hostId: string, component: 'cloudflared' | 'sing-box' | 'panel' | 'probe') {
  const prefix=hostId==='local' ? '' : `fleet/hosts/${encodeURIComponent(hostId)}/`
  const call=<T>(path: string,options: RequestInit={})=>request<T>(prefix+path,options,false)
  const post=<T>(action:string,body:unknown)=>call<T>(`system/${component}/${action}`,{method:'POST',body:JSON.stringify(body)})
