@@ -795,14 +795,14 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, 409, "Remote Probe does not support online updates")
 		return
 	}
-	if fleetHasCapability(host, "probe") && resource != "system/probe/update" && resource != "system/probe" {
-		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
-		return
-	}
 	if r.Method == http.MethodGet {
 		if !host.Online && s.writeFleetSnapshotResource(w, host, resource) || !strings.HasPrefix(resource, "system/firewall") && !strings.HasPrefix(resource, "system/fail2ban") && s.writeFleetSnapshotResource(w, host, resource) {
 			return
 		}
+	}
+	if fleetHasCapability(host, "probe") && resource != "system/probe/update" && resource != "system/probe" {
+		writeError(w, http.StatusForbidden, "轻量探针仅支持舰队状态查看")
+		return
 	}
 	if !host.Online {
 		writeError(w, http.StatusConflict, "主机离线，只能查看最后快照")
@@ -931,11 +931,18 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 				return true
 			}
 		}
-		if job, err := s.store.Job(id); err == nil && strings.HasPrefix(job.Kind, "fleet.") && job.Target == host.Name {
+		if job, err := s.store.Job(id); err == nil && strings.HasPrefix(job.Kind, "fleet.") && (job.Target == host.Name || job.Target == host.ID) {
 			writeJSON(w, http.StatusOK, job)
 			return true
 		}
 		writeError(w, http.StatusNotFound, "任务不存在")
+	case resource == "system/probe":
+		writeJSON(w, http.StatusOK, model.ComponentUpdateState{
+			Installed:      true,
+			CurrentVersion: host.PanelVersion,
+			LatestVersion:  strings.TrimPrefix(s.version, "v"),
+			Writable:       fleetHasCapability(host, "probe.update"),
+		})
 	case resource == "settings":
 		snapshot.Settings.SubscriptionToken = maskToken(snapshot.Settings.SubscriptionToken)
 		if snapshot.Settings.ExpiresAt == "" && host.ExpiresAt != "" {

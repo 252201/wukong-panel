@@ -572,6 +572,15 @@ func TestProbeEnrollmentCannotGainFleetCommands(t *testing.T) {
 		t.Fatalf("expected probe waiting message, got %q", storedJob.Message)
 	}
 
+	jobReq := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/hosts/"+probeWithUpdate.ID+"/jobs/"+job.ID, nil)
+	jobReq.SetPathValue("hostId", probeWithUpdate.ID)
+	jobReq.SetPathValue("resource", "jobs/"+job.ID)
+	jobRec := httptest.NewRecorder()
+	server.fleetHostGateway(jobRec, jobReq, store.Session{Username: "admin"})
+	if jobRec.Code != http.StatusOK {
+		t.Fatalf("expected probe job query status 200, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+
 	next := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/agent/commands/next?wait=1", nil)
 	next.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
 	next.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
