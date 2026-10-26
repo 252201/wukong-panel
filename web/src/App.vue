@@ -806,7 +806,7 @@ function startPanelReconnect() {
       modal.value = null
       setTimeout(() => {
         window.location.reload()
-      }, 500)
+      }, 1000)
     })
     .catch(() => {
       if (hostReconnectAttempts.value >= 60) {
