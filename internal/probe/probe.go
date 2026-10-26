@@ -40,13 +40,14 @@ type Config struct {
 }
 
 type Client struct {
-	Config   Config
-	Token    string
-	HTTP     *http.Client
-	Sampler  *Sampler
-	Network  *netcheck.Service
-	Location *hostlocation.Detector
-	Version  string
+	Config       Config
+	Token        string
+	HTTP         *http.Client
+	DownloadHTTP *http.Client
+	Sampler      *Sampler
+	Network      *netcheck.Service
+	Location     *hostlocation.Detector
+	Version      string
 }
 
 func controllerURL(value string) (string, error) {
@@ -61,6 +62,28 @@ func newHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return errors.New("controller endpoint must not redirect")
 	}}
+}
+
+func newDownloadHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			if req.URL.Scheme != "https" && os.Getenv("WUKONG_TEST_PROBE_DOWNLOAD_URL") == "" {
+				return errors.New("insecure redirect")
+			}
+			return nil
+		},
+	}
+}
+
+func (c *Client) getDownloadClient() *http.Client {
+	if c.DownloadHTTP != nil {
+		return c.DownloadHTTP
+	}
+	return newDownloadHTTPClient()
 }
 
 func identity(name string) model.FleetEnrollmentRequest {
@@ -334,12 +357,14 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 	_ = json.Unmarshal(command.Payload, &req)
 	cleanVer := strings.TrimPrefix(strings.TrimSpace(req.TargetVersion), "v")
 
+	downloadClient := c.getDownloadClient()
+
 	if cleanVer == "" || cleanVer == "latest" {
 		ghReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/252201/wukong-panel/releases/latest", nil)
 		if err == nil {
 			ghReq.Header.Set("User-Agent", "wukong-probe/updater")
 			ghReq.Header.Set("Accept", "application/vnd.github.v3+json")
-			if ghResp, err := c.HTTP.Do(ghReq); err == nil && ghResp.StatusCode == http.StatusOK {
+			if ghResp, err := downloadClient.Do(ghReq); err == nil && ghResp.StatusCode == http.StatusOK {
 				var payload struct {
 					TagName string `json:"tag_name"`
 				}
@@ -370,12 +395,18 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 		return
 	}
 	sumsReq.Header.Set("User-Agent", "wukong-probe/updater")
-	sumsResp, err := c.HTTP.Do(sumsReq)
+	sumsResp, err := downloadClient.Do(sumsReq)
 	if err != nil || sumsResp.StatusCode != http.StatusOK {
 		if sumsResp != nil && sumsResp.Body != nil {
 			sumsResp.Body.Close()
 		}
-		c.sendCommandResult(ctx, command.ID, "failed", "下载校验清单失败", nil)
+		errMsg := "下载校验清单失败"
+		if err != nil {
+			errMsg = fmt.Sprintf("下载校验清单失败: %v", err)
+		} else if sumsResp != nil {
+			errMsg = fmt.Sprintf("下载校验清单失败 (HTTP %d)", sumsResp.StatusCode)
+		}
+		c.sendCommandResult(ctx, command.ID, "failed", errMsg, nil)
 		return
 	}
 	defer sumsResp.Body.Close()
@@ -410,13 +441,19 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 		return
 	}
 	binReq.Header.Set("User-Agent", "wukong-probe/updater")
-	binResp, err := c.HTTP.Do(binReq)
+	binResp, err := downloadClient.Do(binReq)
 	if err != nil || binResp.StatusCode != http.StatusOK {
 		tmpFile.Close()
 		if binResp != nil && binResp.Body != nil {
 			binResp.Body.Close()
 		}
-		c.sendCommandResult(ctx, command.ID, "failed", "下载探针二进制失败", nil)
+		errMsg := "下载探针二进制失败"
+		if err != nil {
+			errMsg = fmt.Sprintf("下载探针二进制失败: %v", err)
+		} else if binResp != nil {
+			errMsg = fmt.Sprintf("下载探针二进制失败 (HTTP %d)", binResp.StatusCode)
+		}
+		c.sendCommandResult(ctx, command.ID, "failed", errMsg, nil)
 		return
 	}
 	defer binResp.Body.Close()
