@@ -208,3 +208,32 @@ test('mobile view removes the "可" character from update pill via responsive CS
   );
 });
 
+test('system-glance (主机气脉) card version meta layout matches central fleet host card', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // Verify system-glance includes .fleet-host-version-meta with dot separator
+  assert.ok(
+    appVue.includes('<div class="version-strip"><div class="fleet-host-version-meta"><span class="fleet-host-version-text">Panel {{ overview?.panelVersion || \'—\' }}</span>'),
+    'App.vue system-glance card must structure version meta with .fleet-host-version-meta and .fleet-host-version-text'
+  );
+  assert.ok(
+    appVue.includes('<span class="fleet-version-dot">·</span><span class="fleet-host-version-text">sing-box {{ overview?.singBoxVersion || \'—\' }}</span>'),
+    'App.vue system-glance card must include .fleet-version-dot separator between Panel and sing-box'
+  );
+
+  // Verify styles.css version-strip does not use justify-content: space-between
+  assert.doesNotMatch(
+    stylesCss,
+    /\.version-strip\s*\{[^}]*justify-content:\s*space-between/,
+    'styles.css .version-strip must not use space-between so versions remain together on the left'
+  );
+
+  // Verify styles.css .fleet-update-pill uses unified gold border and transparent background
+  assert.match(
+    stylesCss,
+    /\.fleet-update-pill\s*\{[\s\S]*?border:\s*1px solid rgba\(211,\s*169,\s*77,\s*0\.22\);/,
+    'styles.css .fleet-update-pill must use unified gold border rgba(211, 169, 77, 0.22)'
+  );
+});
+
