@@ -589,6 +589,23 @@ func TestProbeEnrollmentCannotGainFleetCommands(t *testing.T) {
 	if nextRecorder.Code != http.StatusNoContent {
 		t.Fatalf("probe command poll status=%d", nextRecorder.Code)
 	}
+
+	resultReq := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/commands/"+cmd.ID+"/result", strings.NewReader(`{"status":"success","result":{}}`))
+	resultReq.SetPathValue("id", cmd.ID)
+	resultReq.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
+	resultReq.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
+	resultRec := httptest.NewRecorder()
+	server.fleetAgentCommandResult(resultRec, resultReq)
+	if resultRec.Code != http.StatusNoContent {
+		t.Fatalf("expected result status 204, got %d: %s", resultRec.Code, resultRec.Body.String())
+	}
+	finishedJob, err := database.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finishedJob.Status != "success" || finishedJob.Message != "轻量探针升级成功，已平滑重启" {
+		t.Fatalf("expected probe upgrade success message, got status=%q message=%q", finishedJob.Status, finishedJob.Message)
+	}
 }
 
 func TestProbeEnrollmentCommandUsesSeparateInstaller(t *testing.T) {

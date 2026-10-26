@@ -238,7 +238,7 @@ func TestFleetFirewallBatchCapabilityAndHostIsolation(t *testing.T) {
 								}
 								cipher, e := s.fleetVault.Encrypt(`{"revision":"r","changes":[]}`)
 								if e == nil {
-									_, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
+									_, _, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
 								}
 								done <- e
 								return
@@ -373,7 +373,7 @@ func TestFleetManualBanCapabilityAndHostIsolation(t *testing.T) {
 								}
 								cipher, e := s.fleetVault.Encrypt(`{"revision":"r","changes":[]}`)
 								if e == nil {
-									_, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
+									_, _, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
 								}
 								done <- e
 								return
@@ -466,7 +466,7 @@ func TestFleetPermanentBanCapabilityAndHostIsolation(t *testing.T) {
 								}
 								cipher, e := s.fleetVault.Encrypt(`{"revision":"r","changes":[]}`)
 								if e == nil {
-									_, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
+									_, _, e = db.CompleteFleetCommand(record.Command.ID, "success", cipher, "")
 								}
 								done <- e
 								return

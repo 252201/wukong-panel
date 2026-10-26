@@ -255,3 +255,41 @@ test('light mode restores emerald green for panel/probe and indigo blue-purple f
   );
 });
 
+test('host update and sing-box update modals display success banner and completion actions', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // Verify host update modal has version-diff-card-success banner
+  assert.ok(
+    appVue.includes("hostUpdateJob?.status === 'success' && !hostReconnecting"),
+    'App.vue host-update modal must check success state for completion banner'
+  );
+  assert.ok(
+    appVue.includes("✓ 升级完成（关闭）"),
+    'App.vue host-update modal must offer explicit completion button on success'
+  );
+  assert.ok(
+    appVue.includes("hostUpdateJob?.status !== 'success' || hostReconnecting"),
+    'App.vue must hide fallback terminal command section when host update succeeds'
+  );
+
+  // Verify sing-box update modal has success banner and completion button
+  assert.ok(
+    appVue.includes("singBoxUpdateJob?.status === 'success'"),
+    'App.vue singbox-update modal must check success state'
+  );
+
+  // Verify styles.css contains .version-diff-card-success and .update-success-card
+  assert.match(
+    stylesCss,
+    /\.version-diff-card-success\s*\{/,
+    'styles.css must style .version-diff-card-success'
+  );
+  assert.match(
+    stylesCss,
+    /\.update-success-card\s*\{/,
+    'styles.css must style .update-success-card'
+  );
+});
+
+

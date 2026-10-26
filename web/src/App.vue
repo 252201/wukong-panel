@@ -2663,7 +2663,16 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <span>{{ hostUpdateTarget.hostname || hostUpdateTarget.id }} · {{ isProbeHost(hostUpdateTarget) ? '轻量探针' : '面板主控' }}</span>
       </div>
 
-      <div class="version-diff-card">
+      <div v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" class="version-diff-card version-diff-card-success">
+        <div class="version-success-banner">
+          <span class="version-success-check">✓</span>
+          <div class="version-success-text">
+            <b>{{ isProbeHost(hostUpdateTarget) ? '轻量探针升级成功' : '面板服务升级成功' }}</b>
+            <span>当前运行版本：<strong>v{{ latestReleaseVersion }}</strong> · 远端进程已平滑重启并恢复正常通讯</span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="version-diff-card">
         <div class="version-diff-box current">
           <span class="diff-label">当前运行版本</span>
           <span class="diff-val">{{ hostUpdateCurrentVersion(hostUpdateTarget) }}</span>
@@ -2678,17 +2687,20 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <!-- 在线一键升级进度或控制区 -->
       <div v-if="hostUpdateOnlineSupported(hostUpdateTarget)" class="host-online-update-section">
-        <div v-if="hostUpdating || hostUpdateJob || hostReconnecting" class="singbox-update-progress-card">
+        <div v-if="hostUpdating || hostUpdateJob || hostReconnecting" class="singbox-update-progress-card" :class="{ 'update-success-card': hostUpdateJob?.status === 'success' && !hostReconnecting }">
           <div class="progress-header">
             <span class="progress-status">
               <i :class="hostReconnecting ? 'status-icon spinning' : (hostUpdateJob?.status === 'success' ? 'status-icon success' : (hostUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning'))"></i>
-              <b>{{ hostReconnecting ? `面板服务正在平滑重启，正在等待重新连接 (第 ${hostReconnectAttempts} 次重试)…` : (hostUpdateJob?.message || (hostUpdating ? '正在执行更新…' : '更新完成')) }}</b>
+              <b>{{ hostReconnecting ? `面板服务正在平滑重启，正在等待重新连接 (第 ${hostReconnectAttempts} 次重试)…` : (hostUpdateJob?.status === 'success' ? (isProbeHost(hostUpdateTarget) ? '轻量探针升级成功，已平滑重启' : '面板服务升级成功，已平滑重启') : (hostUpdateJob?.message || (hostUpdating ? '正在执行更新…' : '更新完成'))) }}</b>
             </span>
             <span class="progress-pct">{{ hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0) }}%</span>
           </div>
           <div class="progress-bar-track">
             <div class="progress-bar-fill" :style="{ width: `${hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0)}%` }" :class="{ success: hostUpdateJob?.status === 'success' || hostReconnecting, failed: hostUpdateJob?.status === 'failed' }"></div>
           </div>
+          <p v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" class="update-success-subhint">
+            ✓ 远端服务已平滑加载新版本二进制，保留现有认证凭据与网络配置，已恢复正常通讯。
+          </p>
           <p v-if="hostUpdateError" class="singbox-update-err-msg">{{ hostUpdateError }}</p>
           <div v-if="hostUpdateJob?.status === 'failed' || hostUpdateError" class="progress-retry-action">
             <button type="button" class="mini-btn" @click="startHostUpgrade(hostUpdateTarget)">重新尝试升级</button>
@@ -2712,7 +2724,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <p><b>提示：</b>该远端面板主控当前运行版本（{{ hostUpdateCurrentVersion(hostUpdateTarget) }}）尚未包含跨机在线升级管道。更新至新版本后，将自动启用中央控制台在线一键升级支持。本次可直接登录该机自身 Web 面板在线更新，或在终端执行下方升级命令。</p>
       </div>
 
-      <div class="host-update-command-section">
+      <div v-if="hostUpdateJob?.status !== 'success' || hostReconnecting" class="host-update-command-section">
         <div class="update-command-header">
           <h4>{{ isProbeHost(hostUpdateTarget) ? '远端终端升级命令（备选）' : '服务器终端升级命令（备选）' }}</h4>
           <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
@@ -2737,13 +2749,18 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           查看 GitHub Release ↗
         </a>
         <div class="actions-right">
-          <button type="button" class="secondary" @click="modal = null">关闭</button>
-          <button v-if="!hostUpdating && hostUpdateJob?.status !== 'success' && !hostReconnecting && hostUpdateOnlineSupported(hostUpdateTarget)" type="button" class="primary" @click="startHostUpgrade(hostUpdateTarget)">
-            立即在线升级
+          <button v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" type="button" class="primary" @click="modal = null">
+            ✓ 升级完成（关闭）
           </button>
-          <button v-else type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
-            复制升级命令
-          </button>
+          <template v-else>
+            <button type="button" class="secondary" @click="modal = null">关闭</button>
+            <button v-if="!hostUpdating && !hostReconnecting && hostUpdateOnlineSupported(hostUpdateTarget)" type="button" class="primary" @click="startHostUpgrade(hostUpdateTarget)">
+              立即在线升级
+            </button>
+            <button v-else type="button" class="primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
+              复制升级命令
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -2759,7 +2776,16 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <span>{{ singBoxUpdateTarget.hostname || singBoxUpdateTarget.id }} · sing-box 内核</span>
       </div>
 
-      <div class="version-diff-card">
+      <div v-if="singBoxUpdateJob?.status === 'success'" class="version-diff-card version-diff-card-success">
+        <div class="version-success-banner">
+          <span class="version-success-check">✓</span>
+          <div class="version-success-text">
+            <b>sing-box 内核已成功升级至最新版本</b>
+            <span>当前运行版本：<strong>{{ latestSingBoxVersion }}</strong> · 节点与代理网络正常运行</span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="version-diff-card">
         <div class="version-diff-box current">
           <span class="diff-label">当前运行版本</span>
           <span class="diff-val">{{ hostSingBoxVersion(singBoxUpdateTarget) || '—' }}</span>
@@ -2774,17 +2800,20 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <!-- 在线一键更新进度或控制区 -->
       <div v-if="singBoxUpdateSupported(singBoxUpdateTarget)" class="singbox-online-update-section">
-        <div v-if="singBoxUpdating || singBoxUpdateJob" class="singbox-update-progress-card">
+        <div v-if="singBoxUpdating || singBoxUpdateJob" class="singbox-update-progress-card" :class="{ 'update-success-card': singBoxUpdateJob?.status === 'success' }">
           <div class="progress-header">
             <span class="progress-status">
               <i :class="singBoxUpdateJob?.status === 'success' ? 'status-icon success' : (singBoxUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning')"></i>
-              <b>{{ singBoxUpdateJob?.message || (singBoxUpdating ? '正在执行更新…' : '更新完成') }}</b>
+              <b>{{ singBoxUpdateJob?.status === 'success' ? 'sing-box 内核升级成功，已平滑重启' : (singBoxUpdateJob?.message || (singBoxUpdating ? '正在执行更新…' : '更新完成')) }}</b>
             </span>
             <span class="progress-pct">{{ singBoxUpdateJob?.progress ?? 0 }}%</span>
           </div>
           <div class="progress-bar-track">
             <div class="progress-bar-fill" :style="{ width: `${singBoxUpdateJob?.progress ?? 0}%` }" :class="{ success: singBoxUpdateJob?.status === 'success', failed: singBoxUpdateJob?.status === 'failed' }"></div>
           </div>
+          <p v-if="singBoxUpdateJob?.status === 'success'" class="update-success-subhint">
+            ✓ 内核服务已成功升级并完成健康探测，所有节点与网络规则已恢复正常代理。
+          </p>
           <p v-if="singBoxUpdateError" class="singbox-update-err-msg">{{ singBoxUpdateError }}</p>
           <div v-if="singBoxUpdateJob?.status === 'failed'" class="progress-retry-action">
             <button type="button" class="mini-btn" @click="startSingBoxUpgrade(singBoxUpdateTarget)">重新尝试升级</button>
@@ -2802,7 +2831,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       </div>
 
       <!-- 终端升级命令备选区 -->
-      <div class="host-update-command-section">
+      <div v-if="singBoxUpdateJob?.status !== 'success'" class="host-update-command-section">
         <div class="update-command-header">
           <h4>服务器终端一键升级命令</h4>
           <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
@@ -2820,13 +2849,18 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           查看 sing-box Release ↗
         </a>
         <div class="actions-right">
-          <button type="button" class="secondary" @click="modal = null">关闭</button>
-          <button v-if="!singBoxUpdating && singBoxUpdateJob?.status !== 'success' && singBoxUpdateSupported(singBoxUpdateTarget)" type="button" class="primary" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
-            立即升级内核
+          <button v-if="singBoxUpdateJob?.status === 'success'" type="button" class="primary" @click="modal = null">
+            ✓ 升级完成（关闭）
           </button>
-          <button v-else type="button" class="primary" @click="copySingBoxUpdateCommand">
-            复制升级命令
-          </button>
+          <template v-else>
+            <button type="button" class="secondary" @click="modal = null">关闭</button>
+            <button v-if="!singBoxUpdating && singBoxUpdateSupported(singBoxUpdateTarget)" type="button" class="primary" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
+              立即升级内核
+            </button>
+            <button v-else type="button" class="primary" @click="copySingBoxUpdateCommand">
+              复制升级命令
+            </button>
+          </template>
         </div>
       </div>
     </div>
