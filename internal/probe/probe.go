@@ -504,9 +504,35 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 	if os.Getenv("WUKONG_TEST_NO_EXIT") != "1" {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			os.Exit(0)
+			restartProbe()
 		}()
 	}
+}
+
+var restartProbeHook func()
+
+func restartProbe() {
+	if restartProbeHook != nil {
+		restartProbeHook()
+		return
+	}
+	if _, err := os.Stat("/run/systemd/system"); err == nil {
+		_ = exec.Command("systemctl", "restart", "wukong-probe.service").Run()
+		os.Exit(0)
+		return
+	}
+	if _, err := os.Stat("/sbin/openrc-run"); err == nil {
+		cmd := exec.Command("sh", "-c", "sleep 0.5 && (rc-service wukong-probe restart || rc-service wukong-probe start)")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err == nil {
+			os.Exit(0)
+			return
+		}
+		_ = exec.Command("rc-service", "wukong-probe", "restart").Run()
+		os.Exit(0)
+		return
+	}
+	os.Exit(0)
 }
 
 func replaceExecutable(src, dst string, mode os.FileMode) error {
