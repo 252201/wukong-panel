@@ -119,7 +119,7 @@ func TestFleetCommandRedeliveryReceiptAndExpiry(t *testing.T) {
 	if err != nil || receipt.Status != "success" {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	if _, err = database.CompleteFleetCommand(command.ID, "success", "sealed", ""); err != nil {
+	if _, _, err = database.CompleteFleetCommand(command.ID, "success", "sealed", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.NextFleetCommand("host-a"); err != sql.ErrNoRows {

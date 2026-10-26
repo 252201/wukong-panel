@@ -1391,6 +1391,59 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border: 1px solid rgba(74, 172, 130, 0.35);
 }
 
+.version-diff-card-success {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 14px 18px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 4px;
+  margin: 18px 0;
+}
+.version-success-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.version-success-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--jade);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.version-success-text b {
+  display: block;
+  font-size: 13px;
+  color: var(--paper);
+  margin-bottom: 2px;
+}
+.version-success-text span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.version-success-text strong {
+  font-family: var(--mono, monospace);
+  color: var(--jade);
+}
+.update-success-card {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.06);
+}
+.update-success-subhint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--jade);
+  line-height: 1.4;
+}
+
 .host-update-command-section {
   margin: 16px 0;
   display: flex;
@@ -1655,4 +1708,24 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .singbox-update-progress-card {
   background: #f8fafc;
   border-color: rgba(99, 102, 241, 0.25);
+}
+:root[data-effective-theme="light"] .version-diff-card-success {
+  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+:root[data-effective-theme="light"] .version-success-text b {
+  color: #064e3b;
+}
+:root[data-effective-theme="light"] .version-success-text span {
+  color: #047857;
+}
+:root[data-effective-theme="light"] .version-success-text strong {
+  color: #047857;
+}
+:root[data-effective-theme="light"] .update-success-card {
+  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+:root[data-effective-theme="light"] .update-success-subhint {
+  color: #047857;
 }

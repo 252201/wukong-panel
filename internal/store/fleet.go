@@ -474,17 +474,18 @@ func (s *Store) NextFleetCommand(hostID string) (FleetCommandRecord, error) {
 	return record, tx.Commit()
 }
 
-func (s *Store) CompleteFleetCommand(id, status, resultCipher, commandErr string) (string, error) {
+func (s *Store) CompleteFleetCommand(id, status, resultCipher, commandErr string) (string, string, error) {
 	var jobID string
 	var current string
-	if err := s.DB.QueryRow(`SELECT job_id,status FROM fleet_commands WHERE id=?`, id).Scan(&jobID, &current); err != nil {
-		return "", err
+	var kind string
+	if err := s.DB.QueryRow(`SELECT job_id,status,kind FROM fleet_commands WHERE id=?`, id).Scan(&jobID, &current, &kind); err != nil {
+		return "", "", err
 	}
 	if current == "success" || current == "failed" || current == "expired" {
-		return jobID, nil
+		return jobID, kind, nil
 	}
 	_, err := s.DB.Exec(`UPDATE fleet_commands SET status=?,result_cipher=?,error=?,updated_at=? WHERE id=?`, status, resultCipher, commandErr, time.Now().Unix(), id)
-	return jobID, err
+	return jobID, kind, err
 }
 
 func (s *Store) FleetCommand(id string) (status, resultCipher, commandErr string, err error) {

@@ -589,7 +589,7 @@ func (s *Server) fleetAgentNextCommand(w http.ResponseWriter, r *http.Request) {
 			}
 			plain, decryptErr := s.fleetVault.Decrypt(record.PayloadCipher)
 			if decryptErr != nil {
-				_, _ = s.store.CompleteFleetCommand(record.Command.ID, "failed", "", "命令载荷无法解密")
+				_, _, _ = s.store.CompleteFleetCommand(record.Command.ID, "failed", "", "命令载荷无法解密")
 				continue
 			}
 			record.Command.Payload = json.RawMessage(plain)
@@ -648,16 +648,30 @@ func (s *Server) fleetAgentCommandResult(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	jobID, err := s.store.CompleteFleetCommand(r.PathValue("id"), result.Status, cipher, result.Error)
+	jobID, kind, err := s.store.CompleteFleetCommand(r.PathValue("id"), result.Status, cipher, result.Error)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "回执无法保存")
 		return
 	}
 	if jobID != "" {
 		if result.Status == "success" {
-			_ = s.store.UpdateJob(jobID, "success", 100, "远端执行完成", "")
+			successMsg := "远端执行完成"
+			switch kind {
+			case "probe.update":
+				successMsg = "轻量探针升级成功，已平滑重启"
+			case "panel.update":
+				successMsg = "面板服务升级成功，已平滑重启"
+			}
+			_ = s.store.UpdateJob(jobID, "success", 100, successMsg, "")
 		} else {
-			_ = s.store.UpdateJob(jobID, "failed", 100, "远端执行失败", result.Error)
+			failMsg := "远端执行失败"
+			switch kind {
+			case "probe.update":
+				failMsg = "轻量探针升级失败"
+			case "panel.update":
+				failMsg = "面板服务升级失败"
+			}
+			_ = s.store.UpdateJob(jobID, "failed", 100, failMsg, result.Error)
 		}
 	}
 	_ = s.store.Audit("fleet-agent", "fleet.command.result", hostID, r.PathValue("id")+" "+result.Status)
