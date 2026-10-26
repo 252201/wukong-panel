@@ -795,6 +795,10 @@ func (s *Server) fleetHostGateway(w http.ResponseWriter, r *http.Request, sessio
 		writeError(w, 409, "Remote Probe does not support online updates")
 		return
 	}
+	if (resource == "system/panel" || resource == "system/panel/update") && !fleetHasCapability(host, "panel.update") {
+		writeError(w, 409, "Remote Agent does not support panel updates")
+		return
+	}
 	if r.Method == http.MethodGet {
 		if !host.Online && s.writeFleetSnapshotResource(w, host, resource) || !strings.HasPrefix(resource, "system/firewall") && !strings.HasPrefix(resource, "system/fail2ban") && s.writeFleetSnapshotResource(w, host, resource) {
 			return
@@ -943,6 +947,13 @@ func (s *Server) writeFleetSnapshotResource(w http.ResponseWriter, host model.Fl
 			LatestVersion:  strings.TrimPrefix(s.version, "v"),
 			Writable:       fleetHasCapability(host, "probe.update"),
 		})
+	case resource == "system/panel":
+		writeJSON(w, http.StatusOK, model.ComponentUpdateState{
+			Installed:      true,
+			CurrentVersion: host.PanelVersion,
+			LatestVersion:  strings.TrimPrefix(s.version, "v"),
+			Writable:       fleetHasCapability(host, "panel.update"),
+		})
 	case resource == "settings":
 		snapshot.Settings.SubscriptionToken = maskToken(snapshot.Settings.SubscriptionToken)
 		if snapshot.Settings.ExpiresAt == "" && host.ExpiresAt != "" {
@@ -994,6 +1005,8 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 		return parts[1] + "." + parts[2], payload, parts[2] == "update", nil
 	case len(parts) == 3 && parts[0] == "system" && parts[1] == "probe" && parts[2] == "update" && r.Method == http.MethodPost:
 		return "probe.update", body, true, nil
+	case len(parts) == 3 && parts[0] == "system" && parts[1] == "panel" && parts[2] == "update" && r.Method == http.MethodPost:
+		return "panel.update", body, true, nil
 	case r.Method == http.MethodGet && (resource == "system/firewall" || resource == "system/fail2ban"):
 		payload, _ := json.Marshal(model.SecurityRequest{Zone: r.URL.Query().Get("zone")})
 		return "security." + parts[1] + ".status", payload, false, nil
@@ -1082,7 +1095,7 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 	if createJob && strings.HasPrefix(kind, "security.") {
 		ttl = 9 * time.Minute
 	}
-	if createJob && kind == "probe.update" {
+	if createJob && (kind == "probe.update" || kind == "panel.update") {
 		ttl = 10 * time.Minute
 	}
 	if !createJob {
@@ -1096,6 +1109,8 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 		msg := "等待远端 Agent"
 		if fleetHasCapability(host, "probe") {
 			msg = "等待轻量探针接收更新指令"
+		} else if kind == "panel.update" {
+			msg = "等待远端面板接收更新指令"
 		}
 		_ = s.store.UpdateJob(job.ID, "running", 10, msg, "")
 	}

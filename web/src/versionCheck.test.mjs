@@ -160,6 +160,8 @@ test('hostUpdateOnlineSupported accurately detects panel and probe online update
     snapshot: { overview: { panelVersion: '1.7.31' } },
   };
   const remoteServerNoProbe = { id: 'remote-1', name: '远端控制机', capabilities: ['overview', 'command'] };
+  const remotePanelWithCap = { id: 'remote-frog', name: '青蛙', capabilities: ['overview', 'nodes.write', 'panel.update'] };
+  const remotePanelWithoutCap = { id: 'remote-legacy', name: '老面板', capabilities: ['overview', 'nodes.write'] };
 
   assert.equal(hostUpdateOnlineSupported(localPanel), true, 'Local panel always supports online update');
   assert.equal(hostUpdateOnlineSupported(legacyProbe), false, 'Legacy probe < 1.7.30 without probe.update requires terminal command');
@@ -168,6 +170,8 @@ test('hostUpdateOnlineSupported accurately detects panel and probe online update
   assert.equal(hostUpdateOnlineSupported(v30ProbePrefix), true, 'Probe running v1.7.30 supports online update with prefix');
   assert.equal(hostUpdateOnlineSupported(v31ProbeSnapshot), true, 'Probe running 1.7.31 in snapshot supports online update');
   assert.equal(hostUpdateOnlineSupported(remoteServerNoProbe), false, 'Non-probe remote host does not support probe update');
+  assert.equal(hostUpdateOnlineSupported(remotePanelWithCap), true, 'Remote panel with panel.update supports online update');
+  assert.equal(hostUpdateOnlineSupported(remotePanelWithoutCap), false, 'Remote panel without panel.update requires terminal command or local update');
 });
 
 test('mobile view removes the "可" character from update pill via responsive CSS', () => {
