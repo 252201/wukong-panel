@@ -45,7 +45,7 @@ func TestPanelUpdateAuthAndJob(t *testing.T) {
 		{true, false, 403},
 		{true, true, 202},
 	} {
-		req := httptest.NewRequest("POST", "/api/v1/system/panel/update", strings.NewReader(`{"targetVersion":"1.7.30"}`))
+		req := httptest.NewRequest("POST", "/api/v1/system/panel/update", strings.NewReader(`{"currentVersion":"1.7.29","targetVersion":"1.7.30"}`))
 		if auth.cookie {
 			req.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
 		}
@@ -65,7 +65,10 @@ func TestPanelUpdateAuthAndJob(t *testing.T) {
 				t.Fatalf("invalid job response: %s", rr.Body.String())
 			}
 			// Wait for agent call
-			time.Sleep(50 * time.Millisecond)
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) && agent.calls.Load() < 1 {
+				time.Sleep(10 * time.Millisecond)
+			}
 			if agent.calls.Load() != 1 {
 				t.Fatalf("expected agent to be called once, got %d", agent.calls.Load())
 			}

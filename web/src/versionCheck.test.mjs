@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import {
   parseSemver,
   isNewerVersion,
+  isAtLeastVersion,
+  hostUpdateOnlineSupported,
   getProbeUpdateCommand,
   getPanelUpdateCommand,
   getSingBoxUpdateCommand,
@@ -130,23 +132,42 @@ test('fetchLatestRelease fetches and parses release response', async () => {
   assert.equal(release.tag, 'v1.7.26');
 });
 
-test('hostUpdateOnlineSupported accurately detects panel and probe online update support', () => {
-  const isProbeHost = (host) => (host.capabilities || []).includes('probe');
-  const hostUpdateOnlineSupported = (host) => {
-    if (host.id === 'local') return true;
-    if (isProbeHost(host)) {
-      return (host.capabilities || []).includes('probe.update');
-    }
-    return false;
-  };
+test('isAtLeastVersion compares versions correctly', () => {
+  assert.equal(isAtLeastVersion('1.7.30', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('v1.7.30', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('V1.7.30', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('1.7.31', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('1.8.0', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('2.0.0', '1.7.30'), true);
+  assert.equal(isAtLeastVersion('1.7.29', '1.7.30'), false);
+  assert.equal(isAtLeastVersion('1.7.11', '1.7.30'), false);
+  assert.equal(isAtLeastVersion('1.6.99', '1.7.30'), false);
+  assert.equal(isAtLeastVersion('', '1.7.30'), false);
+  assert.equal(isAtLeastVersion(null, '1.7.30'), false);
+  assert.equal(isAtLeastVersion('invalid', '1.7.30'), false);
+});
 
+test('hostUpdateOnlineSupported accurately detects panel and probe online update support', () => {
   const localPanel = { id: 'local', name: '青蛙', capabilities: ['overview'] };
-  const legacyProbe = { id: 'probe-1', name: 'JP-三网直连', capabilities: ['overview', 'probe'] };
-  const modernProbe = { id: 'probe-2', name: 'JP-三网直连-新版', capabilities: ['overview', 'probe', 'probe.update'] };
+  const legacyProbe = { id: 'probe-1', name: 'JP-三网直连', panelVersion: '1.7.27', capabilities: ['overview', 'probe'] };
+  const modernProbeExplicit = { id: 'probe-2', name: 'JP-三网直连-显式能力', capabilities: ['overview', 'probe', 'probe.update'] };
+  const v30ProbeNoCap = { id: 'probe-3', name: 'JP-三网直连-v1.7.30', panelVersion: '1.7.30', capabilities: ['overview', 'probe'] };
+  const v30ProbePrefix = { id: 'probe-4', name: 'JP-三网直连-v1.7.30带前缀', panelVersion: 'v1.7.30', capabilities: ['overview', 'probe'] };
+  const v31ProbeSnapshot = {
+    id: 'probe-5',
+    name: 'JP-三网直连-快照版本',
+    capabilities: ['overview', 'probe'],
+    snapshot: { overview: { panelVersion: '1.7.31' } },
+  };
+  const remoteServerNoProbe = { id: 'remote-1', name: '远端控制机', capabilities: ['overview', 'command'] };
 
   assert.equal(hostUpdateOnlineSupported(localPanel), true, 'Local panel always supports online update');
-  assert.equal(hostUpdateOnlineSupported(legacyProbe), false, 'Legacy probe without probe.update requires terminal command');
-  assert.equal(hostUpdateOnlineSupported(modernProbe), true, 'Modern probe with probe.update supports online update');
+  assert.equal(hostUpdateOnlineSupported(legacyProbe), false, 'Legacy probe < 1.7.30 without probe.update requires terminal command');
+  assert.equal(hostUpdateOnlineSupported(modernProbeExplicit), true, 'Probe with probe.update supports online update');
+  assert.equal(hostUpdateOnlineSupported(v30ProbeNoCap), true, 'Probe running 1.7.30 supports online update even if capability was omitted');
+  assert.equal(hostUpdateOnlineSupported(v30ProbePrefix), true, 'Probe running v1.7.30 supports online update with prefix');
+  assert.equal(hostUpdateOnlineSupported(v31ProbeSnapshot), true, 'Probe running 1.7.31 in snapshot supports online update');
+  assert.equal(hostUpdateOnlineSupported(remoteServerNoProbe), false, 'Non-probe remote host does not support probe update');
 });
 
 test('mobile view removes the "可" character from update pill via responsive CSS', () => {

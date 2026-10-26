@@ -331,3 +331,75 @@ func TestFleetPanelHostHeartbeatSyncsSettings(t *testing.T) {
 		t.Fatalf("expected panel host expiresAt 2026-12-31, got %q", stored.ExpiresAt)
 	}
 }
+
+func TestFleetProbeUpdateCapabilityRetention(t *testing.T) {
+	database := openFleetTestStore(t)
+	token := "token-probe-test-999"
+	if err := database.CreateFleetEnrollmentToken(token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	host := model.FleetHost{
+		ID:              "probe-test",
+		Name:            "Probe-1",
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+	}
+	if err := database.ConsumeFleetEnrollmentToken(token, host, "probe-secret"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Probe reporting v1.7.30 without probe.update in heartbeat should still get probe.update automatically
+	hb1 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "v1.7.30",
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: time.Now().Unix()},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb1); err != nil {
+		t.Fatal(err)
+	}
+	stored1, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundUpdate := false
+	for _, cap := range stored1.Capabilities {
+		if cap == "probe.update" {
+			foundUpdate = true
+			break
+		}
+	}
+	if !foundUpdate {
+		t.Fatalf("expected probe v1.7.30 to have probe.update capability, got %+v", stored1.Capabilities)
+	}
+
+	// 2. Probe reporting v1.7.27 without probe.update should NOT have probe.update
+	hb2 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "1.7.27",
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: time.Now().Unix()},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb2); err != nil {
+		t.Fatal(err)
+	}
+	stored2, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cap := range stored2.Capabilities {
+		if cap == "probe.update" {
+			t.Fatalf("expected legacy probe 1.7.27 not to have probe.update, got %+v", stored2.Capabilities)
+		}
+	}
+}

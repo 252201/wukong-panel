@@ -19,12 +19,19 @@ func (s *Server) panelUpdate(w http.ResponseWriter, r *http.Request, session sto
 		return
 	}
 	var req struct {
-		TargetVersion string `json:"targetVersion"`
+		CurrentVersion  string `json:"currentVersion,omitempty"`
+		TargetVersion   string `json:"targetVersion"`
+		CurrentVerSnake string `json:"current_version,omitempty"`
+		TargetVerSnake  string `json:"target_version,omitempty"`
 	}
 	if r.ContentLength > 0 && !decode(w, r, &req) {
 		return
 	}
-	_ = s.store.Audit(session.Username, "panel.update", "local", req.TargetVersion)
+	targetVer := req.TargetVersion
+	if targetVer == "" {
+		targetVer = req.TargetVerSnake
+	}
+	_ = s.store.Audit(session.Username, "panel.update", "local", targetVer)
 	job, err := s.store.CreateJob("panel.update", "local")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -34,7 +41,7 @@ func (s *Server) panelUpdate(w http.ResponseWriter, r *http.Request, session sto
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		_ = s.store.UpdateJob(job.ID, "running", 20, "正在获取发布清单与下载新版面板程序...", "")
-		if err := a.PanelUpdate(ctx, req.TargetVersion); err != nil {
+		if err := a.PanelUpdate(ctx, targetVer); err != nil {
 			_ = s.store.UpdateJob(job.ID, "failed", 100, "面板更新失败", err.Error())
 			return
 		}

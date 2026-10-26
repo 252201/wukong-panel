@@ -80,6 +80,32 @@ export function getSingBoxUpdateCommand(): string {
   return OFFICIAL_SINGBOX_UPDATE_COMMAND;
 }
 
+export function isAtLeastVersion(version: string | null | undefined, minVersion: string): boolean {
+  const v = parseSemver(version);
+  const min = parseSemver(minVersion);
+  if (!v || !min) return false;
+  if (v.major !== min.major) return v.major > min.major;
+  if (v.minor !== min.minor) return v.minor > min.minor;
+  return v.patch >= min.patch;
+}
+
+export function hostUpdateOnlineSupported(host: {
+  id: string;
+  capabilities?: string[];
+  panelVersion?: string;
+  snapshot?: { overview?: { panelVersion?: string } };
+}): boolean {
+  if (host.id === 'local') return true;
+  const caps = host.capabilities || [];
+  const isProbe = caps.includes('probe');
+  if (isProbe) {
+    if (caps.includes('probe.update')) return true;
+    const ver = host.panelVersion || host.snapshot?.overview?.panelVersion || '';
+    return isAtLeastVersion(ver, '1.7.30');
+  }
+  return false;
+}
+
 const RELEASE_CACHE_KEY = 'wukong_latest_release_cache';
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 

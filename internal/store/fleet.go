@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,36 @@ func (s *Store) AuthenticateFleetHost(hostID, token string) bool {
 	got := []byte(security.HashToken(token))
 	want := []byte(hash)
 	return len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1
+}
+
+func isProbeVersionWithUpdate(version string) bool {
+	clean := strings.TrimSpace(version)
+	clean = strings.TrimPrefix(clean, "v")
+	clean = strings.TrimPrefix(clean, "V")
+	parts := strings.Split(clean, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	patchStr := strings.Split(parts[2], "-")[0]
+	patch, err := strconv.Atoi(patchStr)
+	if err != nil {
+		return false
+	}
+	if major != 1 {
+		return major > 1
+	}
+	if minor != 7 {
+		return minor > 7
+	}
+	return patch >= 30
 }
 
 func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat model.FleetHeartbeat) error {
@@ -102,7 +133,12 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 		if capability == "probe" {
 			isProbe = true
 			// Probe enrollment is immutable: heartbeats cannot turn a read-only probe into a command agent.
-			heartbeat.Capabilities = []string{"overview", "probe"}
+			// Probes supporting or upgraded to v1.7.30+ retain the probe.update capability.
+			probeCaps := []string{"overview", "probe"}
+			if slices.Contains(heartbeat.Capabilities, "probe.update") || isProbeVersionWithUpdate(heartbeat.PanelVersion) {
+				probeCaps = append(probeCaps, "probe.update")
+			}
+			heartbeat.Capabilities = probeCaps
 			break
 		}
 	}
