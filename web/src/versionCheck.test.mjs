@@ -195,5 +195,12 @@ test('mobile view removes the "可" character from update pill via responsive CS
     /@media\s*\(max-width:\s*700px\)[^{]*\{[\s\S]*?\.fleet-update-pill\s+\.fleet-update-lead\s*\{\s*display:\s*none;\s*\}/,
     'styles.css must hide .fleet-update-lead at <= 700px mobile breakpoint'
   );
+
+  const inlineIdx = stylesCss.search(/\.fleet-update-pill\s+\.fleet-update-lead\s*\{\s*display:\s*inline;\s*\}/);
+  const noneIdx = stylesCss.indexOf('.fleet-update-pill .fleet-update-lead { display: none; }');
+  assert.ok(
+    inlineIdx !== -1 && noneIdx !== -1 && inlineIdx < noneIdx,
+    'Default display: inline must precede media query display: none in styles.css to ensure mobile override wins'
+  );
 });
 
