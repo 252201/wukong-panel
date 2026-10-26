@@ -237,3 +237,21 @@ test('system-glance (主机气脉) card version meta layout matches central flee
   );
 });
 
+test('light mode restores emerald green for panel/probe and indigo blue-purple for sing-box update pills', () => {
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // Verify light mode .fleet-update-pill emerald green styles
+  assert.match(
+    stylesCss,
+    /:root\[data-effective-theme="light"\]\s+\.fleet-update-pill\s*\{[\s\S]*?border-color:\s*rgba\(16,\s*185,\s*129,\s*0\.4\);[\s\S]*?color:\s*#047857;/,
+    'styles.css must restore emerald green border and text for .fleet-update-pill in light mode'
+  );
+
+  // Verify light mode .singbox-update-pill indigo/blue-purple styles
+  assert.match(
+    stylesCss,
+    /:root\[data-effective-theme="light"\]\s+\.singbox-update-pill\s*\{[\s\S]*?border-color:\s*rgba\(99,\s*102,\s*241,\s*0\.4\);[\s\S]*?color:\s*#4f46e5;/,
+    'styles.css must restore indigo/blue-purple border and text for .singbox-update-pill in light mode'
+  );
+});
+
