@@ -659,3 +659,114 @@ func TestLightweightProbeAppearsInControllerFleet(t *testing.T) {
 		t.Fatalf("updated host settings not reflected in fleet status: %+v", statusUpdated.Hosts[1])
 	}
 }
+
+func TestRemotePanelUpdateCommandHandling(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+
+	// 1. Host without panel.update capability
+	legacyPanel := model.FleetHost{
+		ID:              "panel-legacy",
+		Name:            "Legacy Panel",
+		Hostname:        "legacy.example.com",
+		PanelVersion:    "2.0.2",
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "nodes.write"},
+	}
+	const tokenLegacy = "token_legacy"
+	if err := database.CreateFleetEnrollmentToken(tokenLegacy, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ConsumeFleetEnrollmentToken(tokenLegacy, legacyPanel, "agent_token_legacy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), legacyPanel.ID, model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    legacyPanel.Capabilities,
+		PanelVersion:    legacyPanel.PanelVersion,
+		Snapshot:        model.FleetSnapshot{Full: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqLegacy := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/hosts/panel-legacy/system/panel/update", strings.NewReader(`{"targetVersion":"2.0.4"}`))
+	reqLegacy.SetPathValue("hostId", "panel-legacy")
+	reqLegacy.SetPathValue("resource", "system/panel/update")
+	recLegacy := httptest.NewRecorder()
+	server.fleetHostGateway(recLegacy, reqLegacy, store.Session{Username: "admin"})
+	if recLegacy.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for legacy panel update, got %d: %s", recLegacy.Code, recLegacy.Body.String())
+	}
+
+	// 2. Host with panel.update capability
+	modernPanel := model.FleetHost{
+		ID:              "panel-modern",
+		Name:            "Modern Panel",
+		Hostname:        "modern.example.com",
+		PanelVersion:    "2.0.3",
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "nodes.write", "panel.update"},
+	}
+	const tokenModern = "token_modern"
+	if err := database.CreateFleetEnrollmentToken(tokenModern, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ConsumeFleetEnrollmentToken(tokenModern, modernPanel, "agent_token_modern"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), modernPanel.ID, model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    modernPanel.Capabilities,
+		PanelVersion:    modernPanel.PanelVersion,
+		Snapshot:        model.FleetSnapshot{Full: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Query status on system/panel
+	reqStatus := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/hosts/panel-modern/system/panel", nil)
+	reqStatus.SetPathValue("hostId", "panel-modern")
+	reqStatus.SetPathValue("resource", "system/panel")
+	recStatus := httptest.NewRecorder()
+	server.fleetHostGateway(recStatus, reqStatus, store.Session{Username: "admin"})
+	if recStatus.Code != http.StatusOK {
+		t.Fatalf("expected 200 for panel status query, got %d: %s", recStatus.Code, recStatus.Body.String())
+	}
+	var state model.ComponentUpdateState
+	if err := json.Unmarshal(recStatus.Body.Bytes(), &state); err != nil || !state.Writable || state.CurrentVersion != "2.0.3" {
+		t.Fatalf("unexpected panel component update state: %+v (err: %v)", state, err)
+	}
+
+	// Post update on system/panel/update
+	reqUpdate := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/hosts/panel-modern/system/panel/update", strings.NewReader(`{"targetVersion":"2.0.4"}`))
+	reqUpdate.SetPathValue("hostId", "panel-modern")
+	reqUpdate.SetPathValue("resource", "system/panel/update")
+	recUpdate := httptest.NewRecorder()
+	server.fleetHostGateway(recUpdate, reqUpdate, store.Session{Username: "admin"})
+	if recUpdate.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for panel update queue, got %d: %s", recUpdate.Code, recUpdate.Body.String())
+	}
+	var res map[string]string
+	if err := json.Unmarshal(recUpdate.Body.Bytes(), &res); err != nil || res["jobId"] == "" {
+		t.Fatalf("expected jobId in response, got %s", recUpdate.Body.String())
+	}
+
+	// Verify job created
+	jobID := res["jobId"]
+	job, err := database.Job(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Kind != "fleet.panel.update" || job.Message != "等待远端面板接收更新指令" {
+		t.Fatalf("unexpected job attributes: %+v", job)
+	}
+
+	// Query job via gateway
+	reqJob := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/hosts/panel-modern/jobs/"+jobID, nil)
+	reqJob.SetPathValue("hostId", "panel-modern")
+	reqJob.SetPathValue("resource", "jobs/"+jobID)
+	recJob := httptest.NewRecorder()
+	server.fleetHostGateway(recJob, reqJob, store.Session{Username: "admin"})
+	if recJob.Code != http.StatusOK {
+		t.Fatalf("expected 200 for panel update job query, got %d: %s", recJob.Code, recJob.Body.String())
+	}
+}

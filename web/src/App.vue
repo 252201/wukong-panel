@@ -774,7 +774,7 @@ async function pollHostJob(host: FleetHost, jobId: string) {
         if (host.snapshot?.overview) {
           host.snapshot.overview.panelVersion = targetVer
         }
-        notify(`轻量探针升级成功，已更新至 v${targetVer}`)
+        notify(`${isProbeHost(host) ? '轻量探针' : '面板服务'}升级成功，已更新至 v${targetVer}`)
       }
       return
     }
@@ -2707,6 +2707,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       </div>
       <div v-else-if="isProbeHost(hostUpdateTarget)" class="host-update-warning-banner">
         <p><b>提示：</b>当前探针版本（{{ hostUpdateCurrentVersion(hostUpdateTarget) }}）尚未包含在线升级管道。请登录该机器终端执行下方升级命令，更新后将自动启用面板在线一键更新支持。</p>
+      </div>
+      <div v-else class="host-update-warning-banner">
+        <p><b>提示：</b>该远端面板主控当前运行版本（{{ hostUpdateCurrentVersion(hostUpdateTarget) }}）尚未包含跨机在线升级管道。更新至新版本后，将自动启用中央控制台在线一键升级支持。本次可直接登录该机自身 Web 面板在线更新，或在终端执行下方升级命令。</p>
       </div>
 
       <div class="host-update-command-section">

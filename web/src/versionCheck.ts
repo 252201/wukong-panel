@@ -103,6 +103,7 @@ export function hostUpdateOnlineSupported(host: {
     const ver = host.panelVersion || host.snapshot?.overview?.panelVersion || '';
     return isAtLeastVersion(ver, '1.7.30');
   }
+  if (caps.includes('panel.update')) return true;
   return false;
 }
 

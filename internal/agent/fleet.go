@@ -29,7 +29,7 @@ import (
 
 var FleetCapabilities = []string{
 	"overview", "nodes.read", "nodes.write", "imports", "share", "settings",
-	"security.firewall", "security.firewall.batch", "security.fail2ban", "security.fail2ban.reset", "security.fail2ban.ban", "security.fail2ban.permanent", "residential-exit", "socks-exit", "sing-box-migration", "cloudflared.update", "sing-box.update", "subscription-render",
+	"security.firewall", "security.firewall.batch", "security.fail2ban", "security.fail2ban.reset", "security.fail2ban.ban", "security.fail2ban.permanent", "residential-exit", "socks-exit", "sing-box-migration", "cloudflared.update", "sing-box.update", "subscription-render", "panel.update",
 }
 
 type FleetClientConfig struct {
@@ -423,6 +423,9 @@ func (c *FleetConnector) execute(ctx context.Context, command model.FleetCommand
 	if strings.HasPrefix(command.Kind, "cloudflared.") || strings.HasPrefix(command.Kind, "sing-box.") {
 		limit = 5 * time.Minute
 	}
+	if command.Kind == "panel.update" {
+		limit = 10 * time.Minute
+	}
 	if command.Kind == "security.fail2ban.apply" || command.Kind == "security.firewall.apply" {
 		var request model.SecurityRequest
 		if json.Unmarshal(command.Payload, &request) == nil && (request.Operation == "install" || command.Kind == "security.fail2ban.apply" && request.Operation == "reinstall") {
@@ -534,6 +537,17 @@ func (c *FleetConnector) executeOnce(ctx context.Context, command model.FleetCom
 			return nil, err
 		}
 		return c.manager.Share(ctx, r.ID)
+	case "panel.update":
+		var r struct {
+			TargetVersion  string `json:"targetVersion"`
+			TargetVerSnake string `json:"target_version"`
+		}
+		_ = json.Unmarshal(command.Payload, &r)
+		target := r.TargetVersion
+		if target == "" {
+			target = r.TargetVerSnake
+		}
+		return nil, c.manager.PanelUpdate(ctx, target)
 	case "sing-box.status", "sing-box.check", "sing-box.update":
 		var r model.ComponentUpdateRequest
 		if err := json.Unmarshal(command.Payload, &r); err != nil {
