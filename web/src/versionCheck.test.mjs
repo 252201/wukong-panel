@@ -292,4 +292,15 @@ test('host update and sing-box update modals display success banner and completi
   );
 });
 
+test('local panel update reconnect delays automatic page reload by 1 second', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+
+  // Verify startPanelReconnect delays reload by 1000ms (1 second)
+  assert.match(
+    appVue,
+    /window\.location\.reload\(\)\s*\}\s*,\s*1000\)/,
+    'App.vue startPanelReconnect must delay automatic page reload by 1000ms (1 second)'
+  );
+});
+
 
