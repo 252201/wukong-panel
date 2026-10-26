@@ -107,3 +107,58 @@ func containsHelper(s, sub string) bool {
 	}
 	return false
 }
+
+func TestReplaceExecutable(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "src-bin")
+	dst := filepath.Join(tempDir, "bin", "target-bin")
+
+	if err := os.WriteFile(src, []byte("new-binary-content"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initial replace when dst does not exist yet
+	if err := replaceExecutable(src, dst, 0755); err != nil {
+		t.Fatalf("replaceExecutable on new file failed: %v", err)
+	}
+	content, err := os.ReadFile(dst)
+	if err != nil || string(content) != "new-binary-content" {
+		t.Fatalf("expected new-binary-content, got %s (err: %v)", string(content), err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil || info.Mode().Perm() != 0755 {
+		t.Fatalf("expected mode 0755, got %v", info.Mode().Perm())
+	}
+
+	// 2. Overwrite existing target
+	if err := os.WriteFile(src, []byte("updated-content-v2"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutable(src, dst, 0755); err != nil {
+		t.Fatalf("replaceExecutable on existing file failed: %v", err)
+	}
+	content, err = os.ReadFile(dst)
+	if err != nil || string(content) != "updated-content-v2" {
+		t.Fatalf("expected updated-content-v2, got %s", string(content))
+	}
+
+	// 3. Symlink target resolves and replaces target file
+	realTarget := filepath.Join(tempDir, "real-bin")
+	if err := os.WriteFile(realTarget, []byte("real-target-v1"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(tempDir, "symlink-bin")
+	if err := os.Symlink(realTarget, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("symlink-updated-v3"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutable(src, symlinkPath, 0755); err != nil {
+		t.Fatalf("replaceExecutable with symlink failed: %v", err)
+	}
+	content, err = os.ReadFile(realTarget)
+	if err != nil || string(content) != "symlink-updated-v3" {
+		t.Fatalf("expected real target to be updated, got %s", string(content))
+	}
+}

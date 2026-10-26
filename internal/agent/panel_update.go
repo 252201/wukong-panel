@@ -214,7 +214,7 @@ func (m *Manager) PanelUpdate(ctx context.Context, targetVersion string) error {
 	if err := os.MkdirAll(filepath.Dir(destBin), 0755); err != nil {
 		return err
 	}
-	if err := copyFile(stagePath, destBin, 0755); err != nil {
+	if err := replaceExecutable(stagePath, destBin, 0755); err != nil {
 		return fmt.Errorf("替换可执行文件失败: %w", err)
 	}
 
@@ -236,6 +236,61 @@ func (m *Manager) PanelUpdate(ctx context.Context, targetVersion string) error {
 				_ = exec.Command("sh", "-c", "rc-service wukong-agent restart && rc-service wukong-web restart").Run()
 			}
 		}()
+	}
+
+	return nil
+}
+
+func replaceExecutable(src, dst string, mode os.FileMode) error {
+	if realDst, err := filepath.EvalSymlinks(dst); err == nil && realDst != "" {
+		dst = realDst
+	}
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".new-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	tmpName = ""
+
+	if dirF, err := os.Open(dir); err == nil {
+		_ = dirF.Sync()
+		_ = dirF.Close()
 	}
 
 	return nil

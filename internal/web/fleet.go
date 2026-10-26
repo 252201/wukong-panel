@@ -1050,7 +1050,9 @@ func fleetCommandForRequest(r *http.Request, resource string) (string, json.RawM
 
 func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload json.RawMessage, actor string, createJob bool) (model.FleetCommand, model.Job, error) {
 	if fleetHasCapability(host, "probe") {
-		return model.FleetCommand{}, model.Job{}, errors.New("轻量探针不接受远程命令")
+		if kind != "probe.update" || !fleetHasCapability(host, "probe.update") {
+			return model.FleetCommand{}, model.Job{}, errors.New("轻量探针不接受远程命令")
+		}
 	}
 	if s.fleetVaultErr != nil {
 		return model.FleetCommand{}, model.Job{}, s.fleetVaultErr
@@ -1073,6 +1075,9 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 	if createJob && strings.HasPrefix(kind, "security.") {
 		ttl = 9 * time.Minute
 	}
+	if createJob && kind == "probe.update" {
+		ttl = 10 * time.Minute
+	}
 	if !createJob {
 		ttl = 60 * time.Second
 	}
@@ -1081,7 +1086,11 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 		return command, job, err
 	}
 	if job.ID != "" {
-		_ = s.store.UpdateJob(job.ID, "running", 10, "等待远端 Agent", "")
+		msg := "等待远端 Agent"
+		if fleetHasCapability(host, "probe") {
+			msg = "等待轻量探针接收更新指令"
+		}
+		_ = s.store.UpdateJob(job.ID, "running", 10, msg, "")
 	}
 	detail := kind + " " + command.ID
 	if kind == "security.fail2ban.apply" {

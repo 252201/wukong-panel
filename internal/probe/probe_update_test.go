@@ -92,3 +92,20 @@ func stringsContains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestProbeReplaceExecutable(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "src-probe")
+	dst := filepath.Join(tempDir, "bin", "wukong-probe")
+
+	if err := os.WriteFile(src, []byte("new-probe-binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutable(src, dst, 0755); err != nil {
+		t.Fatalf("replaceExecutable failed: %v", err)
+	}
+	content, err := os.ReadFile(dst)
+	if err != nil || string(content) != "new-probe-binary" {
+		t.Fatalf("expected new-probe-binary, got %s (err: %v)", string(content), err)
+	}
+}
