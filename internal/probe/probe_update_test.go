@@ -181,3 +181,18 @@ func TestProbeReplaceExecutable(t *testing.T) {
 		t.Fatalf("expected new-probe-binary, got %s (err: %v)", string(content), err)
 	}
 }
+
+func TestProbeRestartHook(t *testing.T) {
+	called := false
+	restartProbeHook = func() {
+		called = true
+	}
+	defer func() {
+		restartProbeHook = nil
+	}()
+
+	restartProbe()
+	if !called {
+		t.Fatal("expected restartProbeHook to be called")
+	}
+}
