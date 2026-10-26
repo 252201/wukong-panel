@@ -129,8 +129,8 @@ func TestManagedEditRejectsMismatchedRealityCredentials(t *testing.T) {
 	}
 }
 
-func TestRealityDefaultSNIIsCloudflare(t *testing.T) {
-	if realityDefaultSNI != "www.cloudflare.com" {
+func TestRealityDefaultSNIIsAwsStatic(t *testing.T) {
+	if realityDefaultSNI != "s0.awsstatic.com" {
 		t.Fatalf("unexpected REALITY default SNI: %s", realityDefaultSNI)
 	}
 }

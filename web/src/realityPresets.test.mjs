@@ -7,10 +7,10 @@ test('realityPresets contains all required categories and domains from requireme
   assert.ok(categories.includes('Apple 系'))
   assert.ok(categories.includes('Microsoft 系'))
   assert.ok(categories.includes('AWS / 亚马逊'))
-  assert.ok(categories.includes('Cloudflare'))
+  assert.ok(!categories.includes('Cloudflare'))
 
   const flattened = flattenRealityPresets(realityPresets)
-  assert.equal(flattened.length, 8)
+  assert.equal(flattened.length, 7)
 
   const expectedDomains = [
     'swdist.apple.com',
@@ -20,7 +20,6 @@ test('realityPresets contains all required categories and domains from requireme
     's0.awsstatic.com',
     'd1.awsstatic.com',
     'aws.amazon.com',
-    'www.cloudflare.com',
   ]
 
   for (const domain of expectedDomains) {
@@ -45,5 +44,6 @@ test('findRealityPreset normalizes domain casing and whitespace', () => {
   assert.equal(matchedAws.category, 'AWS / 亚马逊')
 
   assert.equal(findRealityPreset(''), undefined)
+  assert.equal(findRealityPreset('www.cloudflare.com'), undefined)
   assert.equal(findRealityPreset('unknown-custom-domain.com'), undefined)
 })
