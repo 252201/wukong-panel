@@ -45,7 +45,7 @@ func TestPanelUpdateAuthAndJob(t *testing.T) {
 		{true, false, 403},
 		{true, true, 202},
 	} {
-		req := httptest.NewRequest("POST", "/api/v1/system/panel/update", strings.NewReader(`{"targetVersion":"1.7.30"}`))
+		req := httptest.NewRequest("POST", "/api/v1/system/panel/update", strings.NewReader(`{"currentVersion":"1.7.29","targetVersion":"1.7.30"}`))
 		if auth.cookie {
 			req.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
 		}

@@ -18,6 +18,7 @@ import { realityPresets, flattenRealityPresets, findRealityPreset } from './real
 import {
   fetchLatestRelease,
   isNewerVersion,
+  hostUpdateOnlineSupported,
   getProbeUpdateCommand,
   getPanelUpdateCommand,
   getSingBoxUpdateCommand,
@@ -681,14 +682,6 @@ function hostUpdateCurrentVersion(host: FleetHost): string {
   return v.startsWith('v') || v.startsWith('V') ? v : `v${v}`
 }
 
-function hostUpdateOnlineSupported(host: FleetHost): boolean {
-  if (host.id === 'local') return true
-  if (isProbeHost(host)) {
-    return (host.capabilities || []).includes('probe.update')
-  }
-  return false
-}
-
 function hostUpdateCommand(host: FleetHost): string {
   return isProbeHost(host) ? getProbeUpdateCommand() : getPanelUpdateCommand()
 }
@@ -746,7 +739,19 @@ async function startHostUpgrade(host: FleetHost) {
     void pollHostJob(host, res.jobId)
   } catch (err) {
     hostUpdating.value = false
-    hostUpdateError.value = err instanceof Error ? err.message : '启动更新失败'
+    const errMsg = err instanceof Error ? err.message : '启动更新失败'
+    hostUpdateError.value = errMsg
+    hostUpdateJob.value = {
+      id: '',
+      kind: isProbeHost(host) ? 'probe.update' : 'panel.update',
+      target: host.id,
+      status: 'failed',
+      progress: 0,
+      message: '启动更新失败',
+      error: errMsg,
+      createdAt: '',
+      updatedAt: '',
+    }
   }
 }
 
@@ -2685,7 +2690,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <div class="progress-bar-fill" :style="{ width: `${hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0)}%` }" :class="{ success: hostUpdateJob?.status === 'success' || hostReconnecting, failed: hostUpdateJob?.status === 'failed' }"></div>
           </div>
           <p v-if="hostUpdateError" class="singbox-update-err-msg">{{ hostUpdateError }}</p>
-          <div v-if="hostUpdateJob?.status === 'failed'" class="progress-retry-action">
+          <div v-if="hostUpdateJob?.status === 'failed' || hostUpdateError" class="progress-retry-action">
             <button type="button" class="mini-btn" @click="startHostUpgrade(hostUpdateTarget)">重新尝试升级</button>
           </div>
         </div>
@@ -2694,6 +2699,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <h4>在线一键升级</h4>
             <small>{{ isProbeHost(hostUpdateTarget) ? '由中央控制台向远端探针下发安全自更新指令：' : '自动备份当前数据库与配置，无需登录终端无缝升级：' }}</small>
           </div>
+          <p v-if="hostUpdateError && !hostUpdating && !hostUpdateJob" class="singbox-update-err-msg" style="margin-top: 8px;">{{ hostUpdateError }}</p>
           <button type="button" class="primary singbox-start-btn" :disabled="hostUpdating || !hostUpdateTarget.online" @click="startHostUpgrade(hostUpdateTarget)">
             🚀 立即升级{{ isProbeHost(hostUpdateTarget) ? '探针' : '面板' }}至 v{{ latestReleaseVersion }}
           </button>

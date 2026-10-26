@@ -119,8 +119,16 @@ func (d directAgent) Cloudflared(ctx context.Context, r model.CloudflaredRequest
 	return d.manager.Cloudflared(ctx, r)
 }
 
+func (d directAgent) PanelUpdate(ctx context.Context, targetVersion string) error {
+	return d.manager.PanelUpdate(ctx, targetVersion)
+}
+
 func main() {
 	cfg := config.Parse(version)
+	if cfg.Command == "version" || cfg.Command == "--version" || cfg.Command == "-v" {
+		fmt.Printf("wukong-panel %s\n", version)
+		return
+	}
 	if cfg.Command == "security-recovery" || cfg.Command == "security-firewall" {
 		if os.Geteuid() != 0 {
 			log.Fatal("security-recovery requires root")

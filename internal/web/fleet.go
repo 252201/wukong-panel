@@ -458,7 +458,11 @@ func (s *Server) fleetAgentEnroll(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "探针接入令牌只能用于轻量探针")
 			return
 		}
-		request.Capabilities = []string{"overview", "probe"}
+		probeCaps := []string{"overview", "probe"}
+		if slices.Contains(request.Capabilities, "probe.update") || isProbeVersionWithUpdate(request.PanelVersion) {
+			probeCaps = append(probeCaps, "probe.update")
+		}
+		request.Capabilities = probeCaps
 		request.PanelVersion = ""
 	}
 	hosts, err := s.store.FleetHosts(false)
@@ -1090,11 +1094,44 @@ func (s *Server) queueFleetCommand(host model.FleetHost, kind string, payload js
 	return command, job, nil
 }
 
+func isProbeVersionWithUpdate(version string) bool {
+	clean := strings.TrimSpace(version)
+	clean = strings.TrimPrefix(clean, "v")
+	clean = strings.TrimPrefix(clean, "V")
+	parts := strings.Split(clean, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	patchStr := strings.Split(parts[2], "-")[0]
+	patch, err := strconv.Atoi(patchStr)
+	if err != nil {
+		return false
+	}
+	if major != 1 {
+		return major > 1
+	}
+	if minor != 7 {
+		return minor > 7
+	}
+	return patch >= 30
+}
+
 func fleetHasCapability(host model.FleetHost, capability string) bool {
 	for _, item := range host.Capabilities {
 		if item == capability {
 			return true
 		}
+	}
+	if capability == "probe.update" && slices.Contains(host.Capabilities, "probe") && isProbeVersionWithUpdate(host.PanelVersion) {
+		return true
 	}
 	return false
 }
