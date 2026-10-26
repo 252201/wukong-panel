@@ -457,25 +457,10 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 		}
 	}
 
-	in, err := os.Open(stagePath)
-	if err != nil {
-		c.sendCommandResult(ctx, command.ID, "failed", err.Error(), nil)
+	if err := replaceExecutable(stagePath, destBin, 0755); err != nil {
+		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("替换目标二进制失败: %v", err), nil)
 		return
 	}
-	defer in.Close()
-
-	out, err := os.OpenFile(destBin, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("写入目标二进制失败: %v", err), nil)
-		return
-	}
-	if _, err = io.Copy(out, in); err != nil {
-		out.Close()
-		c.sendCommandResult(ctx, command.ID, "failed", fmt.Sprintf("复制二进制失败: %v", err), nil)
-		return
-	}
-	_ = out.Sync()
-	out.Close()
 
 	c.sendCommandResult(ctx, command.ID, "success", "", map[string]any{"ok": true, "version": cleanVer})
 
@@ -485,6 +470,61 @@ func (c *Client) handleProbeUpdate(ctx context.Context, command model.FleetComma
 			os.Exit(0)
 		}()
 	}
+}
+
+func replaceExecutable(src, dst string, mode os.FileMode) error {
+	if realDst, err := filepath.EvalSymlinks(dst); err == nil && realDst != "" {
+		dst = realDst
+	}
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".new-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	tmpName = ""
+
+	if dirF, err := os.Open(dir); err == nil {
+		_ = dirF.Sync()
+		_ = dirF.Close()
+	}
+
+	return nil
 }
 
 // Sample owns no database and observes only /proc and the root filesystem.

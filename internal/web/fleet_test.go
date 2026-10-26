@@ -551,6 +551,27 @@ func TestProbeEnrollmentCannotGainFleetCommands(t *testing.T) {
 	if _, _, err = server.queueFleetCommand(host, "node.rename", json.RawMessage(`{}`), "admin", false); err == nil {
 		t.Fatal("probe accepted command")
 	}
+	if _, _, err = server.queueFleetCommand(host, "probe.update", json.RawMessage(`{}`), "admin", true); err == nil {
+		t.Fatal("probe without probe.update accepted probe.update command")
+	}
+
+	probeWithUpdate := host
+	probeWithUpdate.Capabilities = []string{"overview", "probe", "probe.update"}
+	cmd, job, err := server.queueFleetCommand(probeWithUpdate, "probe.update", json.RawMessage(`{"targetVersion":"2.0.0"}`), "admin", true)
+	if err != nil {
+		t.Fatalf("probe with probe.update failed to queue probe.update: %v", err)
+	}
+	if cmd.ID == "" || job.ID == "" {
+		t.Fatalf("expected non-empty command and job, got cmd=%+v job=%+v", cmd, job)
+	}
+	storedJob, err := database.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedJob.Message != "等待轻量探针接收更新指令" {
+		t.Fatalf("expected probe waiting message, got %q", storedJob.Message)
+	}
+
 	next := httptest.NewRequest(http.MethodGet, "/api/v1/fleet/agent/commands/next?wait=1", nil)
 	next.Header.Set("Authorization", "Bearer "+enrolled.AgentToken)
 	next.Header.Set("X-Wukong-Host-ID", enrolled.HostID)
