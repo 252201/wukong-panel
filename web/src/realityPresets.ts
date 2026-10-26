@@ -32,12 +32,6 @@ export const realityPresets: RealityPresetCategory[] = [
       { domain: 'aws.amazon.com', title: 'AWS 官网控制台', desc: '亚马逊云官网主控台，全球访问极其频繁，具备极高信誉与稳定性。' },
     ],
   },
-  {
-    category: 'Cloudflare',
-    items: [
-      { domain: 'www.cloudflare.com', title: 'Cloudflare 官网', desc: '默认使用已验证的 Cloudflare TLS 站点，全球 Anycast CDN 节点覆盖广泛。' },
-    ],
-  },
 ]
 
 export interface FlattenedRealityPreset extends RealityPresetItem {

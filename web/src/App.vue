@@ -1626,7 +1626,7 @@ watch(() => createForm.protocol, (protocol, previous) => {
   if (protocol === 'vless-ws-tunnel') {
     if (createForm.server === panelDomain) createForm.server = ''
     createForm.domain = ''
-  } else if (protocol === 'vless' && (createForm.domain === panelDomain || !createForm.domain)) createForm.domain = 'www.cloudflare.com'
+  } else if (protocol === 'vless' && (createForm.domain === panelDomain || !createForm.domain)) createForm.domain = 's0.awsstatic.com'
   else if (protocol === 'shadowsocks') createForm.domain = ''
   else if (previous === 'vless' || previous === 'vless-ws-tunnel' || !createForm.domain) createForm.domain = panelDomain
   if (protocol !== 'vless-ws-tunnel' && !createForm.server) createForm.server = panelDomain
@@ -2178,7 +2178,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
           <input
             v-model="createForm.domain"
-            :placeholder="createForm.protocol === 'vless' ? 'www.cloudflare.com' : 'node.example.com'"
+            :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'"
             autocomplete="off"
             spellcheck="false"
           >
@@ -2192,7 +2192,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               客户端与 VPS 均可达的 TLS 1.3 站点（已填入自定义域名）
             </template>
             <template v-else>
-              默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点
+              默认使用 AWS 静态资源 TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点
             </template>
           </small>
           <small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small>

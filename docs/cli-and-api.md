@@ -21,7 +21,7 @@ wukongctl scan
 wukongctl node create --name "Node-HY2" --server node.example.com --domain node.example.com --mode prefer_v6
 
 # 创建 VLESS + REALITY 节点
-wukongctl node create --protocol vless --name "Node-Reality" --server node.example.com --domain www.cloudflare.com --mode prefer_v6
+wukongctl node create --protocol vless --name "Node-Reality" --server node.example.com --domain s0.awsstatic.com --mode prefer_v6
 
 # 创建 VLESS + WS + Cloudflare Tunnel 节点
 wukongctl node create --protocol vless-ws-tunnel --name "Node-CF-WS" --server edge.example.com --ws-path /wukong-edge --tunnel-token-file /root/cloudflare-tunnel.token

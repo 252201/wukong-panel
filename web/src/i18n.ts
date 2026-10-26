@@ -479,6 +479,7 @@ const english: Record<string, string> = {
   'QUIC 低延迟节点，使用 BBR 拥塞控制。': 'Low-latency QUIC node using BBR congestion control.',
   '基于标准 TLS 的 TCP 兼容节点。': 'TCP-compatible node built on standard TLS.',
   '基于标准 TLS 的复用与填充协议，适合 UDP 受限网络。': 'Standard-TLS multiplexing and padding for networks where UDP is restricted.',
+  '默认使用 AWS 静态资源 TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点': 'Uses an AWS static resource TLS site by default; you may choose another TLS 1.3 site reachable by both client and VPS',
   '默认使用已验证的 Cloudflare TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点': 'Uses a verified Cloudflare TLS site by default; you may choose another TLS 1.3 site reachable by both client and VPS',
   '与面板证书域名保持一致': 'Matches the panel certificate domain',
   'WebSocket 路径': 'WebSocket path',

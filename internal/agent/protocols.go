@@ -27,7 +27,7 @@ const (
 	protocolTrojan        = "trojan"
 	protocolAnyTLS        = "anytls"
 	shadowsocks2022       = "2022-blake3-aes-128-gcm"
-	realityDefaultSNI     = "www.cloudflare.com"
+	realityDefaultSNI     = "s0.awsstatic.com"
 )
 
 var supportedProtocols = map[string]bool{
