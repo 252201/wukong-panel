@@ -1601,20 +1601,29 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 
 /* Light mode overrides for version update */
-:root[data-effective-theme="light"] .fleet-update-pill,
-:root[data-effective-theme="light"] .singbox-update-pill {
-  border-color: rgba(242, 138, 11, 0.35);
-  background: rgba(242, 138, 11, 0.08);
-  color: var(--paper);
+:root[data-effective-theme="light"] .fleet-update-pill {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
 }
 :root[data-effective-theme="light"] .fleet-update-pill:hover,
-:root[data-effective-theme="light"] .fleet-update-pill:focus-visible,
+:root[data-effective-theme="light"] .fleet-update-pill:focus-visible {
+  border-color: #059669;
+  background: rgba(16, 185, 129, 0.18);
+  color: #065f46;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.15);
+}
+:root[data-effective-theme="light"] .singbox-update-pill {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
+}
 :root[data-effective-theme="light"] .singbox-update-pill:hover,
 :root[data-effective-theme="light"] .singbox-update-pill:focus-visible {
-  border-color: #df7600;
-  background: rgba(242, 138, 11, 0.16);
-  color: #bd6804;
-  box-shadow: 0 2px 6px rgba(242, 138, 11, 0.15);
+  border-color: #4338ca;
+  background: rgba(99, 102, 241, 0.16);
+  color: #3730a3;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15);
 }
 :root[data-effective-theme="light"] .version-diff-card {
   background: #f6f8f7;
