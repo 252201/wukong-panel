@@ -25,6 +25,22 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertScopes([path], "backend")
 
+    def test_protocols_and_component_updates_do_not_trigger_security(self):
+        for path in (
+            "internal/agent/protocols.go",
+            "internal/agent/protocols_test.go",
+            "internal/agent/singbox_update.go",
+            "internal/agent/cloudflared.go",
+            "internal/agent/fleet.go",
+            "internal/agent/panel_update.go",
+            "internal/agent/residential_exit.go",
+            "internal/agent/socks_exit.go",
+            "internal/componentupdate/update.go",
+            "internal/iplocation/location.go",
+        ):
+            with self.subTest(path=path):
+                self.assertScopes([path], "backend")
+
     def test_security_and_shared_dependencies_trigger_native_checks(self):
         for path in ("internal/hostsecurity/firewall.go", "internal/model/model.go", "internal/config/config.go", "internal/security/auth.go", "internal/agent/manager.go", "internal/store/store.go", "internal/web/server.go", "cmd/wukong-panel/main.go", "scripts/security/setup.sh", "scripts/test-host-security-native.sh"):
             with self.subTest(path=path):

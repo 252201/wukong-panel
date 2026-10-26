@@ -61,10 +61,20 @@ def classify(paths, read_blob=lambda revision, path: None):
             selected["backend"] = selected["security"] = True
         elif path in ("install.sh", "uninstall.sh", "bootstrap.sh", "probe-install.sh") or path.startswith(("compat/", "scripts/test-install", "scripts/test-singbox")):
             selected["installers"] = True
+        elif path.startswith((
+            "internal/monitor/", "internal/probe/", "internal/netcheck/",
+            "internal/hostlocation/", "internal/singboxconfig/", "cmd/wukong-probe/",
+            "internal/componentupdate/", "internal/iplocation/",
+            "internal/agent/protocols", "internal/agent/singbox_update",
+            "internal/agent/cloudflared", "internal/agent/residential_exit",
+            "internal/agent/socks_exit", "internal/agent/fleet",
+            "internal/agent/panel_update", "internal/agent/anytls",
+            "internal/agent/reality", "internal/agent/transport",
+            "internal/agent/runtime_binary",
+        )):
+            selected["backend"] = True
         elif path.startswith(SECURITY_PREFIXES):
             selected["backend"] = selected["security"] = True
-        elif path.startswith(("internal/monitor/", "internal/probe/", "internal/netcheck/", "internal/hostlocation/", "internal/singboxconfig/", "cmd/wukong-probe/")):
-            selected["backend"] = True
         elif path in ("README.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore") or path.startswith(("docs/", "assets/")) or path.endswith(".md"):
             continue
         else:
