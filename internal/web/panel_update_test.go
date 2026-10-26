@@ -65,7 +65,10 @@ func TestPanelUpdateAuthAndJob(t *testing.T) {
 				t.Fatalf("invalid job response: %s", rr.Body.String())
 			}
 			// Wait for agent call
-			time.Sleep(50 * time.Millisecond)
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) && agent.calls.Load() < 1 {
+				time.Sleep(10 * time.Millisecond)
+			}
 			if agent.calls.Load() != 1 {
 				t.Fatalf("expected agent to be called once, got %d", agent.calls.Load())
 			}
