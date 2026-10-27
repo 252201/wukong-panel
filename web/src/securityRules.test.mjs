@@ -43,7 +43,7 @@ test('combined legacy rules match both protocols without matching other transpor
 })
 
 test('batch eligibility separates external adoption from managed deletion and protects entry ports', async()=>{
- const {securityBatchEligible}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+ const {securityBatchEligible,sortFirewallRules}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
  const rule={adoptable:true,managed:false,protected:false}
  assert.equal(securityBatchEligible(rule,'adopt'),true)
  assert.equal(securityBatchEligible(rule,'delete'),false)
@@ -52,6 +52,14 @@ test('batch eligibility separates external adoption from managed deletion and pr
  assert.equal(securityBatchEligible({...rule,managed:true,protected:true},'delete'),false)
  assert.equal(securityBatchEligible({...rule,protected:true},'adopt'),true)
  assert.equal(securityBatchEligible({...rule,adoptable:false},'adopt'),false)
+ const unsorted=[
+  {id:'r3',protected:false,portFrom:35561,portTo:35561,protocol:'tcp'},
+  {id:'r1',protected:true,portFrom:46961,portTo:46961,protocol:'tcp'},
+  {id:'r4',protected:false,portFrom:80,portTo:80,protocol:'tcp'},
+  {id:'r2',protected:true,portFrom:9443,portTo:9443,protocol:'tcp'},
+  {id:'r5',protected:false,portFrom:443,portTo:443,protocol:'tcp'},
+ ]
+ assert.deepEqual(sortFirewallRules(unsorted).map(r=>r.id),['r1','r2','r4','r5','r3'])
 })
 
 test('batch previews explain each rule, source and zone in both languages',async()=>{

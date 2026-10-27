@@ -6,7 +6,7 @@ import BanDurationInput from './BanDurationInput.vue'
 import { translateText } from './i18n'
 import { securityStatusCache } from './securityStatus'
 import { afterFirewallRead } from './securityRefresh'
-import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange, formatProtocol, formatHumanSeconds } from './securityRules'
+import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange, formatProtocol, formatHumanSeconds, sortFirewallRules } from './securityRules'
 const props = defineProps<{hostId: string; hostName: string; online: boolean; compatible: boolean; capabilities: string[]; language: string}>()
 const client = hostSecurityAPI(props.hostId)
 const t = (zh: string, en: string) => props.language === 'en-US' ? en : zh
@@ -26,14 +26,30 @@ const refreshing = ref(false)
 const zone = ref(firewall.value?.zone || '')
 const batchMode = ref<'adopt'|'delete'>('adopt')
 const selectedRules = ref<string[]>([])
+const ruleFilter = ref('')
+const showManualPorts = ref(false)
 const batchSupported = computed(() => support('firewall.batch') && !!firewall.value?.supportsBatch)
 const batchWritable = computed(() => fwWritable.value && batchSupported.value && !pending.value)
-// Display protected rules first without changing the backend's rule order.
+const adoptEligibleCount = computed(() => (firewall.value?.rules || []).filter(item => securityBatchEligible(item, 'adopt')).length)
+const deleteEligibleCount = computed(() => (firewall.value?.rules || []).filter(item => securityBatchEligible(item, 'delete')).length)
+watch([adoptEligibleCount, deleteEligibleCount], ([adoptCount, deleteCount]) => {
+ if (selectedRules.value.length > 0) return
+ if (batchMode.value === 'adopt' && adoptCount === 0 && deleteCount > 0) batchMode.value = 'delete'
+ else if (batchMode.value === 'delete' && deleteCount === 0 && adoptCount > 0) batchMode.value = 'adopt'
+}, {immediate: true})
+// Display protected rules first, then sort remaining rules by port ascending.
+const sortedRules = computed(() => sortFirewallRules(firewall.value?.rules || []))
 const displayedRules = computed(() => {
- const rules = firewall.value?.rules || []
- return [...rules.filter(item => item.protected), ...rules.filter(item => !item.protected)]
+ const q = ruleFilter.value.trim().toLowerCase()
+ if (!q) return sortedRules.value
+ return sortedRules.value.filter(item => {
+  const ports = `${item.portFrom}${item.portTo !== item.portFrom ? '-' + item.portTo : ''}/${formatProtocol(item.protocol)}`.toLowerCase()
+  const services = securityRuleServices(item, firewall.value?.requiredPorts || [], props.language).join(' ').toLowerCase()
+  const owner = item.protected ? t('受保护','protected') : item.managed ? t('悟空管理','wukong managed') : t('外部规则','external')
+  return ports.includes(q) || services.includes(q) || (item.source || '').toLowerCase().includes(q) || (item.description || '').toLowerCase().includes(q) || owner.toLowerCase().includes(q)
+ })
 })
-const batchEligible = computed(() => (firewall.value?.rules || []).filter(item => securityBatchEligible(item, batchMode.value)))
+const batchEligible = computed(() => displayedRules.value.filter(item => securityBatchEligible(item, batchMode.value)))
 const allSelected = computed(() => batchEligible.value.length > 0 && batchEligible.value.slice(0,100).every(item => selectedRules.value.includes(item.id)))
 watch([batchMode, zone], () => { selectedRules.value = [] })
 function selectAll() { selectedRules.value = allSelected.value ? [] : batchEligible.value.slice(0,100).map(item => item.id) }
@@ -44,9 +60,21 @@ function stageBatch() {
 const now = ref(Date.now())
 const pending = ref<{kind: 'firewall'|'fail2ban'; request: SecurityRequest; preview: SecurityPreview} | null>(null)
 const job = ref<Job | null>(null)
-const rule = reactive({action: 'allow' as 'allow'|'deny', protocol: 'tcp' as 'tcp'|'udp'|'tcp/udp'|'tcp+udp', portFrom: 0, portTo: 0, source: ''})
+const rule = reactive({action: 'allow' as 'allow'|'deny', protocol: 'tcp' as 'tcp'|'udp'|'tcp/udp'|'tcp+udp', portFrom: '' as number | '', portTo: '' as number | '', source: ''})
 const manualSSH = ref('')
 const manualPanel = ref('')
+const hasDetectedProtectedPorts = computed(() => {
+ const req = firewall.value?.requiredPorts || []
+ return req.some(p => p.protected && p.reason === 'SSH') && req.some(p => p.protected && p.reason !== 'SSH')
+})
+const manualPortsVisible = computed(() => showManualPorts.value || !!manualSSH.value.trim() || !!manualPanel.value.trim() || (fwVerified.value && !hasDetectedProtectedPorts.value))
+function stageAddRule() {
+ const from = Number(rule.portFrom)
+ const to = rule.portTo === '' || rule.portTo === null || rule.portTo === undefined || Number(rule.portTo) === 0 ? from : Number(rule.portTo)
+ if (!Number.isInteger(from) || from < 1 || from > 65535) return
+ if (!Number.isInteger(to) || to < from || to > 65535) return
+ void stage('firewall', {operation:'add', rule:{action:rule.action, protocol:rule.protocol, portFrom:from, portTo:to, source:rule.source.trim() || 'any'}})
+}
 const config = reactive<SSHProtectionConfig>({maxRetry:5,findTime:600,banTime:3600,mode:'normal',ignoreIPs:[]})
 const permanentBanSupported = computed(() => support('fail2ban.permanent') && !!fail2ban.value?.supportsPermanentBan)
 const whitelist = ref('')
@@ -184,6 +212,11 @@ async function apply() {
   if (!alive) return
   pending.value = null
   selectedRules.value = []
+  if (staged.kind === 'firewall' && staged.request.operation === 'add') {
+   rule.portFrom = ''
+   rule.portTo = ''
+   rule.source = ''
+  }
   if (result.firewall) {
    firewall.value = result.firewall;fwVerified.value = true
    securityStatusCache.publish(props.hostId,'firewall',result.firewall.zone || zone.value,result.firewall)
@@ -242,49 +275,139 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
   <p v-if="error" role="alert" class="security-warning">{{error}}</p>
   <section v-if="job" class="panel-card security-notice"><b>{{t('安全组件安装','Security component installation')}}</b><p>{{job.message}} · {{job.progress}}%</p><small>{{t('进度和错误同时记录在任务日志。','Progress and errors are also recorded in Jobs.')}}</small></section>
   <section v-if="firewall?.pending" class="panel-card security-notice danger"><h3>{{t('请确认连接仍正常','Confirm connectivity')}}</h3><p>{{t('变更将在倒计时结束后自动恢复。请确认能够重新连接 SSH 和面板后保留配置。','The change will roll back when the timer expires. Keep it only after verifying new SSH and panel connections.')}}</p><b>{{seconds}} s</b><button class="primary" :disabled="busy || !online || !fwCurrent || seconds <= 0" @click="confirm">{{t('连接正常，保留变更','Connections work — keep change')}}</button><p v-if="firewall.pending.error">{{firewall.pending.error}}</p></section>
-  <section class="panel-card security-card">
-   <div class="card-head"><div><span class="section-mark jade">防</span><div><h3>{{t('防火墙管理','Firewall')}}</h3><p>{{firewall?.backend || '—'}} · {{firewall?.policy || '—'}}</p></div></div><span>{{!fwVerified ? t('状态待复核','Status awaiting verification') : firewall?.active && online && securityStateFresh(firewall.checkedAt,now) && firewall.policy === 'deny' ? t('入站防护已开启','Inbound protection enabled') : t('入站防护未开启','Inbound protection disabled')}}</span></div>
+  <section class="panel-card security-card fw-security-card">
+   <div class="card-head">
+    <div>
+     <span class="section-mark jade">防</span>
+     <div>
+      <h3>{{t('防火墙管理','Firewall')}}</h3>
+      <p>{{firewall?.backend ? firewall.backend.toUpperCase() : '—'}} · {{firewall?.policy === 'deny' ? t('默认拒绝入站 (DENY)','Default deny inbound (DENY)') : firewall?.policy === 'allow' ? t('默认放行入站 (ALLOW)','Default allow inbound (ALLOW)') : (firewall?.policy || '—')}}</p>
+     </div>
+    </div>
+    <span class="ssh-status-indicator" :class="{active: fwVerified && firewall?.active && online && securityStateFresh(firewall.checkedAt,now) && firewall.policy === 'deny'}">{{!fwVerified ? t('状态待复核','Status awaiting verification') : firewall?.active && online && securityStateFresh(firewall.checkedAt,now) && firewall.policy === 'deny' ? t('入站防护已开启','Inbound protection enabled') : t('入站防护未开启','Inbound protection disabled')}}</span>
+   </div>
    <p v-if="!support('firewall')" class="security-warning">{{t('远端 Agent 不支持防火墙管理，请更新完整面板。','The remote Agent does not support firewall management. Update the full panel.')}}</p>
    <p v-if="fwLoading && !fwCurrent" class="security-loading" role="status">{{firewall ? t('正在复核防火墙；下方是上次采样结果。','Checking firewall; the previous sample is shown below.') : t('正在读取防火墙状态…','Loading firewall status…')}}</p>
    <p v-if="fwError" role="alert" class="security-warning">{{t('防火墙状态读取失败：','Failed to load firewall status: ')}}{{fwError}} {{firewall ? t('下方仅显示上次采样，已禁用操作。','The previous sample is shown; actions are disabled.') : ''}}</p>
    <p v-if="firewall?.reason" class="security-warning">{{firewall.reason}}</p>
-   <small v-if="firewall" :class="{stale: !securityStateFresh(firewall.checkedAt, now)}">{{t('采样时间','Sampled')}} {{new Date(firewall.checkedAt).toLocaleString(language)}} {{!securityStateFresh(firewall.checkedAt,now) ? t('（已过期）','(stale)') : ''}}</small>
-   <div class="security-actions">
-    <button v-if="firewall && !firewall.installed" class="primary" :disabled="!fwWritable" @click="stage('firewall',{operation:'install'})">{{t('安装防火墙组件','Install firewall')}}</button>
-    <button v-else class="primary" :disabled="!fwWritable" @click="stage('firewall',{operation:'enable'})">{{t('开启入站防护','Enable inbound protection')}}</button>
-    <button class="secondary" :disabled="!fwWritable || !firewall?.active" @click="stage('firewall',{operation:'disable'})">{{t('关闭防火墙','Disable firewall')}}</button>
-    <label v-if="firewall?.zones.length">{{t('区域','Zone')}}<select v-model="zone" :disabled="busy || !!firewall.pending" @change="changeZone"><option v-for="item in firewall.zones" :key="item">{{item}}</option></select></label>
+   <div class="ssh-meta-toolbar">
+    <div class="ssh-meta-left">
+     <span v-if="firewall" class="ssh-ownership-badge" :class="{managed: firewall.active && firewall.policy === 'deny'}">{{t(`共 ${firewall.rules.length} 条规则`, `${firewall.rules.length} rules`)}} · {{t(`${firewall.rules.filter(r => r.protected).length} 受保护`, `${firewall.rules.filter(r => r.protected).length} protected`)}} · {{t(`${firewall.rules.filter(r => r.managed && !r.protected).length} 悟空管理`, `${firewall.rules.filter(r => r.managed && !r.protected).length} managed`)}}<template v-if="firewall.rules.some(r => !r.managed)"> · {{t(`${firewall.rules.filter(r => !r.managed).length} 外部`, `${firewall.rules.filter(r => !r.managed).length} external`)}}</template></span>
+     <small v-if="firewall" :class="{stale: !securityStateFresh(firewall.checkedAt, now)}">{{t('采样时间','Sampled')}} {{new Date(firewall.checkedAt).toLocaleString(language)}} {{!securityStateFresh(firewall.checkedAt,now) ? t('（已过期）','(stale)') : ''}}</small>
+    </div>
+    <div class="security-actions ssh-header-actions">
+     <label v-if="firewall?.zones.length" class="fw-zone-select">
+      <span>{{t('区域','Zone')}}</span>
+      <select v-model="zone" :disabled="busy || !!firewall.pending" @change="changeZone"><option v-for="item in firewall.zones" :key="item">{{item}}</option></select>
+     </label>
+     <button v-if="firewall && !firewall.installed" class="primary" :disabled="!fwWritable" @click="stage('firewall',{operation:'install'})">{{t('安装防火墙组件','Install firewall')}}</button>
+     <button v-else-if="firewall?.active && firewall?.policy === 'deny'" class="secondary" :disabled="!fwWritable" @click="stage('firewall',{operation:'enable'})">{{t('重新同步防护策略','Resync protection policy')}}</button>
+     <button v-else class="primary" :disabled="!fwWritable" @click="stage('firewall',{operation:'enable'})">{{t('开启入站防护','Enable inbound protection')}}</button>
+     <button class="secondary" :disabled="!fwWritable || !firewall?.active" @click="stage('firewall',{operation:'disable'})">{{t('关闭防火墙','Disable firewall')}}</button>
+    </div>
    </div>
-   <div class="security-form security-ports"><label>{{t('SSH 端口（无法识别时填写）','SSH ports (if not detected)')}}<input v-model="manualSSH" placeholder="46961" :disabled="!enabled"><small>{{t('逗号分隔，不默认使用 22','Comma separated; never defaults to 22')}}</small></label><label>{{t('面板入口端口（无法识别时填写）','Public panel ports (if not detected)')}}<input v-model="manualPanel" placeholder="9443" :disabled="!enabled"><small>{{t('填写本机实际入口，NAT 公网映射另行设置','Use the local public listener; configure external NAT separately')}}</small></label></div>
-   <div class="security-port-list"><b>{{t('管理保护与节点端口建议','Protected management ports and node suggestions')}}</b><span v-for="port in firewall?.requiredPorts" :key="`${port.port}/${port.protocol}`">{{port.port}}/{{formatProtocol(port.protocol)}} · {{port.reason}} <button v-if="!port.protected && !portAllowed(port)" :disabled="!fwWritable" @click="stage('firewall',{operation:'add',rule:{action:'allow',protocol:port.protocol as 'tcp'|'udp',portFrom:port.port,source:'any'}})">{{t('放行','Allow')}}</button><small v-else>{{port.protected ? t('受保护','Protected') : t('已允许','Allowed')}}</small></span></div>
-   <form class="security-form" @submit.prevent="stage('firewall',{operation:'add',rule:{...rule,portTo:rule.portTo || rule.portFrom,source:rule.source || 'any'}})">
-    <label>{{t('操作','Action')}}<select v-model="rule.action"><option value="allow">{{t('允许','Allow')}}</option><option value="deny">{{t('拒绝','Deny')}}</option></select></label>
-    <label>{{t('协议','Protocol')}}<select v-model="rule.protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp/udp">TCP+UDP</option></select></label>
-    <label>{{t('起始端口','First port')}}<input v-model.number="rule.portFrom" type="number" min="1" max="65535" required></label>
-    <label>{{t('结束端口（可选）','Last port (optional)')}}<input v-model.number="rule.portTo" type="number" min="0" max="65535"></label>
-    <label class="wide">{{t('来源 IP / CIDR（留空为任意）','Source IP / CIDR (empty means any)')}}<input v-model="rule.source" placeholder="192.0.2.1/32 · 2001:db8::/64"></label>
-    <button class="primary" :disabled="!fwWritable">{{t('预览添加规则','Preview rule')}}</button>
-   </form>
-   <div class="security-batch security-actions">
-    <label><span class="security-batch-heading"><span>{{t('批量操作','Batch action')}}</span><small aria-live="polite">{{t('已选','Selected')}} {{selectedRules.length}} / 100</small></span><select v-model="batchMode" :disabled="!batchWritable" :aria-label="t('批量操作','Batch action')"><option value="adopt">{{t('接管外部规则','Adopt external rules')}}</option><option value="delete">{{t('删除悟空规则','Delete managed rules')}}</option></select></label>
-    <button class="secondary" :disabled="!batchWritable || !selectedRules.length" @click="selectedRules = []">{{t('清空选择','Clear selection')}}</button>
-    <button :class="batchMode === 'delete' ? 'danger-button' : 'primary'" :disabled="!batchWritable || !selectedRules.length || selectedRules.length > 100" @click="stageBatch">{{batchMode === 'delete' ? t('预览批量删除','Preview batch deletion') : t('预览批量接管','Preview batch adoption')}}</button>
+   <div class="fw-suggestions-panel">
+    <div class="ssh-section-head">
+     <div class="ssh-head-title">
+      <b>{{t('管理保护与节点端口建议','Protected management ports & node suggestions')}}</b>
+      <span class="ssh-count-pill">{{firewall?.requiredPorts?.length || 0}}</span>
+     </div>
+     <button type="button" class="secondary ssh-expand-btn" @click="showManualPorts = !showManualPorts">{{manualPortsVisible && showManualPorts ? t('收起手动端口设置','Hide manual port override') : t('手动指定保护端口','Override protected ports')}}</button>
+    </div>
+    <div v-if="manualPortsVisible" class="security-form security-ports fw-manual-ports">
+     <label>{{t('SSH 端口（无法识别时填写）','SSH ports (if not detected)')}}<input v-model="manualSSH" placeholder="46961" :disabled="!enabled"><small>{{t('逗号分隔，不默认使用 22','Comma separated; never defaults to 22')}}</small></label>
+     <label>{{t('面板入口端口（无法识别时填写）','Public panel ports (if not detected)')}}<input v-model="manualPanel" placeholder="9443" :disabled="!enabled"><small>{{t('填写本机实际入口，NAT 公网映射另行设置','Use the local public listener; configure external NAT separately')}}</small></label>
+    </div>
+    <div v-if="firewall?.requiredPorts?.length" class="fw-port-chips">
+     <div v-for="port in firewall.requiredPorts" :key="`${port.port}/${port.protocol}`" class="fw-port-chip" :class="port.protected ? 'is-protected' : portAllowed(port) ? 'is-allowed' : 'is-pending'">
+      <span class="fw-port-main">
+       <code>{{port.port}}/{{formatProtocol(port.protocol)}}</code>
+       <span class="ssh-dot">·</span>
+       <span class="fw-port-reason">{{port.reason}}</span>
+      </span>
+      <button v-if="!port.protected && !portAllowed(port)" type="button" class="fw-allow-btn" :disabled="!fwWritable" @click="stage('firewall',{operation:'add',rule:{action:'allow',protocol:port.protocol as 'tcp'|'udp',portFrom:port.port,source:'any'}})">{{t('放行','Allow')}}</button>
+      <span v-else class="fw-port-status" :class="port.protected ? 'protected' : 'allowed'">{{port.protected ? t('受保护','Protected') : t('已允许','Allowed')}}</span>
+     </div>
+    </div>
    </div>
-   <p v-if="!batchSupported" class="security-footnote">{{t('Agent 不支持防火墙批量操作，请更新完整面板。','Update the full panel to support firewall batch actions.')}}</p>
-   <p class="security-footnote">{{t('先选择批量操作类型，再勾选规则；受保护规则不可删除。整批预览、整批应用，执行失败恢复全部变更。','Choose an action, then select rules. Protected rules cannot be deleted. The batch is reviewed and applied together; failures restore the entire change.')}}</p>
-   <div class="security-table-wrap"><table class="security-table">
-    <thead><tr><th class="security-select"><input type="checkbox" :checked="allSelected" :indeterminate="selectedRules.length > 0 && !allSelected" :disabled="!batchWritable || !batchEligible.length" :aria-label="t('全选可操作规则（最多 100 条）','Select eligible rules (up to 100)')" @change="selectAll"></th><th>{{t('规则','Rule')}}</th><th>{{t('对应服务 / 用途','Service / purpose')}}</th><th>{{t('来源 IP','Source IP')}}</th><th>{{t('归属','Ownership')}}</th><th>{{t('操作','Actions')}}</th></tr></thead>
-    <tbody><tr v-for="item in displayedRules" :key="item.id">
-     <td class="security-select"><input v-model="selectedRules" type="checkbox" :value="item.id" :disabled="!batchWritable || !securityBatchEligible(item,batchMode) || selectedRules.length >= 100 && !selectedRules.includes(item.id)" :aria-label="`${t('选择规则','Select rule')} ${item.portFrom}/${formatProtocol(item.protocol)}`"></td>
-     <td>{{item.description || `${t(item.action === 'allow' ? '允许' : '拒绝',item.action)} ${item.portFrom}${item.portTo !== item.portFrom ? '–'+item.portTo : ''}/${formatProtocol(item.protocol)}`}}<small v-if="item.addressFamilies?.length" class="security-rule-family">{{item.addressFamilies.map(family => family === 'ipv4' ? 'IPv4' : 'IPv6').join(' · ')}}</small></td>
-     <td class="security-rule-services"><span v-for="service in securityRuleServices(item, firewall?.requiredPorts || [], language)" :key="service">{{service}}</span><small v-if="!securityRuleServices(item, firewall?.requiredPorts || [], language).length">{{t('未识别服务','Unidentified service')}}</small></td>
-     <td>{{item.source === 'any' ? t('任意 IP','Any IP') : item.source || '—'}}</td>
-     <td>{{item.protected ? t('受保护','Protected') : item.managed ? t('悟空管理','Wukong managed') : t('已有外部规则','Existing external rule')}}</td>
-     <td><button v-if="item.adoptable && !item.managed" :disabled="!fwWritable" @click="stage('firewall',{operation:'adopt',ruleId:item.id})">{{t('接管','Adopt')}}</button><button v-if="item.managed" :disabled="!fwWritable || item.protected" @click="stage('firewall',{operation:'delete',ruleId:item.id})">{{t('删除','Delete')}}</button><small v-if="!item.adoptable">{{t('只读','Read only')}}</small></td>
-    </tr></tbody>
-   </table></div>
-   <p class="security-footnote">{{t('用途按当前主机的端口建议匹配，不代表服务正在运行。任意 IP 表示不限制访问来源。','Purposes match this host’s suggested ports and do not indicate running services. Any IP means unrestricted source addresses.')}}</p>
-   <p class="security-footnote">{{t('后续节点不会自动修改防火墙；云安全组和 NAT 映射需单独配置。','Future nodes do not automatically change firewall rules. Cloud security groups and NAT need separate configuration.')}}</p>
+   <div class="fw-add-panel">
+    <div class="ssh-section-head">
+     <div class="ssh-head-title">
+      <b>{{t('添加入站规则','Add inbound rule')}}</b>
+     </div>
+     <small>{{t('支持单端口或连续端口段，选择 TCP+UDP 可同时放行双协议','Supports single port or range; choose TCP+UDP to allow both protocols')}}</small>
+    </div>
+    <form class="security-form fw-add-form" @submit.prevent="stageAddRule">
+     <label>{{t('操作','Action')}}<select v-model="rule.action"><option value="allow">{{t('允许 (ALLOW)','Allow (ALLOW)')}}</option><option value="deny">{{t('拒绝 (DENY)','Deny (DENY)')}}</option></select></label>
+     <label>{{t('协议','Protocol')}}<select v-model="rule.protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp/udp">TCP+UDP</option></select></label>
+     <label>{{t('起始端口','First port')}}<input v-model.number="rule.portFrom" type="number" min="1" max="65535" placeholder="1–65535" required></label>
+     <label>{{t('结束端口（可选）','Last port (optional)')}}<input v-model.number="rule.portTo" type="number" :min="rule.portFrom || 1" max="65535" :placeholder="rule.portFrom ? String(rule.portFrom) : t('留空为单端口','Same as start')"></label>
+     <label class="fw-source-field">{{t('来源 IP / CIDR（留空为任意）','Source IP / CIDR (empty means any)')}}<input v-model="rule.source" placeholder="192.0.2.1/32 · 2001:db8::/64"></label>
+     <button class="primary fw-add-submit" :disabled="!fwWritable">{{t('预览添加规则','Preview rule')}}</button>
+    </form>
+   </div>
+   <div class="fw-rules-panel">
+    <div class="fw-table-toolbar">
+     <div class="fw-toolbar-left">
+      <div class="ssh-head-title">
+       <b>{{t('当前防火墙规则','Firewall rules')}}</b>
+       <span class="ssh-count-pill">{{displayedRules.length}}<template v-if="ruleFilter.trim()"> / {{firewall?.rules?.length || 0}}</template></span>
+      </div>
+      <input v-if="(firewall?.rules?.length || 0) > 6" v-model="ruleFilter" type="search" class="ssh-ban-search" :placeholder="t('搜索端口、服务或来源 IP…','Filter port, service or source IP…')" :aria-label="t('搜索防火墙规则','Filter firewall rules')">
+     </div>
+     <div class="fw-toolbar-batch">
+      <span class="fw-batch-count" aria-live="polite">{{t('已选','Selected')}} <b>{{selectedRules.length}}</b> / 100</span>
+      <select v-model="batchMode" class="fw-batch-select" :disabled="!batchWritable" :aria-label="t('批量操作','Batch action')">
+       <option value="delete">{{t(`删除悟空规则 (${deleteEligibleCount})`,`Delete managed rules (${deleteEligibleCount})`)}}</option>
+       <option value="adopt">{{t(`接管外部规则 (${adoptEligibleCount})`,`Adopt external rules (${adoptEligibleCount})`)}}</option>
+      </select>
+      <button v-if="selectedRules.length > 0" type="button" class="secondary fw-batch-btn" :disabled="!batchWritable" @click="selectedRules = []">{{t('清空选择','Clear')}}</button>
+      <button type="button" class="fw-batch-btn" :class="batchMode === 'delete' ? 'danger-button' : 'primary'" :disabled="!batchWritable || !selectedRules.length || selectedRules.length > 100" @click="stageBatch">{{batchMode === 'delete' ? t('预览批量删除','Preview batch deletion') : t('预览批量接管','Preview batch adoption')}}</button>
+     </div>
+    </div>
+    <p v-if="!batchSupported" class="security-footnote">{{t('Agent 不支持防火墙批量操作，请更新完整面板。','Update the full panel to support firewall batch actions.')}}</p>
+    <div tabindex="0" role="region" :aria-label="t('防火墙规则列表','Firewall rules table')" class="security-table-wrap"><table class="security-table fw-table">
+     <thead><tr><th class="security-select"><input type="checkbox" :checked="allSelected" :indeterminate="selectedRules.length > 0 && !allSelected" :disabled="!batchWritable || !batchEligible.length" :aria-label="t('全选可操作规则（最多 100 条）','Select eligible rules (up to 100)')" @change="selectAll"></th><th>{{t('规则','Rule')}}</th><th>{{t('对应服务 / 用途','Service / purpose')}}</th><th>{{t('来源 IP','Source IP')}}</th><th>{{t('归属','Ownership')}}</th><th class="fw-col-action">{{t('操作','Actions')}}</th></tr></thead>
+     <tbody>
+      <tr v-for="item in displayedRules" :key="item.id" :class="{'is-selected': selectedRules.includes(item.id)}">
+       <td class="security-select"><input v-model="selectedRules" type="checkbox" :value="item.id" :disabled="!batchWritable || !securityBatchEligible(item,batchMode) || selectedRules.length >= 100 && !selectedRules.includes(item.id)" :aria-label="`${t('选择规则','Select rule')} ${item.portFrom}/${formatProtocol(item.protocol)}`"></td>
+       <td>
+        <div class="fw-rule-cell">
+         <span class="fw-action-badge" :class="item.action === 'allow' ? 'is-allow' : 'is-deny'">{{item.action === 'allow' ? t('允许','Allow') : t('拒绝','Deny')}}</span>
+         <code class="fw-rule-port">{{item.description || `${item.portFrom}${item.portTo !== item.portFrom ? '–'+item.portTo : ''}/${formatProtocol(item.protocol)}`}}</code>
+         <span v-if="item.addressFamilies?.length" class="fw-family-tag">{{item.addressFamilies.map(family => family === 'ipv4' ? 'IPv4' : 'IPv6').join(' · ')}}</span>
+        </div>
+       </td>
+       <td class="security-rule-services">
+        <div v-if="securityRuleServices(item, firewall?.requiredPorts || [], language).length" class="fw-service-tags">
+         <span v-for="service in securityRuleServices(item, firewall?.requiredPorts || [], language)" :key="service" class="fw-service-tag">{{service}}</span>
+        </div>
+        <small v-else class="fw-unidentified">{{t('未识别服务','Unidentified service')}}</small>
+       </td>
+       <td>
+        <span v-if="item.source === 'any'" class="fw-source-any">{{t('任意 IP','Any IP')}}</span>
+        <code v-else class="fw-source-cidr">{{item.source || '—'}}</code>
+       </td>
+       <td>
+        <span class="fw-owner-badge" :class="item.protected ? 'is-protected' : item.managed ? 'is-managed' : 'is-external'">{{item.protected ? t('受保护','Protected') : item.managed ? t('悟空管理','Wukong managed') : t('外部规则','External rule')}}</span>
+       </td>
+       <td class="fw-col-action">
+        <button v-if="item.adoptable && !item.managed" class="fw-row-btn" :disabled="!fwWritable" @click="stage('firewall',{operation:'adopt',ruleId:item.id})">{{t('接管','Adopt')}}</button>
+        <button v-else-if="item.managed && !item.protected" class="fw-row-btn is-danger" :disabled="!fwWritable" @click="stage('firewall',{operation:'delete',ruleId:item.id})">{{t('删除','Delete')}}</button>
+        <small v-else-if="item.protected" class="fw-op-note">{{t('系统保护','Protected')}}</small>
+        <small v-else class="fw-op-note">{{t('只读','Read only')}}</small>
+       </td>
+      </tr>
+      <tr v-if="!displayedRules.length">
+       <td colspan="6" class="fw-empty-row">{{ruleFilter.trim() ? t('没有匹配的防火墙规则。','No matching firewall rules.') : t('当前暂无防火墙规则。','No firewall rules found.')}}</td>
+      </tr>
+     </tbody>
+    </table></div>
+    <div class="fw-footnotes">
+     <small class="security-footnote">{{t('受保护规则不可删除；批量操作将整批预览并应用，执行失败自动恢复全部变更。','Protected rules cannot be deleted. Batch actions are reviewed and applied together; failures roll back all changes.')}}</small>
+     <small class="security-footnote">{{t('用途按当前主机的端口建议匹配，不代表服务正在运行。后续节点不会自动修改防火墙；云安全组和 NAT 映射需单独配置。','Purposes match suggested ports and do not indicate running services. Cloud security groups and NAT require separate configuration.')}}</small>
+    </div>
+   </div>
   </section>
   <section class="panel-card security-card ssh-security-card">
    <div class="card-head">
@@ -541,6 +664,67 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
 .ssh-footer-drawers summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:500}
 .ssh-footer-drawers p{font-size:11px;line-height:1.65;color:var(--muted);margin:8px 0 0}
 .ssh-footer-drawers button{margin-top:10px}
+.fw-zone-select{display:inline-flex!important;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.fw-zone-select select{height:30px;padding:0 8px;font-size:12px}
+.fw-suggestions-panel{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:4px;background:rgba(var(--wash-rgb),.015)}
+.fw-manual-ports{margin:10px 0 14px!important;padding:12px 14px;background:var(--surface-code);border:1px solid var(--line);border-radius:4px}
+.fw-port-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.fw-port-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface-code);font-size:12px;transition:border-color .15s}
+.fw-port-chip.is-protected{border-color:rgba(212,173,87,.35);background:rgba(212,173,87,.05)}
+.fw-port-chip.is-allowed{border-color:rgba(82,182,144,.28)}
+.fw-port-chip.is-pending{border-color:rgba(212,173,87,.55);background:rgba(212,173,87,.08)}
+.fw-port-main{display:inline-flex;align-items:center;gap:6px}
+.fw-port-main code{font-weight:600;color:var(--paper)}
+.fw-port-reason{color:var(--muted);font-size:11px}
+.fw-port-status{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600}
+.fw-port-status.protected{background:rgba(212,173,87,.14);color:var(--gold);border:1px solid rgba(212,173,87,.35)}
+.fw-port-status.allowed{background:rgba(82,182,144,.12);color:var(--jade);border:1px solid rgba(82,182,144,.32)}
+.fw-allow-btn{background:transparent;border:1px solid var(--gold);color:var(--gold);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;cursor:pointer;transition:background .15s}
+.fw-allow-btn:hover:not(:disabled){background:rgba(212,173,87,.15)}
+.fw-allow-btn:disabled{opacity:.45;cursor:default}
+.fw-add-panel{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:4px;background:rgba(var(--wash-rgb),.015)}
+.fw-add-form{grid-template-columns:130px 120px 120px 140px minmax(180px,1fr) auto;align-items:end;margin:10px 0 0!important;gap:10px}
+.fw-source-field{grid-column:auto}
+.fw-add-submit{grid-column:auto!important;min-height:38px!important;white-space:nowrap}
+.fw-rules-panel{margin-top:16px}
+.fw-table-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:12px}
+.fw-toolbar-left{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.fw-toolbar-batch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fw-batch-count{font-size:12px;color:var(--muted);white-space:nowrap}
+.fw-batch-count b{color:var(--paper);font-family:var(--mono,monospace)}
+.fw-batch-select{height:32px;padding:0 10px;font-size:12px;min-width:170px}
+.fw-batch-btn{min-height:32px;padding:4px 12px;font-size:12px;white-space:nowrap}
+.fw-table{border-collapse:separate;border-spacing:0}
+.fw-table thead{position:sticky;inset-block-start:0;z-index:1;background:var(--surface-card,var(--bg))}
+.fw-table tbody tr:hover{background:rgba(var(--wash-rgb),.025)}
+.fw-table tbody tr.is-selected{background:rgba(212,173,87,.06)}
+.fw-rule-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fw-action-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;line-height:1.5}
+.fw-action-badge.is-allow{background:rgba(82,182,144,.12);border:1px solid rgba(82,182,144,.35);color:var(--jade)}
+.fw-action-badge.is-deny{background:rgba(227,107,89,.14);border:1px solid rgba(227,107,89,.38);color:var(--danger-text)}
+.fw-rule-port{font-size:12px;font-weight:600;color:var(--paper)}
+.fw-family-tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:3px;font-size:10px;background:var(--surface-code);border:1px solid var(--line);color:var(--muted)}
+.fw-service-tags{display:flex;flex-wrap:wrap;gap:6px}
+.fw-service-tag{display:inline-flex!important;align-items:center;padding:2px 8px;border-radius:3px;font-size:11px;background:var(--surface-code);border:1px solid var(--line);color:var(--paper);min-width:auto!important;max-width:none!important;line-height:1.4!important}
+.fw-unidentified{color:var(--muted);opacity:.65;font-size:11px}
+.fw-source-any{color:var(--muted);font-size:12px}
+.fw-source-cidr{font-size:12px;color:var(--paper)}
+.fw-owner-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line);background:var(--surface-code);color:var(--muted);white-space:nowrap}
+.fw-owner-badge.is-protected{border-color:rgba(212,173,87,.4);background:rgba(212,173,87,.1);color:var(--gold)}
+.fw-owner-badge.is-managed{border-color:rgba(82,182,144,.36);background:rgba(82,182,144,.1);color:var(--jade)}
+.fw-col-action{text-align:right!important;white-space:nowrap}
+.fw-row-btn{background:transparent;border:1px solid var(--line);color:var(--gold);padding:3px 10px;border-radius:3px;font-size:11px;cursor:pointer;margin:0!important;transition:background .15s,border-color .15s}
+.fw-row-btn:hover:not(:disabled){background:rgba(212,173,87,.14);border-color:var(--gold)}
+.fw-row-btn.is-danger:hover:not(:disabled){background:rgba(227,107,89,.14);border-color:var(--danger-text);color:var(--danger-text)}
+.fw-row-btn:disabled{opacity:.45;cursor:default}
+.fw-op-note{color:var(--muted);opacity:.65;font-size:11px}
+.fw-empty-row{text-align:center!important;padding:24px 12px!important;color:var(--muted)}
+.fw-footnotes{margin-top:12px;display:grid;gap:4px}
+@media(max-width:1050px){
+ .fw-add-form{grid-template-columns:repeat(4,minmax(0,1fr))}
+ .fw-source-field{grid-column:1/4}
+ .fw-add-submit{grid-column:4/5;justify-self:stretch}
+}
 .security-loading{font-size:12px;color:var(--muted);line-height:1.65}
 .security-batch-heading{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.security-batch-heading small{font-size:12px;color:var(--muted);white-space:nowrap}.security-select{width:32px}.security-select input{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}.security-select input:disabled{cursor:default}
 .security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:22px;margin-bottom:20px}.security-card>.card-head{margin-bottom:15px}.security-warning{color:var(--danger-text);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.security-actions{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:18px 0}.security-form{display:grid;align-items:start;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}.security-form label,.security-actions label{display:grid;gap:7px;min-width:0;font-size:12px}.security-form small,.security-footnote,.security-card>small{font-size:11px;color:var(--muted);line-height:1.6}.security-form .wide{grid-column:1/-1}.security-form>button{align-self:end;min-height:40px;grid-column:1/-1;justify-self:start}.security-ports{grid-template-columns:repeat(2,minmax(0,1fr))}.security-port-list{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.security-port-list>b{width:100%;font-size:12px}.security-port-list>span{padding:6px 9px;border:1px solid var(--line);font-size:11px;overflow-wrap:anywhere}.security-port-list button,.security-table button,.security-jail header button{background:transparent;border:1px solid var(--line);color:var(--gold);padding:4px 8px;margin-left:6px;cursor:pointer}.security-table-wrap{overflow-x:auto}.security-table{width:100%;border-collapse:collapse;font-size:12px}.security-table th,.security-table td{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.security-rule-services span{display:block;min-width:140px;max-width:320px;line-height:1.65}.security-rule-services small{color:var(--muted)}.security-table th{color:var(--muted);font-weight:500}.security-notice{padding:20px;margin-bottom:20px}.security-notice p{font-size:12px;line-height:1.7}.security-notice b{margin-right:16px}.security-guidance{padding:14px 16px;margin:14px 0;background:var(--surface-code);border-left:3px solid var(--gold)}.security-guidance b{font-size:13px}.security-guidance p{font-size:12px;line-height:1.7;margin:6px 0;color:var(--muted)}.security-technical{font-size:11px;color:var(--muted)}.security-technical summary{cursor:pointer}.security-technical code{overflow-wrap:anywhere}.security-jail{padding:6px 0 4px}.security-jail header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}.security-jail header span,.security-jail p{font-size:11px;color:var(--muted)}.security-preview ul{padding-left:18px;font-size:13px;line-height:1.8}.security-preview p{font-size:12px;line-height:1.7}.stale{color:var(--danger-text)!important}
@@ -548,7 +732,8 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
  .ssh-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
  .security-failure-row{align-items:flex-start;flex-direction:column;gap:8px}
  .security-failure-detail{white-space:normal}
- .security-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .security-form,.fw-add-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .fw-source-field,.fw-add-submit{grid-column:1/-1!important}
  .security-ports{grid-template-columns:1fr}
  .security-card{padding:16px}
  .security-table{min-width:680px}
