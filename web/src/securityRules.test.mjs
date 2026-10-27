@@ -55,12 +55,17 @@ test('batch eligibility separates external adoption from managed deletion and pr
 })
 
 test('batch previews explain each rule, source and zone in both languages',async()=>{
- const {securityRuleChange,formatProtocol}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+ const {securityRuleChange,formatProtocol,formatHumanSeconds}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
  assert.equal(formatProtocol('tcp'),'TCP')
  assert.equal(formatProtocol('udp'),'UDP')
  assert.equal(formatProtocol('tcp/udp'),'TCP+UDP')
  assert.equal(formatProtocol('tcp+udp'),'TCP+UDP')
  assert.equal(formatProtocol('ipv6-icmp'),'IPv6-ICMP')
+ assert.equal(formatHumanSeconds(600,'zh-CN'),'10 分钟')
+ assert.equal(formatHumanSeconds(3600,'zh-CN'),'1 小时')
+ assert.equal(formatHumanSeconds(600000,'zh-CN'),'6 天 22 小时 40 分钟')
+ assert.equal(formatHumanSeconds(600000,'en-US'),'6d 22h 40m')
+ assert.equal(formatHumanSeconds(0,'zh-CN'),'')
  assert.equal(securityRuleChange('delete allow:tcp/udp:8080:8080:any:','zh-CN'),'删除 · 允许 8080/TCP+UDP · 任意 IP')
  assert.equal(securityRuleChange('allow:tcp:80:80:any:','zh-CN'),'添加 · 允许 80/TCP · 任意 IP')
  assert.equal(securityRuleChange('allow:tcp+udp:8080:8080:any:','zh-CN'),'添加 · 允许 8080/TCP+UDP · 任意 IP')

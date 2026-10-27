@@ -6,7 +6,7 @@ import BanDurationInput from './BanDurationInput.vue'
 import { translateText } from './i18n'
 import { securityStatusCache } from './securityStatus'
 import { afterFirewallRead } from './securityRefresh'
-import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange, formatProtocol } from './securityRules'
+import { parseSecurityPorts, securityRuleServices, securityRuleMatchesProtocol, securityStateFresh, securityBatchEligible, securityRuleChange, formatProtocol, formatHumanSeconds } from './securityRules'
 const props = defineProps<{hostId: string; hostName: string; online: boolean; compatible: boolean; capabilities: string[]; language: string}>()
 const client = hostSecurityAPI(props.hostId)
 const t = (zh: string, en: string) => props.language === 'en-US' ? en : zh
@@ -218,6 +218,15 @@ async function confirm() {
  finally {busy.value = false}
 }
 const externalSSH = computed(() => fail2ban.value?.jails.length === 1 && !fail2ban.value.managedJail ? fail2ban.value.jails[0] : null)
+const showSSHGuidance = computed(() => !fail2ban.value || !fail2ban.value.active || !!fail2ban.value.canActivate || !!(externalSSH.value && fail2ban.value.active) || (fbVerified.value && fail2ban.value.installed && !fbWritable.value))
+const banFilter = ref('')
+const bansExpanded = ref(false)
+function displayedBannedIPs(ips: string[]): string[] {
+ const q = banFilter.value.trim().toLowerCase()
+ const filtered = q ? ips.filter(ip => ip.toLowerCase().includes(q) || sourceCountry(ip).toLowerCase().includes(q)) : ips
+ if (q || bansExpanded.value || filtered.length <= 12) return filtered
+ return filtered.slice(0, 12)
+}
 function stageSSH() {
  const existing = externalSSH.value
  void stage('fail2ban', {operation: existing ? 'adopt' : fail2ban.value?.managedJail ? 'configure' : 'enable', jail: existing?.name, config: configRequest()})
@@ -277,12 +286,21 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
    <p class="security-footnote">{{t('用途按当前主机的端口建议匹配，不代表服务正在运行。任意 IP 表示不限制访问来源。','Purposes match this host’s suggested ports and do not indicate running services. Any IP means unrestricted source addresses.')}}</p>
    <p class="security-footnote">{{t('后续节点不会自动修改防火墙；云安全组和 NAT 映射需单独配置。','Future nodes do not automatically change firewall rules. Cloud security groups and NAT need separate configuration.')}}</p>
   </section>
-  <section class="panel-card security-card">
-   <div class="card-head"><div><span class="section-mark">护</span><div><h3>{{t('SSH 登录防护（Fail2ban）','SSH login protection (Fail2ban)')}}</h3><p>{{fail2ban?.logBackend || '—'}} {{fail2ban?.logPath}} · SSH {{fail2ban?.sshPorts.join(', ') || '—'}}</p></div></div><span>{{!fbVerified ? t('状态待复核','Status awaiting verification') : fail2ban?.active && !fail2ban.reason && online && fail2ban.logBackend && securityStateFresh(fail2ban.checkedAt,now) ? t('SSH 登录防护已开启','SSH login protection enabled') : t('防护尚未就绪','Protection not ready')}}</span></div>
+  <section class="panel-card security-card ssh-security-card">
+   <div class="card-head">
+    <div>
+     <span class="section-mark">护</span>
+     <div>
+      <h3>{{t('SSH 登录防护（Fail2ban）','SSH login protection (Fail2ban)')}}</h3>
+      <p>{{fail2ban?.logBackend || '—'}} {{fail2ban?.logPath}} · SSH {{fail2ban?.sshPorts.join(', ') || '—'}}</p>
+     </div>
+    </div>
+    <span class="ssh-status-indicator" :class="{active: fbVerified && fail2ban?.active && !fail2ban.reason && online && fail2ban.logBackend && securityStateFresh(fail2ban.checkedAt,now)}">{{!fbVerified ? t('状态待复核','Status awaiting verification') : fail2ban?.active && !fail2ban.reason && online && fail2ban.logBackend && securityStateFresh(fail2ban.checkedAt,now) ? t('SSH 登录防护已开启','SSH login protection enabled') : t('防护尚未就绪','Protection not ready')}}</span>
+   </div>
    <p v-if="!support('fail2ban')" class="security-warning">{{t('远端 Agent 不支持 SSH 防护管理，请更新完整面板。','The remote Agent does not support SSH protection. Update the full panel.')}}</p>
    <p v-if="fbLoading && !fbCurrent" class="security-loading" role="status">{{fail2ban ? t('正在复核 SSH 防护；下方是上次采样结果。','Checking SSH protection; the previous sample is shown below.') : t('正在读取 SSH 防护状态…','Loading SSH protection status…')}}</p>
    <p v-if="fbError" role="alert" class="security-warning">{{t('SSH 防护状态读取失败：','Failed to load SSH protection status: ')}}{{fbError}} {{fail2ban ? t('下方仅显示上次采样，已禁用操作。','The previous sample is shown; actions are disabled.') : ''}}</p>
-   <div class="security-guidance">
+   <div v-if="showSSHGuidance" class="security-guidance">
     <b v-if="fail2ban?.canActivate">{{t('已安装，SSH 登录防护尚未启用','Installed; SSH login protection is not enabled')}}</b>
     <b v-else-if="externalSSH && fail2ban?.active">{{t('发现已有 SSH 登录防护','Existing SSH login protection detected')}}</b>
     <b v-else-if="fail2ban?.installed && !fail2ban.active">{{t('SSH 登录防护尚未运行','SSH login protection is not running')}}</b>
@@ -292,43 +310,253 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
     <p v-else-if="fbVerified && fail2ban?.installed && !fbWritable">{{t('目前无法安全启用。请根据下方原因处理；不熟悉服务器操作时，可把原因发给服务器管理员协助检查。','Protection cannot be safely enabled yet. Resolve the reason below, or ask your server administrator for help.')}}</p>
    </div>
    <p v-if="fail2ban?.reason && !fail2ban.canActivate" class="security-warning">{{fail2ban.reason}}</p>
-   <small v-if="fail2ban">{{t('采样时间','Sampled')}} {{new Date(fail2ban.checkedAt).toLocaleString(language)}} {{!securityStateFresh(fail2ban.checkedAt,now) ? t('（已过期）','(stale)') : ''}}</small>
-   <div class="security-actions"><button v-if="fail2ban && !fail2ban.installed" class="primary" :disabled="!fbWritable" @click="stage('fail2ban',{operation:'install'})">{{t('安装 Fail2ban','Install Fail2ban')}}</button><button v-if="fail2ban?.managedJail" class="secondary" :disabled="!fbWritable || !fail2ban?.managedJail" @click="stage('fail2ban',{operation:'reload'})">{{t('重载防护','Reload protection')}}</button><button v-if="fail2ban?.managedJail" class="secondary" :disabled="!enabled || !fbCurrent || !fail2ban?.managedJail" @click="stage('fail2ban',{operation:'disable'})">{{t('停用 SSH 防护','Disable SSH protection')}}</button><button v-if="fail2ban?.managedJail" class="secondary" :disabled="!enabled || !fbCurrent || !fail2ban?.managedJail" @click="stage('fail2ban',{operation:'detach'})">{{t('解除接管','Release ownership')}}</button></div>
-   <details v-if="fail2ban?.installed" class="security-reset"><summary>{{t('修复与重新安装','Repair and reinstall')}}</summary><p>{{t('多个配置冲突或安装损坏时，可备份后完全清理并重新安装。会删除所有 Fail2ban 防护配置、白名单和历史封禁，包括非 SSH 防护。重装后保持停用，请重新启用。','For conflicting configurations or a damaged installation, back up and reset Fail2ban. This removes all protection configurations, whitelists and ban history, including non-SSH protection. Protection stays disabled until you enable it again.')}}</p><p v-if="fail2ban.resetReason" class="security-warning">{{securityCopy(fail2ban.resetReason)}}</p><p v-if="!support('fail2ban.reset')" class="security-warning">{{t('远端 Agent 不支持清理重装，请更新完整面板。','Update the full remote panel to support resetting Fail2ban.')}}</p><button class="danger-button" :disabled="!resetWritable" @click="stage('fail2ban',{operation:'reinstall'})">{{t('预览清理并重新安装','Preview reset and reinstall')}}</button></details>
-   <form class="security-form" @submit.prevent="stageSSH"><label>{{t('失败次数','Max retries')}}<input v-model.number="config.maxRetry" type="number" min="1" max="100" required></label><label>{{t('统计窗口（秒）','Find time (seconds)')}}<input v-model.number="config.findTime" type="number" min="60" max="604800" required></label><BanDurationInput v-model="config.banTime" :language="language" :permanent-supported="permanentBanSupported" /><label>{{t('检测模式','Filter mode')}}<select v-model="config.mode"><option value="normal">{{t('标准（推荐）','Standard (recommended)')}}</option><option>ddos</option><option>extra</option><option>aggressive</option></select></label><label class="wide">{{t('白名单 IP / CIDR','Whitelist IP / CIDR')}}<textarea v-model="whitelist" rows="3" placeholder="192.0.2.1/32&#10;2001:db8::/64"></textarea><small>{{t('填写不希望被封禁的可信 IP，每行一个。本机地址始终放行；不会自动加入你当前的上网 IP。','Enter trusted IPs that should never be banned, one per line. Local addresses remain trusted; your current Internet IP is not added automatically.')}}</small></label><button class="primary" :disabled="!fbWritable || !fail2ban?.installed">{{fail2ban?.canActivate ? t('预览并启用现有防护','Preview and enable existing protection') : externalSSH ? t('预览并交由面板管理','Preview panel management') : fail2ban?.managedJail ? t('预览并保存防护设置','Preview and save protection settings') : t('预览并启用 SSH 防护','Preview and enable SSH protection')}}</button></form>
+   <div class="ssh-meta-toolbar">
+    <div class="ssh-meta-left">
+     <span v-if="fail2ban?.jails?.length" class="ssh-ownership-badge" :class="{managed: fail2ban.jails[0]?.managed}">{{fail2ban.jails[0]?.managed ? t('由面板管理','Managed by panel') : t('已有配置，尚未交由面板管理','Existing configuration; not managed by panel')}}</span>
+     <small v-if="fail2ban" :class="{stale: !securityStateFresh(fail2ban.checkedAt,now)}">{{t('采样时间','Sampled')}} {{new Date(fail2ban.checkedAt).toLocaleString(language)}} {{!securityStateFresh(fail2ban.checkedAt,now) ? t('（已过期）','(stale)') : ''}}</small>
+     <small v-if="!showSSHGuidance" class="ssh-brief-desc">· {{t('检测 SSH 登录失败并在达到阈值后自动封禁来源 IP','Detects failed SSH logins and blocks IPs exceeding your threshold')}}</small>
+    </div>
+    <div v-if="fail2ban && (!fail2ban.installed || fail2ban.managedJail)" class="security-actions ssh-header-actions">
+     <button v-if="!fail2ban.installed" class="primary" :disabled="!fbWritable" @click="stage('fail2ban',{operation:'install'})">{{t('安装 Fail2ban','Install Fail2ban')}}</button>
+     <button v-if="fail2ban.managedJail" class="secondary" :disabled="!fbWritable || !fail2ban.managedJail" @click="stage('fail2ban',{operation:'reload'})">{{t('重载防护','Reload protection')}}</button>
+     <button v-if="fail2ban.managedJail" class="secondary" :disabled="!enabled || !fbCurrent || !fail2ban.managedJail" @click="stage('fail2ban',{operation:'disable'})">{{t('停用 SSH 防护','Disable SSH protection')}}</button>
+     <button v-if="fail2ban.managedJail" class="secondary" :disabled="!enabled || !fbCurrent || !fail2ban.managedJail" @click="stage('fail2ban',{operation:'detach'})">{{t('解除接管','Release ownership')}}</button>
+    </div>
+   </div>
    <article v-for="jail in fail2ban?.jails" :key="jail.name" class="security-jail">
-    <header><b>{{t('SSH 登录防护','SSH login protection')}}</b><span>{{jail.managed ? t('由面板管理','Managed by panel') : t('已有配置，尚未交由面板管理','Existing configuration; not managed by panel')}}</span></header>
-    <p v-if="jail.configuredOnly || !fail2ban?.active">{{t('尚未运行，无法读取失败次数和封禁记录。','Not running; failure counts and ban records are unavailable.')}}</p>
-    <p v-else>{{t('当前失败','Current failures')}} {{jail.failed}} · {{t('累计失败','Total failures')}} {{jail.totalFailed}} · {{t('当前封禁','Current bans')}} {{jail.banned.length}} · {{t('累计封禁','Total bans')}} {{jail.totalBanned}}</p>
-    <div v-if="!jail.configuredOnly && fail2ban?.active" class="security-failure-sources">
-     <b>{{t('最近失败来源（24 小时）','Recent failure sources (24 hours)')}}</b>
-     <small v-if="jail.managed">{{t('手动封禁仅影响 SSH，时长沿用已保存的防护设置；已封禁的 IP 可在这里解除。','Manual bans affect SSH only and use the saved protection duration. Banned IPs can be unbanned here.')}}</small>
-     <small v-if="jail.managed && !manualBanSupported">{{t('此 Agent 暂不支持手动封禁，请更新完整面板。','Update the full panel Agent to manually ban failure sources.')}}</small>
-     <p v-if="!fail2ban.failureSourcesAvailable">{{fail2ban.failureSourcesReason ? t('失败来源暂不可用：','Failure sources unavailable: ') + securityCopy(fail2ban.failureSourcesReason) : t('此 Agent 暂不支持失败来源列表，请更新完整面板。','This Agent does not support failure sources yet. Update the full panel.')}}</p>
-     <template v-else>
-      <div v-for="source in jail.failures" :key="source.ip" class="security-failure-row">
-       <span class="security-ip-country"><code>{{source.ip}}</code><span>·</span><img v-if="locations[source.ip]?.countryCode" :src="countryFlagURL(locations[source.ip]!.countryCode!)" alt="" aria-hidden="true"><span>{{sourceCountry(source.ip)}}</span></span>
-       <div class="security-failure-actions"><span class="security-failure-detail">{{source.count}} {{t('次','attempts')}} · {{new Date(source.lastSeen).toLocaleString(language)}}</span>
-        <button v-if="jail.managed && jail.banned.includes(source.ip)" class="secondary" :disabled="!unbanWritable" @click="stage('fail2ban',{operation:'unban',jail:jail.name,ip:source.ip})">{{t('解除封禁','Unban')}}</button>
-        <button v-else-if="jail.managed" class="secondary" :disabled="!manualBanWritable" @click="stage('fail2ban',{operation:'ban',jail:jail.name,ip:source.ip})">{{t('手动封禁','Ban IP')}}</button>
+    <header v-if="(fail2ban?.jails?.length || 0) > 1"><b>{{t('SSH 登录防护','SSH login protection')}} · {{jail.name}}</b><span>{{jail.managed ? t('由面板管理','Managed by panel') : t('已有配置，尚未交由面板管理','Existing configuration; not managed by panel')}}</span></header>
+    <p v-if="jail.configuredOnly || !fail2ban?.active" class="ssh-inactive-banner">{{t('尚未运行，无法读取失败次数和封禁记录。','Not running; failure counts and ban records are unavailable.')}}</p>
+    <template v-else>
+     <div class="ssh-metrics-grid">
+      <div class="ssh-metric-card" :class="{'is-alert': jail.banned.length > 0}">
+       <span class="ssh-metric-label">{{t('当前封禁','Current bans')}}</span>
+       <strong class="ssh-metric-value">{{jail.banned.length}}</strong>
+       <small class="ssh-metric-sub">{{t('正在拦截的 IP','Active blocked IPs')}}</small>
+      </div>
+      <div class="ssh-metric-card">
+       <span class="ssh-metric-label">{{t('累计封禁','Total bans')}}</span>
+       <strong class="ssh-metric-value">{{jail.totalBanned}}</strong>
+       <small class="ssh-metric-sub">{{t('历史累计拦截','Historical blocks')}}</small>
+      </div>
+      <div class="ssh-metric-card" :class="{'is-warn': jail.failed > 0}">
+       <span class="ssh-metric-label">{{t('当前失败','Current failures')}}</span>
+       <strong class="ssh-metric-value">{{jail.failed}}</strong>
+       <small class="ssh-metric-sub">{{t('统计窗口内失败','Failures in window')}}</small>
+      </div>
+      <div class="ssh-metric-card">
+       <span class="ssh-metric-label">{{t('累计失败','Total failures')}}</span>
+       <strong class="ssh-metric-value">{{jail.totalFailed}}</strong>
+       <small class="ssh-metric-sub">{{t('历史累计失败尝试','Total failed attempts')}}</small>
+      </div>
+     </div>
+     <div class="security-failure-sources">
+      <div class="ssh-section-head">
+       <div class="ssh-head-title">
+        <b>{{t('最近失败来源（24 小时）','Recent failure sources (24 hours)')}}</b>
+        <span class="ssh-count-pill">{{jail.failures?.length || 0}}</span>
+       </div>
+       <small v-if="jail.managed">{{t('手动封禁仅影响 SSH，时长沿用已保存的防护设置；已封禁的 IP 可在这里解除。','Manual bans affect SSH only and use the saved protection duration. Banned IPs can be unbanned here.')}}</small>
+      </div>
+      <small v-if="jail.managed && !manualBanSupported" class="security-warning">{{t('此 Agent 暂不支持手动封禁，请更新完整面板。','Update the full panel Agent to manually ban failure sources.')}}</small>
+      <p v-if="!fail2ban.failureSourcesAvailable">{{fail2ban.failureSourcesReason ? t('失败来源暂不可用：','Failure sources unavailable: ') + securityCopy(fail2ban.failureSourcesReason) : t('此 Agent 暂不支持失败来源列表，请更新完整面板。','This Agent does not support failure sources yet. Update the full panel.')}}</p>
+      <template v-else>
+       <div v-if="jail.failures?.length" class="ssh-failure-list">
+        <div v-for="source in jail.failures" :key="source.ip" class="security-failure-row">
+         <span class="security-ip-country">
+          <code>{{source.ip}}</code>
+          <span class="ssh-dot">·</span>
+          <img v-if="locations[source.ip]?.countryCode" :src="countryFlagURL(locations[source.ip]!.countryCode!)" alt="" aria-hidden="true">
+          <span>{{sourceCountry(source.ip)}}</span>
+          <span v-if="jail.banned.includes(source.ip)" class="ssh-status-badge is-banned">{{t('已封禁','Banned')}}</span>
+         </span>
+         <div class="security-failure-actions">
+          <span class="ssh-attempt-badge">{{source.count}} {{t('次','attempts')}}</span>
+          <span class="security-failure-detail">{{new Date(source.lastSeen).toLocaleString(language)}}</span>
+          <button v-if="jail.managed && jail.banned.includes(source.ip)" class="secondary ssh-action-btn" :disabled="!unbanWritable" @click="stage('fail2ban',{operation:'unban',jail:jail.name,ip:source.ip})">{{t('解除封禁','Unban')}}</button>
+          <button v-else-if="jail.managed" class="secondary ssh-action-btn" :disabled="!manualBanWritable" @click="stage('fail2ban',{operation:'ban',jail:jail.name,ip:source.ip})">{{t('手动封禁','Ban IP')}}</button>
+         </div>
+        </div>
+       </div>
+       <p v-else class="ssh-empty-hint">{{t('最近保留的日志中没有失败来源。','No failure sources in the recent retained logs.')}}</p>
+       <div class="ssh-failure-footnotes">
+        <small>{{t('按 Fail2ban 保留的检测日志统计，不含已忽略的连接；与上方累计计数可能不同。国家为 IP 归属信息。','Based on retained Fail2ban detection logs; ignored connections are excluded. Counts may differ from totals above. Country indicates IP allocation.')}}</small>
+        <small v-if="fail2ban.failureSourcesLimited">{{t('日志读取或来源数量达到上限，仅展示最近记录（最多 50 个 IP）。','Log or source limit reached; only recent records are shown (up to 50 IPs).')}}</small>
+       </div>
+      </template>
+     </div>
+     <div class="security-bans-section">
+      <div class="ssh-section-head">
+       <div class="ssh-head-title">
+        <b>{{t('当前封禁 IP','Currently banned IPs')}}</b>
+        <span class="ssh-count-pill" :class="{'is-alert': jail.banned.length > 0}">{{jail.banned.length}}</span>
+       </div>
+       <div v-if="jail.banned.length > 0" class="ssh-bans-tools">
+        <input v-if="jail.banned.length > 6" v-model="banFilter" type="search" class="ssh-ban-search" :placeholder="t('搜索 IP 或国家…','Filter IP or country…')" :aria-label="t('搜索封禁 IP 或国家','Filter banned IP or country')">
+        <button v-if="!banFilter.trim() && jail.banned.length > 12" type="button" class="secondary ssh-expand-btn" @click="bansExpanded = !bansExpanded">{{bansExpanded ? t('收起列表','Collapse') : t(`展开全部 (${jail.banned.length})`,`Show all (${jail.banned.length})`)}}</button>
        </div>
       </div>
-      <p v-if="!jail.failures?.length">{{t('最近保留的日志中没有失败来源。','No failure sources in the recent retained logs.')}}</p>
-      <small>{{t('按 Fail2ban 保留的检测日志统计，不含已忽略的连接；与上方累计计数可能不同。国家为 IP 归属信息。','Based on retained Fail2ban detection logs; ignored connections are excluded. Counts may differ from totals above. Country indicates IP allocation.')}}</small>
-      <small v-if="fail2ban.failureSourcesLimited">{{t('日志读取或来源数量达到上限，仅展示最近记录（最多 50 个 IP）。','Log or source limit reached; only recent records are shown (up to 50 IPs).')}}</small>
-     </template>
-    </div>
-    <div class="security-bans"><span v-for="ip in jail.banned" :key="ip"><span class="security-ip-country"><code>{{ip}}</code><span>·</span><img v-if="locations[ip]?.countryCode" :src="countryFlagURL(locations[ip]!.countryCode!)" alt="" aria-hidden="true"><span>{{sourceCountry(ip)}}</span></span><button v-if="jail.managed" :disabled="!unbanWritable" @click="stage('fail2ban',{operation:'unban',jail:jail.name,ip})">{{t('解封','Unban')}}</button></span></div>
-    <details class="security-technical"><summary>{{t('技术详情','Technical details')}}</summary><p>{{t('配置名称（Fail2ban jail）','Configuration name (Fail2ban jail)')}}：<code>{{jail.name}}</code></p><p>{{t('jail 是一组日志检测和封禁设置，页面称为“登录防护”。','A jail groups log detection and ban settings; this page calls it login protection.')}}</p><p>{{t('国家信息由 ipwho.is 查询，只发送公开 IP；内网或保留地址不查询。','Country lookup uses ipwho.is and sends only public IPs; private and reserved addresses are not queried.')}}</p></details>
+      <div v-if="displayedBannedIPs(jail.banned).length" class="security-bans">
+       <div v-for="ip in displayedBannedIPs(jail.banned)" :key="ip" class="security-ban-chip">
+        <span class="security-ip-country">
+         <code>{{ip}}</code>
+         <span class="ssh-dot">·</span>
+         <img v-if="locations[ip]?.countryCode" :src="countryFlagURL(locations[ip]!.countryCode!)" alt="" aria-hidden="true">
+         <span class="ssh-country-name" :title="sourceCountry(ip)">{{sourceCountry(ip)}}</span>
+        </span>
+        <button v-if="jail.managed" type="button" class="ssh-chip-unban" :disabled="!unbanWritable" @click="stage('fail2ban',{operation:'unban',jail:jail.name,ip})">{{t('解除封禁','Unban')}}</button>
+       </div>
+      </div>
+      <p v-else-if="jail.banned.length" class="ssh-empty-hint">{{t('未找到匹配的封禁 IP。','No matching banned IPs found.')}}</p>
+      <p v-else class="ssh-empty-hint">{{t('当前没有处于封禁状态的 IP。','No IPs are currently banned.')}}</p>
+     </div>
+    </template>
    </article>
+   <div class="ssh-config-panel">
+    <div class="ssh-section-head">
+     <div class="ssh-head-title">
+      <b>{{t('防护规则与白名单配置','Protection policy & whitelist')}}</b>
+     </div>
+     <small>{{t('调整阈值、检测窗口、封禁时长与可信白名单，保存后自动重载生效。','Configure threshold, detection window, ban duration and trusted whitelist.')}}</small>
+    </div>
+    <form class="security-form ssh-config-form" @submit.prevent="stageSSH">
+     <label>
+      <span class="ssh-field-label">
+       <span>{{t('失败次数','Max retries')}}</span>
+       <small class="ssh-field-hint">{{t('触发阈值','Threshold')}}</small>
+      </span>
+      <input v-model.number="config.maxRetry" type="number" min="1" max="100" required>
+     </label>
+     <label>
+      <span class="ssh-field-label">
+       <span>{{t('统计窗口（秒）','Find time (seconds)')}}</span>
+       <small v-if="formatHumanSeconds(config.findTime, language)" class="ssh-window-human">≈ {{formatHumanSeconds(config.findTime, language)}}</small>
+      </span>
+      <input v-model.number="config.findTime" type="number" min="60" max="604800" required>
+      <span class="ssh-preset-row">
+       <button v-for="preset in [600, 3600, 86400, 604800]" :key="preset" type="button" class="ssh-preset-chip" :class="{active: config.findTime === preset}" @click="config.findTime = preset">{{formatHumanSeconds(preset, language)}}</button>
+      </span>
+     </label>
+     <BanDurationInput v-model="config.banTime" :language="language" :permanent-supported="permanentBanSupported" />
+     <label>
+      <span class="ssh-field-label">
+       <span>{{t('检测模式','Filter mode')}}</span>
+      </span>
+      <select v-model="config.mode">
+       <option value="normal">{{t('标准模式 (NORMAL · 推荐)','Standard (NORMAL · recommended)')}}</option>
+       <option value="ddos">{{t('防扫描模式 (DDOS)','Anti-scan (DDOS)')}}</option>
+       <option value="extra">{{t('扩展检测模式 (EXTRA)','Extended (EXTRA)')}}</option>
+       <option value="aggressive">{{t('严格检测模式 (AGGRESSIVE)','Aggressive (AGGRESSIVE)')}}</option>
+      </select>
+     </label>
+     <label class="wide">
+      <span>{{t('白名单 IP / CIDR','Whitelist IP / CIDR')}}</span>
+      <textarea v-model="whitelist" rows="3" placeholder="192.0.2.1/32&#10;2001:db8::/64"></textarea>
+      <small>{{t('填写不希望被封禁的可信 IP，每行一个。本机地址始终放行；不会自动加入你当前的上网 IP。','Enter trusted IPs that should never be banned, one per line. Local addresses remain trusted; your current Internet IP is not added automatically.')}}</small>
+     </label>
+     <button class="primary" :disabled="!fbWritable || !fail2ban?.installed">{{fail2ban?.canActivate ? t('预览并启用现有防护','Preview and enable existing protection') : externalSSH ? t('预览并交由面板管理','Preview panel management') : fail2ban?.managedJail ? t('预览并保存防护设置','Preview and save protection settings') : t('预览并启用 SSH 防护','Preview and enable SSH protection')}}</button>
+    </form>
+   </div>
+   <div v-if="fail2ban?.installed || fail2ban?.jails?.length" class="ssh-footer-drawers">
+    <details v-for="jail in fail2ban?.jails" :key="`tech-${jail.name}`" class="security-technical">
+     <summary>{{t('技术详情','Technical details')}}</summary>
+     <p>{{t('配置名称（Fail2ban jail）','Configuration name (Fail2ban jail)')}}：<code>{{jail.name}}</code></p>
+     <p>{{t('jail 是一组日志检测和封禁设置，页面称为“登录防护”。','A jail groups log detection and ban settings; this page calls it login protection.')}}</p>
+     <p>{{t('国家信息由 ipwho.is 查询，只发送公开 IP；内网或保留地址不查询。','Country lookup uses ipwho.is and sends only public IPs; private and reserved addresses are not queried.')}}</p>
+    </details>
+    <details v-if="fail2ban?.installed" class="security-reset">
+     <summary>{{t('修复与重新安装','Repair and reinstall')}}</summary>
+     <p>{{t('多个配置冲突或安装损坏时，可备份后完全清理并重新安装。会删除所有 Fail2ban 防护配置、白名单和历史封禁，包括非 SSH 防护。重装后保持停用，请重新启用。','For conflicting configurations or a damaged installation, back up and reset Fail2ban. This removes all protection configurations, whitelists and ban history, including non-SSH protection. Protection stays disabled until you enable it again.')}}</p>
+     <p v-if="fail2ban.resetReason" class="security-warning">{{securityCopy(fail2ban.resetReason)}}</p>
+     <p v-if="!support('fail2ban.reset')" class="security-warning">{{t('远端 Agent 不支持清理重装，请更新完整面板。','Update the full remote panel to support resetting Fail2ban.')}}</p>
+     <button class="danger-button" :disabled="!resetWritable" @click="stage('fail2ban',{operation:'reinstall'})">{{t('预览清理并重新安装','Preview reset and reinstall')}}</button>
+    </details>
+   </div>
   </section>
   <Teleport to="body"><div v-if="pending" class="modal-backdrop"><div class="modal-card security-preview" role="dialog" aria-modal="true" :aria-label="t('安全变更预览','Security change preview')"><p class="eyebrow">SECURITY CHANGE REVIEW</p><h2>{{t('确认应用到','Apply to')}} {{hostName}}</h2><ul><li v-for="change in pending.preview.changes" :key="change">{{securityCopy(change)}}</li></ul><div v-if="pending.request.operation === 'enable' && pending.kind === 'firewall'" class="security-port-list"><span v-for="port in pending.preview.requiredPorts" :key="`${port.port}/${port.protocol}`">{{port.port}}/{{formatProtocol(port.protocol)}} · {{port.reason}}</span></div><p v-for="warning in pending.preview.warnings" :key="warning">{{securityCopy(warning)}}</p><p v-if="pending.preview.needsConfirmation" class="security-warning">{{t('应用后需在 90 秒内确认连接，超时自动恢复。','After applying, confirm connectivity within 90 seconds or the change rolls back.')}}</p><label v-if="pending.request.operation === 'reinstall'" class="security-reset-confirm">{{t('输入 RESET FAIL2BAN 确认清理此主机的全部 Fail2ban 防护','Type RESET FAIL2BAN to reset all Fail2ban protection on this host')}}<input v-model="resetConfirmation" autocomplete="off" spellcheck="false" placeholder="RESET FAIL2BAN"></label><div class="modal-actions"><button class="secondary" :disabled="busy" @click="pending = null">{{t('取消','Cancel')}}</button><button :class="pending.request.operation === 'reinstall' ? 'danger-button' : 'primary'" :disabled="busy || !requestReady(pending.kind) || pending.request.operation === 'reinstall' && (!resetWritable || resetConfirmation !== 'RESET FAIL2BAN')" @click="apply">{{busy ? t('正在应用…','Applying…') : pending.request.operation === 'reinstall' ? t('确认清理并重新安装','Reset and reinstall') : t('确认应用','Apply change')}}</button></div></div></div></Teleport>
  </div>
 </template>
 
 <style scoped>
-.security-failure-sources{margin:14px 0;padding:14px;border:1px solid var(--line)}.security-failure-sources>b{font-size:12px}.security-failure-sources>small{display:block;color:var(--muted);font-size:10px;line-height:1.7;margin-top:8px}.security-failure-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}.security-ip-country{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}.security-ip-country code{overflow-wrap:anywhere}.security-ip-country img{width:18px;height:13px;object-fit:cover;flex:none}.security-failure-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.security-failure-actions button{white-space:nowrap}.security-failure-detail{color:var(--muted);font-size:10px;white-space:nowrap}@media(max-width:700px){.security-failure-row{align-items:flex-start;flex-direction:column;gap:6px}.security-failure-detail{white-space:normal}}
+.ssh-status-indicator.active{color:var(--jade);font-weight:600}
+.ssh-meta-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:10px 0 14px;border-bottom:1px solid var(--line)}
+.ssh-meta-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)}
+.ssh-ownership-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:3px;font-size:11px;border:1px solid var(--line);background:var(--surface-code);color:var(--muted)}
+.ssh-ownership-badge.managed{border-color:rgba(82,182,144,.38);background:rgba(82,182,144,.1);color:var(--jade)}
+.ssh-brief-desc{color:var(--muted)}
+.ssh-header-actions{margin:0!important}
+.ssh-inactive-banner{padding:12px 14px;background:var(--surface-code);border:1px solid var(--line);font-size:12px;color:var(--muted);margin:12px 0}
+.ssh-metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}
+.ssh-metric-card{display:flex;flex-direction:column;gap:4px;padding:12px 14px;background:var(--surface-code);border:1px solid var(--line);border-radius:4px;min-width:0}
+.ssh-metric-card.is-alert{border-color:rgba(212,173,87,.42);background:rgba(212,173,87,.06)}
+.ssh-metric-card.is-warn{border-color:rgba(227,107,89,.35)}
+.ssh-metric-label{font-size:11px;color:var(--muted);line-height:1.4}
+.ssh-metric-value{font-size:22px;font-weight:700;font-family:var(--mono,monospace);color:var(--paper);line-height:1.2}
+.ssh-metric-card.is-alert .ssh-metric-value{color:var(--gold)}
+.ssh-metric-sub{font-size:10px;color:var(--muted);line-height:1.4}
+.ssh-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.ssh-section-head>small{font-size:11px;color:var(--muted);line-height:1.5}
+.ssh-head-title{display:flex;align-items:center;gap:8px}
+.ssh-head-title b{font-size:13px;color:var(--paper)}
+.ssh-count-pill{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:18px;padding:0 6px;border-radius:999px;font-size:11px;font-family:var(--mono,monospace);background:rgba(var(--wash-rgb),.08);color:var(--paper);border:1px solid var(--line)}
+.ssh-count-pill.is-alert{background:rgba(212,173,87,.16);border-color:rgba(212,173,87,.45);color:var(--gold);font-weight:600}
+.security-failure-sources{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:4px;background:rgba(var(--wash-rgb),.015)}
+.ssh-failure-list{border-top:1px solid var(--line);margin-top:6px}
+.security-failure-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}
+.security-ip-country{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
+.security-ip-country code{overflow-wrap:anywhere;font-weight:600}
+.security-ip-country img{width:18px;height:13px;object-fit:cover;flex:none;border-radius:1px}
+.ssh-dot{color:var(--muted)}
+.ssh-status-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;line-height:1.5}
+.ssh-status-badge.is-banned{background:rgba(227,107,89,.15);border:1px solid rgba(227,107,89,.4);color:var(--danger-text)}
+.security-failure-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.security-failure-actions button{white-space:nowrap}
+.ssh-attempt-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:11px;font-family:var(--mono,monospace);background:var(--surface-code);border:1px solid var(--line);color:var(--paper);white-space:nowrap}
+.security-failure-detail{color:var(--muted);font-size:11px;white-space:nowrap}
+.ssh-failure-footnotes{margin-top:10px;display:grid;gap:4px}
+.ssh-failure-footnotes small{color:var(--muted);font-size:11px;line-height:1.6}
+.security-bans-section{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:4px;background:rgba(var(--wash-rgb),.015)}
+.ssh-bans-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ssh-ban-search{height:30px;padding:0 10px;font-size:12px;min-width:180px;border:1px solid var(--line);background:var(--surface-input);color:var(--paper);border-radius:3px}
+.ssh-expand-btn{min-height:30px;padding:4px 10px;font-size:11px}
+.security-bans{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-top:10px}
+.security-ban-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--surface-code);border:1px solid var(--line);border-radius:4px;font-size:12px;min-width:0;transition:border-color .15s}
+.security-ban-chip:hover{border-color:rgba(212,173,87,.38)}
+.security-ban-chip .security-ip-country{flex:1;min-width:0;flex-wrap:nowrap;overflow:hidden}
+.security-ban-chip .security-ip-country code{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.ssh-country-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:11px}
+.ssh-chip-unban{flex:none;background:transparent;border:1px solid var(--line);color:var(--gold);padding:3px 9px;border-radius:3px;font-size:11px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s}
+.ssh-chip-unban:hover:not(:disabled){background:rgba(212,173,87,.14);border-color:var(--gold)}
+.ssh-chip-unban:disabled{opacity:.45;cursor:default}
+.ssh-empty-hint{margin:10px 0 0;font-size:12px;color:var(--muted)}
+.ssh-config-panel{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.ssh-config-form{margin-top:12px!important}
+.ssh-field-label{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.ssh-field-hint{font-size:10px!important;color:var(--muted)}
+.ssh-window-human{font-size:11px!important;color:var(--gold)!important;font-weight:600}
+.ssh-preset-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.ssh-preset-chip{background:var(--surface-code);border:1px solid var(--line);color:var(--muted);padding:2px 7px;border-radius:3px;font-size:10px;cursor:pointer;min-height:auto!important;grid-column:auto!important}
+.ssh-preset-chip:hover,.ssh-preset-chip.active{border-color:var(--gold);color:var(--gold);background:rgba(212,173,87,.1)}
+.ssh-footer-drawers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);align-items:start}
+.ssh-footer-drawers .security-technical,.ssh-footer-drawers .security-reset{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--surface-code)}
+.ssh-footer-drawers summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:500}
+.ssh-footer-drawers p{font-size:11px;line-height:1.65;color:var(--muted);margin:8px 0 0}
+.ssh-footer-drawers button{margin-top:10px}
 .security-loading{font-size:12px;color:var(--muted);line-height:1.65}
 .security-batch-heading{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.security-batch-heading small{font-size:12px;color:var(--muted);white-space:nowrap}.security-select{width:32px}.security-select input{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}.security-select input:disabled{cursor:default}
-.security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:22px;margin-bottom:20px}.security-card>.card-head{margin-bottom:15px}.security-warning{color:var(--danger-text);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.security-actions{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:18px 0}.security-form{display:grid;align-items:start;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}.security-form label,.security-actions label{display:grid;gap:7px;min-width:0;font-size:12px}.security-form small,.security-footnote,.security-card>small{font-size:11px;color:var(--muted);line-height:1.6}.security-form .wide{grid-column:1/-1}.security-form button{align-self:end;min-height:40px;grid-column:1/-1;justify-self:start}.security-ports{grid-template-columns:repeat(2,minmax(0,1fr))}.security-port-list{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.security-port-list>b{width:100%;font-size:12px}.security-port-list>span{padding:6px 9px;border:1px solid var(--line);font-size:11px;overflow-wrap:anywhere}.security-port-list button,.security-table button,.security-bans button,.security-jail header button{background:transparent;border:1px solid var(--line);color:var(--gold);padding:4px 8px;margin-left:6px;cursor:pointer}.security-table-wrap{overflow-x:auto}.security-table{width:100%;border-collapse:collapse;font-size:12px}.security-table th,.security-table td{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.security-rule-services span{display:block;min-width:140px;max-width:320px;line-height:1.65}.security-rule-services small{color:var(--muted)}.security-table th{color:var(--muted);font-weight:500}.security-notice{padding:20px;margin-bottom:20px}.security-notice p{font-size:12px;line-height:1.7}.security-notice b{margin-right:16px}.security-guidance{padding:14px 16px;margin:14px 0;background:var(--surface-code);border-left:3px solid var(--gold)}.security-guidance b{font-size:13px}.security-guidance p{font-size:12px;line-height:1.7;margin:6px 0;color:var(--muted)}.security-technical{font-size:11px;color:var(--muted)}.security-technical summary{cursor:pointer}.security-technical code{overflow-wrap:anywhere}.security-jail{border-top:1px solid var(--line);padding:16px 0}.security-jail header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.security-jail header span,.security-jail p{font-size:11px;color:var(--muted)}.security-bans{display:flex;flex-wrap:wrap;gap:10px}.security-bans span{display:flex;align-items:center}.security-preview ul{padding-left:18px;font-size:13px;line-height:1.8}.security-preview p{font-size:12px;line-height:1.7}.stale{color:var(--danger-text)!important}@media(max-width:700px){.security-form{grid-template-columns:repeat(2,minmax(0,1fr))}.security-ports{grid-template-columns:1fr}.security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:16px}.security-table{min-width:680px}.security-notice button{display:block;margin-top:12px}}@media(max-width:400px){.security-form{grid-template-columns:1fr}.security-preview{padding:20px}}
+.security-reset{border-top:1px solid var(--line);padding:16px 0;margin:16px 0}.security-reset summary{cursor:pointer;color:var(--muted);font-size:12px}.security-reset p{font-size:12px;line-height:1.7}.security-reset-confirm{display:grid;gap:10px;font-size:12px;margin:18px 0}.security-card{padding:22px;margin-bottom:20px}.security-card>.card-head{margin-bottom:15px}.security-warning{color:var(--danger-text);font-size:12px;line-height:1.65;overflow-wrap:anywhere}.security-actions{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:18px 0}.security-form{display:grid;align-items:start;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:20px 0}.security-form label,.security-actions label{display:grid;gap:7px;min-width:0;font-size:12px}.security-form small,.security-footnote,.security-card>small{font-size:11px;color:var(--muted);line-height:1.6}.security-form .wide{grid-column:1/-1}.security-form>button{align-self:end;min-height:40px;grid-column:1/-1;justify-self:start}.security-ports{grid-template-columns:repeat(2,minmax(0,1fr))}.security-port-list{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.security-port-list>b{width:100%;font-size:12px}.security-port-list>span{padding:6px 9px;border:1px solid var(--line);font-size:11px;overflow-wrap:anywhere}.security-port-list button,.security-table button,.security-jail header button{background:transparent;border:1px solid var(--line);color:var(--gold);padding:4px 8px;margin-left:6px;cursor:pointer}.security-table-wrap{overflow-x:auto}.security-table{width:100%;border-collapse:collapse;font-size:12px}.security-table th,.security-table td{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.security-rule-services span{display:block;min-width:140px;max-width:320px;line-height:1.65}.security-rule-services small{color:var(--muted)}.security-table th{color:var(--muted);font-weight:500}.security-notice{padding:20px;margin-bottom:20px}.security-notice p{font-size:12px;line-height:1.7}.security-notice b{margin-right:16px}.security-guidance{padding:14px 16px;margin:14px 0;background:var(--surface-code);border-left:3px solid var(--gold)}.security-guidance b{font-size:13px}.security-guidance p{font-size:12px;line-height:1.7;margin:6px 0;color:var(--muted)}.security-technical{font-size:11px;color:var(--muted)}.security-technical summary{cursor:pointer}.security-technical code{overflow-wrap:anywhere}.security-jail{padding:6px 0 4px}.security-jail header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}.security-jail header span,.security-jail p{font-size:11px;color:var(--muted)}.security-preview ul{padding-left:18px;font-size:13px;line-height:1.8}.security-preview p{font-size:12px;line-height:1.7}.stale{color:var(--danger-text)!important}
+@media(max-width:700px){
+ .ssh-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .security-failure-row{align-items:flex-start;flex-direction:column;gap:8px}
+ .security-failure-detail{white-space:normal}
+ .security-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .security-ports{grid-template-columns:1fr}
+ .security-card{padding:16px}
+ .security-table{min-width:680px}
+ .security-notice button{display:block;margin-top:12px}
+}
+@media(max-width:400px){
+ .ssh-metrics-grid{grid-template-columns:1fr}
+ .security-form{grid-template-columns:1fr}
+ .security-preview{padding:20px}
+}
 </style>

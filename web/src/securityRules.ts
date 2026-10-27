@@ -8,6 +8,22 @@ export function formatProtocol(protocol: string | null | undefined): string {
   return p.toUpperCase()
 }
 
+export function formatHumanSeconds(seconds: number | null | undefined, language: string): string {
+  const n = Number(seconds)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const en = language === 'en-US'
+  const days = Math.floor(n / 86400)
+  const hours = Math.floor((n % 86400) / 3600)
+  const mins = Math.floor((n % 3600) / 60)
+  const secs = Math.floor(n % 60)
+  const parts: string[] = []
+  if (days > 0) parts.push(en ? `${days}d` : `${days} 天`)
+  if (hours > 0) parts.push(en ? `${hours}h` : `${hours} 小时`)
+  if (mins > 0) parts.push(en ? `${mins}m` : `${mins} 分钟`)
+  if (secs > 0 && days === 0 && hours === 0) parts.push(en ? `${secs}s` : `${secs} 秒`)
+  return parts.join(' ')
+}
+
 export function securityRuleMatchesProtocol(rule: SecurityRule, protocol: string): boolean {
   const rp = rule.protocol?.toLowerCase()
   const p = protocol?.toLowerCase()
