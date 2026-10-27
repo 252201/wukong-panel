@@ -192,16 +192,24 @@ func (c *Controller) Apply(ctx context.Context, kind string, r model.SecurityReq
 			return result, errors.New("入站策略未实际生效")
 		}
 		if r.Operation == "add" {
-			rr, _ := normalizeRule(r.Rule)
-			rr.Zone = f.Zone
-			found := false
-			for _, v := range f.Rules {
-				if sameRule(rr, v) {
-					found = true
-				}
+			protocols := []string{r.Rule.Protocol}
+			if r.Rule.Protocol == "tcp/udp" || r.Rule.Protocol == "tcp+udp" {
+				protocols = []string{"tcp", "udp"}
 			}
-			if !found {
-				return result, errors.New("新规则未实际生效")
+			for _, proto := range protocols {
+				ruleCopy := r.Rule
+				ruleCopy.Protocol = proto
+				rr, _ := normalizeRule(ruleCopy)
+				rr.Zone = f.Zone
+				found := false
+				for _, v := range f.Rules {
+					if sameRule(rr, v) {
+						found = true
+					}
+				}
+				if !found {
+					return result, errors.New("新规则未实际生效")
+				}
 			}
 		}
 		if r.Operation == "batch-adopt" || r.Operation == "batch-delete" {

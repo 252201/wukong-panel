@@ -1,7 +1,19 @@
 import type { SecurityPort, SecurityRule } from './api'
 
+export function formatProtocol(protocol: string | null | undefined): string {
+  if (!protocol) return ''
+  const p = protocol.trim().toLowerCase()
+  if (p === 'tcp/udp' || p === 'tcp+udp' || p === 'tcp + udp') return 'TCP+UDP'
+  if (p === 'ipv6-icmp') return 'IPv6-ICMP'
+  return p.toUpperCase()
+}
+
 export function securityRuleMatchesProtocol(rule: SecurityRule, protocol: string): boolean {
- return rule.protocol === protocol || (rule.protocol === 'tcp/udp' && (protocol === 'tcp' || protocol === 'udp'))
+  const rp = rule.protocol?.toLowerCase()
+  const p = protocol?.toLowerCase()
+  if (rp === p) return true
+  if ((rp === 'tcp/udp' || rp === 'tcp+udp') && (p === 'tcp' || p === 'udp')) return true
+  return false
 }
 
 
@@ -33,13 +45,13 @@ export function securityBatchEligible(rule: SecurityRule, mode: 'adopt'|'delete'
 }
 
 export function securityRuleChange(text: string, language: string): string | null {
- const match = /^(adopt|delete) (allow|deny):(tcp|udp|tcp\/udp):(\d+):(\d+):(.+):([^:]*)$/.exec(text)
+ const match = /^(?:(adopt|delete|add) )?(allow|deny):(tcp|udp|tcp\/udp|tcp\+udp):(\d+):(\d+):(.+):([^:]*)$/.exec(text)
  if (!match) return null
  const [,operation,action,protocol,first,last,source,zone] = match
  const en = language === 'en-US'
- const verb = operation === 'adopt' ? (en ? 'Adopt' : '接管') : (en ? 'Delete' : '删除')
+ const verb = !operation || operation === 'add' ? (en ? 'Add' : '添加') : operation === 'adopt' ? (en ? 'Adopt' : '接管') : (en ? 'Delete' : '删除')
  const verdict = action === 'allow' ? (en ? 'allow' : '允许') : (en ? 'deny' : '拒绝')
  const ports = first === last ? first : `${first}–${last}`
- const transport = protocol === 'tcp/udp' ? 'TCP + UDP' : protocol!.toUpperCase()
+ const transport = formatProtocol(protocol)
  return `${verb} · ${verdict} ${ports}/${transport} · ${source === 'any' ? (en ? 'Any IP' : '任意 IP') : source}${zone ? ` · ${en ? 'Zone' : '区域'} ${zone}` : ''}`
 }
