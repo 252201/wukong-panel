@@ -94,6 +94,7 @@ const socksExit = ref<SOCKSExit | null>(null)
 const socksForm = reactive({ server: '', port: 1080, version: '5', username: '', password: '', clearPassword: false, network: 'both', expectedExitIp: '' })
 const socksFormHydrated = ref(false)
 const socksBusy = ref(false)
+const activeEgressTab = ref<'residential' | 'socks'>('residential')
 const timelineRange = ref<'today' | 'billing'>('today')
 const activeTimelineBucket = ref<number | null>(null)
 const deviceLimit = ref(3)
@@ -1539,6 +1540,9 @@ async function refreshAll() {
       expectedExitIp: socksData.expectedExitIp || '',
     })
     socksFormHydrated.value = true
+    if (!exitData?.configured && !exitData?.installScript && socksData.configured) {
+      activeEgressTab.value = 'socks'
+    }
   }
 }
 async function showJobLog() {
@@ -2068,32 +2072,177 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="component-update-grid" :aria-label="language === 'en-US' ? 'Runtime updates' : '组件更新'">
           <ComponentUpdatePanel v-for="component in (['sing-box', 'cloudflared'] as const)" :key="`${selectedHostId}:${component}`" :component="component" :host-id="selectedHostId" :online="!remoteHost || !!currentFleetHost?.online" :compatible="!remoteHost || !!currentFleetHost?.compatible" :capabilities="currentFleetHost?.capabilities || []" :language="language" />
         </section>
-        <section class="panel-card residential-panel">
-          <div class="card-head"><div><span class="section-mark jade">落</span><div><h3>落地 IP 出口</h3><p>A 机接入 · WireGuard 到 B 机 NAT · 断线拒绝回退</p></div></div><span class="live-badge" :class="{ muted: !residentialExit?.active }"><i></i>{{ residentialExit?.active ? '隧道在线' : residentialExit?.configured ? '等待 B 机握手' : '未配置' }}</span></div>
-          <div class="residential-grid">
-            <label>A 机公网 IP / 域名<input v-model="residentialForm.endpoint" placeholder="a.example.com"></label>
-            <label>WireGuard UDP 端口<input v-model.number="residentialForm.listenPort" type="number" min="1" max="65535"></label>
-            <label>B 机公钥<input v-model="residentialForm.peerPublicKey" placeholder="先留空生成 B 机脚本"><small>B 私钥只在 B 机本地生成，面板不会接收</small></label>
-            <label>预期落地 IPv4（可选）<input v-model="residentialForm.expectedExitIp" placeholder="用于人工核对出口"></label>
+        <section class="panel-card residential-panel egress-hub-panel">
+          <div class="card-head">
+            <div>
+              <span class="section-mark jade">出</span>
+              <div>
+                <h3>出站分流与落地出口</h3>
+                <p>为节点提供 B 机 WireGuard 落地 IP 或上游 SOCKS 代理分流 · 断线严格阻断不回退直连</p>
+              </div>
+            </div>
+            <div class="egress-head-badges">
+              <span class="live-badge" :class="{ muted: !residentialExit?.active }"><i></i>WG · {{ residentialExit?.active ? '隧道在线' : residentialExit?.configured ? '等待握手' : '未配置' }}</span>
+              <span class="live-badge" :class="{ muted: !socksExit?.configured }"><i></i>SOCKS · {{ socksExit?.configured ? '预检通过' : '未配置' }}</span>
+            </div>
           </div>
-          <div class="residential-actions"><button class="primary" :disabled="mutationsDisabled || residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button><button v-if="residentialExit?.configured" class="danger-button" :disabled="mutationsDisabled || residentialBusy" @click="stageResidentialExitRemoval">移除落地出口</button><span v-if="residentialExit?.latestHandshake">最近握手 {{ new Date(residentialExit.latestHandshake).toLocaleString(language) }} · ↓ {{ bytes(residentialExit.rxBytes) }} · ↑ {{ bytes(residentialExit.txBytes) }}</span></div>
-          <div v-if="residentialExit?.installScript" class="residential-script"><div><b>B 机一键安装命令</b><button @click="copy(residentialExit?.installScript || '')">复制脚本</button></div><textarea :value="residentialExit.installScript" readonly spellcheck="false" wrap="off"></textarea><p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方。A/B 私钥不会跨机传输。</p></div>
-          <p class="help-text">选用落地出口的节点被强制为 IPv4，并通过 fwmark {{ 102 }} 进入独立路由表；隧道中断时策略表保留 unreachable 默认路由，不会泄漏到 A 机公网。</p>
-        </section>
-        <section class="panel-card residential-panel socks-panel">
-          <div class="card-head"><div><span class="section-mark">袜</span><div><h3>自定义 SOCKS 出站</h3><p>节点流量经上游 SOCKS 代理 · 密码加密保存 · 失败不回退直连</p></div></div><span class="live-badge" :class="{ muted: !socksExit?.configured }"><i></i>{{ socksExit?.configured ? '预检通过' : '未配置' }}</span></div>
-          <div class="socks-grid">
-            <label>SOCKS 服务器<input v-model="socksForm.server" placeholder="proxy.example.com"></label>
-            <label>端口<input v-model.number="socksForm.port" type="number" min="1" max="65535"></label>
-            <label>版本<select v-model="socksForm.version"><option value="5">SOCKS5</option><option value="4a">SOCKS4a</option><option value="4">SOCKS4</option></select></label>
-            <label>承载网络<select v-model="socksForm.network" :disabled="socksForm.version !== '5'"><option value="both">TCP + UDP</option><option value="tcp">仅 TCP</option></select><small v-if="socksForm.version !== '5'">SOCKS4/4a 仅支持 TCP</small></label>
-            <label>用户名（可选）<input v-model="socksForm.username" autocomplete="off"></label>
-            <label v-if="socksForm.version === '5'">密码（可选）<input v-model="socksForm.password" type="password" autocomplete="new-password" :placeholder="socksExit?.hasPassword ? '已保存；留空保持不变' : '无认证可留空'"></label>
-            <label>预期出口 IP（可选）<input v-model="socksForm.expectedExitIp" placeholder="用于真实代理核对"></label>
-            <label v-if="socksExit?.hasPassword && socksForm.version === '5'" class="toggle-row socks-clear-password"><span><b>清除已保存密码</b><small>保存后改为无密码认证</small></span><span class="switch"><input v-model="socksForm.clearPassword" type="checkbox"><i></i></span></label>
+          <div class="egress-channel-tabs" role="tablist" aria-label="出站通道选择">
+            <button type="button" role="tab" class="egress-channel-card" :class="{ active: activeEgressTab === 'residential' }" :aria-selected="activeEgressTab === 'residential'" @click="activeEgressTab = 'residential'">
+              <div class="egress-channel-top">
+                <div class="egress-channel-title">
+                  <span class="egress-channel-icon jade">落</span>
+                  <div>
+                    <b>落地 IP 出口</b>
+                    <span class="egress-proto-tag">WireGuard · NAT</span>
+                  </div>
+                </div>
+                <span class="egress-state-pill" :class="residentialExit?.active ? 'is-online' : residentialExit?.configured ? 'is-pending' : 'is-idle'">{{ residentialExit?.active ? '隧道在线' : residentialExit?.configured ? '等待 B 机握手' : '未配置' }}</span>
+              </div>
+              <div class="egress-channel-meta">
+                <span>{{ residentialExit?.configured ? `${residentialExit.endpoint}:${residentialExit.listenPort} · ${residentialExit.peerAddress || '10.77.0.2'}` : 'A 机接入 · WireGuard 到 B 机 NAT · 断线拒绝回退' }}</span>
+                <em v-if="residentialNodesInUse.length" class="egress-node-count">{{ residentialNodesInUse.length }} 个节点使用中</em>
+              </div>
+            </button>
+            <button type="button" role="tab" class="egress-channel-card" :class="{ active: activeEgressTab === 'socks' }" :aria-selected="activeEgressTab === 'socks'" @click="activeEgressTab = 'socks'">
+              <div class="egress-channel-top">
+                <div class="egress-channel-title">
+                  <span class="egress-channel-icon">袜</span>
+                  <div>
+                    <b>自定义 SOCKS 出站</b>
+                    <span class="egress-proto-tag">SOCKS{{ socksExit?.configured ? socksExit.version : socksForm.version }}</span>
+                  </div>
+                </div>
+                <span class="egress-state-pill" :class="socksExit?.configured ? 'is-online' : 'is-idle'">{{ socksExit?.configured ? '预检通过' : '未配置' }}</span>
+              </div>
+              <div class="egress-channel-meta">
+                <span>{{ socksExit?.configured ? `${socksExit.server}:${socksExit.port} · 出口 ${socksExit.probeExitIp || '已连通'}${socksExit.probeLatencyMs !== undefined ? ` (${socksExit.probeLatencyMs} ms)` : ''}` : '节点流量经上游 SOCKS 代理 · 密码加密保存 · 失败不回退直连' }}</span>
+                <em v-if="socksNodesInUse.length" class="egress-node-count">{{ socksNodesInUse.length }} 个节点使用中</em>
+              </div>
+            </button>
           </div>
-          <div class="residential-actions"><button class="primary" :disabled="mutationsDisabled || socksBusy || !socksForm.server" @click="configureSOCKSExit">{{ socksBusy ? '正在真实代理预检…' : socksExit?.configured ? '重新预检并保存' : '预检并保存' }}</button><button v-if="socksExit?.configured" class="danger-button" :disabled="mutationsDisabled || socksBusy" @click="stageSOCKSExitRemoval">移除 SOCKS 出站</button><span v-if="socksExit?.probeCheckedAt">出口 {{ socksExit.probeExitIp || '已连通' }} · {{ socksExit.probeLatencyMs }} ms · {{ new Date(socksExit.probeCheckedAt).toLocaleString(language) }}</span></div>
-          <p class="help-text">保存前会通过上游 SOCKS 完成真实 HTTPS 闭环。配置正被节点使用时禁止修改或删除，请先将引用节点切回其他出口；SOCKS4/4a 只承载 TCP，SOCKS5 的 UDP 流量要求上游支持 UDP ASSOCIATE。</p>
+          <div v-if="activeEgressTab === 'residential'" class="egress-tab-body" role="tabpanel">
+            <div v-if="residentialExit?.configured || residentialNodesInUse.length" class="egress-telemetry-strip">
+              <div class="egress-telemetry-item">
+                <small>隧道网卡与内网</small>
+                <b><code>{{ residentialExit?.interface || 'wg-exit0' }}</code> · {{ residentialExit?.tunnelAddress || '10.77.0.1' }} → {{ residentialExit?.peerAddress || '10.77.0.2' }}</b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>最近握手时间</small>
+                <b>{{ residentialExit?.latestHandshake ? new Date(residentialExit.latestHandshake).toLocaleString(language) : '等待 B 机握手' }}</b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>隧道累计流量</small>
+                <b>↓ {{ bytes(residentialExit?.rxBytes) }} · ↑ {{ bytes(residentialExit?.txBytes) }}</b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>当前引用节点</small>
+                <div v-if="residentialNodesInUse.length" class="egress-bound-nodes">
+                  <span v-for="n in residentialNodesInUse" :key="n.id" class="egress-node-chip">{{ n.name }}</span>
+                </div>
+                <b v-else class="egress-muted">暂未绑定节点</b>
+              </div>
+            </div>
+            <div class="residential-grid">
+              <label>
+                <span class="egress-field-head"><span>A 机公网 IP / 域名</span><small class="egress-step-tag">步骤 1 · 必填</small></span>
+                <input v-model="residentialForm.endpoint" placeholder="a.example.com">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>WireGuard UDP 端口</span><small class="egress-step-tag">步骤 1</small></span>
+                <input v-model.number="residentialForm.listenPort" type="number" min="1" max="65535">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>B 机公钥</span><small class="egress-step-tag">步骤 2 · 脚本输出</small></span>
+                <input v-model="residentialForm.peerPublicKey" placeholder="先留空生成 B 机脚本">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>预期落地 IPv4（可选）</span><small class="egress-step-hint">人工核对</small></span>
+                <input v-model="residentialForm.expectedExitIp" placeholder="用于人工核对出口">
+              </label>
+            </div>
+            <div v-if="residentialExit?.installScript" class="residential-script">
+              <div><b>B 机一键安装命令</b><button type="button" class="secondary" @click="copy(residentialExit?.installScript || '')">复制脚本</button></div>
+              <textarea :value="residentialExit.installScript" readonly spellcheck="false" wrap="off"></textarea>
+              <p>在 B 机以 root 运行后，只把输出的 <code>B_PUBLIC_KEY</code> 粘贴到上方“B 机公钥”并保存。A/B 私钥只在各自本机生成，面板不会接收。</p>
+            </div>
+            <div class="egress-footer-bar">
+              <p class="help-text">选用落地出口的节点被强制为 IPv4，并通过 fwmark {{ 102 }} 进入独立路由表；隧道中断时策略表保留 unreachable 默认路由，不会泄漏到 A 机公网。</p>
+              <div class="egress-footer-actions">
+                <button v-if="residentialExit?.configured" type="button" class="danger-button" :disabled="mutationsDisabled || residentialBusy" @click="stageResidentialExitRemoval">移除落地出口</button>
+                <button type="button" class="primary" :disabled="mutationsDisabled || residentialBusy || !residentialForm.endpoint" @click="configureResidentialExit">{{ residentialBusy ? '处理中…' : residentialForm.peerPublicKey ? '保存并启动隧道' : '生成 B 机安装脚本' }}</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="egress-tab-body" role="tabpanel">
+            <div v-if="socksExit?.configured || socksNodesInUse.length" class="egress-telemetry-strip">
+              <div class="egress-telemetry-item">
+                <small>实测出口 IP</small>
+                <b><code>{{ socksExit?.probeExitIp || '已连通' }}</code></b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>预检闭环延迟</small>
+                <b>{{ socksExit?.probeLatencyMs !== undefined ? `${socksExit.probeLatencyMs} ms` : '—' }}</b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>最近预检时间</small>
+                <b>{{ socksExit?.probeCheckedAt ? new Date(socksExit.probeCheckedAt).toLocaleString(language) : '—' }}</b>
+              </div>
+              <div class="egress-telemetry-item">
+                <small>当前引用节点</small>
+                <div v-if="socksNodesInUse.length" class="egress-bound-nodes">
+                  <span v-for="n in socksNodesInUse" :key="n.id" class="egress-node-chip">{{ n.name }}</span>
+                </div>
+                <b v-else class="egress-muted">暂未绑定节点</b>
+              </div>
+            </div>
+            <div v-if="socksNodesInUse.length" class="egress-inuse-banner">
+              <b>配置正被节点引用锁定：</b>
+              <span>当前节点（{{ socksNodesInUse.map(node => node.name).join('、') }}）正在使用此 SOCKS 出站；为避免业务中断，修改或移除前请先将引用节点切回其他出口。</span>
+            </div>
+            <div class="socks-grid">
+              <label>
+                <span class="egress-field-head"><span>SOCKS 服务器</span><small class="egress-step-tag">必填</small></span>
+                <input v-model="socksForm.server" placeholder="proxy.example.com">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>端口</span><small class="egress-step-hint">1–65535</small></span>
+                <input v-model.number="socksForm.port" type="number" min="1" max="65535">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>版本</span></span>
+                <select v-model="socksForm.version"><option value="5">SOCKS5</option><option value="4a">SOCKS4a</option><option value="4">SOCKS4</option></select>
+              </label>
+              <label>
+                <span class="egress-field-head"><span>承载网络</span><small v-if="socksForm.version !== '5'" class="egress-step-hint">仅支持 TCP</small></span>
+                <select v-model="socksForm.network" :disabled="socksForm.version !== '5'"><option value="both">TCP + UDP</option><option value="tcp">仅 TCP</option></select>
+              </label>
+            </div>
+            <div class="socks-auth-grid" :class="{ 'is-v4': socksForm.version !== '5' }">
+              <label>
+                <span class="egress-field-head"><span>用户名（可选）</span><small class="egress-step-hint">认证账户</small></span>
+                <input v-model="socksForm.username" autocomplete="off" placeholder="无认证可留空">
+              </label>
+              <label v-if="socksForm.version === '5'">
+                <span class="egress-field-head">
+                  <span>密码（可选）</span>
+                  <button v-if="socksExit?.hasPassword" type="button" class="egress-clear-pwd-chip" :class="{ active: socksForm.clearPassword }" @click="socksForm.clearPassword = !socksForm.clearPassword">{{ socksForm.clearPassword ? '✓ 保存后清除已存密码' : '清除已保存密码' }}</button>
+                  <small v-else class="egress-step-hint">加密保存</small>
+                </span>
+                <input v-model="socksForm.password" type="password" autocomplete="new-password" :disabled="socksForm.clearPassword" :placeholder="socksForm.clearPassword ? '保存后将改为无密码认证' : socksExit?.hasPassword ? '已保存；留空保持不变' : '无认证可留空'">
+              </label>
+              <label>
+                <span class="egress-field-head"><span>预期出口 IP（可选）</span><small class="egress-step-hint">代理核对</small></span>
+                <input v-model="socksForm.expectedExitIp" placeholder="用于真实代理核对">
+              </label>
+            </div>
+            <div class="egress-footer-bar">
+              <p class="help-text">保存前会通过上游 SOCKS 完成真实 HTTPS 闭环。配置正被节点使用时禁止修改或删除；SOCKS4/4a 只承载 TCP，SOCKS5 的 UDP 流量要求上游支持 UDP ASSOCIATE。</p>
+              <div class="egress-footer-actions">
+                <button v-if="socksExit?.configured" type="button" class="danger-button" :disabled="mutationsDisabled || socksBusy" @click="stageSOCKSExitRemoval">移除 SOCKS 出站</button>
+                <button type="button" class="primary" :disabled="mutationsDisabled || socksBusy || !socksForm.server" @click="configureSOCKSExit">{{ socksBusy ? '正在真实代理预检…' : socksExit?.configured ? '重新预检并保存' : '预检并保存' }}</button>
+              </div>
+            </div>
+          </div>
         </section>
         <section class="panel-card migration-panel">
           <div class="card-head"><div><span class="section-mark">迁</span><div><h3>sing-box 升级预检</h3><p>配置迁移支持 1.14 系列 · 只读扫描，不修改配置</p></div></div><button class="secondary" :disabled="migrationLoading" @click="scanSingBoxMigration">{{ migrationLoading ? '扫描中…' : '扫描兼容性' }}</button></div>
