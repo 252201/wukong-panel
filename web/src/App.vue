@@ -479,8 +479,20 @@ async function refreshFleetStatus() {
 }
 
 function applyFleetDraft(status: FleetStatus) {
-  const selectedNodes = { ...(status.selectedNodeIds || {}) }
-  for (const host of status.hosts) if (!(host.id in selectedNodes)) selectedNodes[host.id] = (host.snapshot?.nodes || []).filter(node => node.status === 'active').map(node => node.id)
+  const selectedNodes: Record<string, string[]> = {}
+  for (const host of status.hosts) {
+    const snapshotNodes = host.snapshot?.nodes
+    const activeNodeIds = (snapshotNodes || []).filter(node => node.status === 'active').map(node => node.id)
+    const rawSelected = status.selectedNodeIds?.[host.id]
+    if (!Array.isArray(rawSelected)) {
+      selectedNodes[host.id] = activeNodeIds
+    } else if (Array.isArray(snapshotNodes)) {
+      const activeSet = new Set(activeNodeIds)
+      selectedNodes[host.id] = rawSelected.filter(id => activeSet.has(id))
+    } else {
+      selectedNodes[host.id] = [...rawSelected]
+    }
+  }
   syncingFleetDraft = true
   try {
     fleetEnabledDraft.value = status.enabled
@@ -488,7 +500,7 @@ function applyFleetDraft(status: FleetStatus) {
     fleetSubscriptionPublicURL.value = status.subscriptionPublicUrl || ''
     fleetSelectedHosts.value = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => {
       const h = status.hosts.find(item => item.id === id)
-      return !h || !isProbeHost(h) || (h.snapshot?.nodes || []).length > 0
+      return Boolean(h && (!isProbeHost(h) || (h.snapshot?.nodes || []).length > 0))
     }) : status.hosts.filter(host => !isProbeHost(host) || (host.snapshot?.nodes || []).length > 0).map(host => host.id)
     fleetSelectedNodes.value = selectedNodes
   } finally { syncingFleetDraft = false }
@@ -879,8 +891,14 @@ const fleetNexus = computed(() => {
 
   const topTrafficHostName = topHost && topUsed > 0 ? (topHost.id === 'local' ? '中央本机' : topHost.name) : '暂无消耗'
   const topTrafficShare = totalTrafficUsed > 0 && topUsed > 0 ? Math.round((topUsed / totalTrafficUsed) * 100) : 0
-  const selectedHostCount = fleetSelectedHosts.value.length
-  const selectedNodeCount = fleetSelectedHosts.value.reduce((sum, hostId) => sum + (fleetSelectedNodes.value[hostId] || []).length, 0)
+  const selectedHostSet = new Set(fleetSelectedHosts.value)
+  const validSelectedHosts = hosts.filter(host => selectedHostSet.has(host.id) && (!isProbeHost(host) || (host.snapshot?.nodes || []).length > 0))
+  const selectedHostCount = validSelectedHosts.length
+  const selectedNodeCount = validSelectedHosts.reduce((sum, host) => {
+    const activeIds = new Set((host.snapshot?.nodes || []).filter(node => node.status === 'active').map(node => node.id))
+    const chosen = (fleetSelectedNodes.value[host.id] || []).filter(id => activeIds.has(id))
+    return sum + chosen.length
+  }, 0)
 
   return {
     totalTrafficUsed,
@@ -2054,9 +2072,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </span>
               </div>
               <aside class="fleet-header-aside">
-                <div class="fleet-header-rates" title="全局聚合订阅当前纳入范围">
-                  <span class="fleet-rate-down">订阅 <b>{{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台</b></span>
-                  <span class="fleet-rate-up">共 <b>{{ fleetNexus.selectedNodeCount }} 节点</b></span>
+                <div class="fleet-header-rates" title="全舰队实时总吞吐速率">
+                  <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
+                  <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                 </div>
                 <em>
                   <span class="fleet-host-status">
@@ -2120,7 +2138,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <footer>
               <div class="fleet-host-version-meta">
                 <span v-if="enrollmentCommand" class="fleet-host-version-text fleet-enroll-active-hint"><i class="enroll-ready-dot" aria-hidden="true"></i>已就绪：{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</span>
-                <span v-else class="fleet-host-version-text">支持 2–10 台 VPS 协同 · 中央停机不影响远端现有节点</span>
+                <span v-else class="fleet-host-version-text">全局订阅纳入 {{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台主机 · {{ fleetNexus.selectedNodeCount }} 个节点</span>
               </div>
               <div class="fleet-footer-actions">
                 <div class="fleet-footer-buttons">
@@ -2145,9 +2163,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </span>
                 </div>
                 <aside class="fleet-header-aside">
-                  <div class="fleet-header-rates" title="全局聚合订阅当前纳入范围">
-                    <span class="fleet-rate-down">订阅 <b>{{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台</b></span>
-                    <span class="fleet-rate-up">共 <b>{{ fleetNexus.selectedNodeCount }} 节点</b></span>
+                  <div class="fleet-header-rates" title="全舰队实时总吞吐速率">
+                    <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
+                    <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                   </div>
                   <em>
                     <span class="fleet-host-status">
