@@ -699,6 +699,7 @@ const english: Record<string, string> = {
   '舰队全局态势': 'Fleet Nexus',
   '全舰队账期汇总、租期预警与远端主机快速扩容': 'Fleet-wide billing summary, lease expiry alerts, and remote host enrollment',
   '全局聚合订阅当前纳入范围': 'Global subscription current scope',
+  '全舰队实时总吞吐速率': 'Fleet live aggregate throughput',
   '订阅': 'Sub',
   '共': 'Total',
   '舰队全局汇总': 'Fleet summary',
