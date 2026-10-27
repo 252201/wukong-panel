@@ -2143,7 +2143,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <div class="fleet-footer-actions">
                 <div class="fleet-footer-buttons">
                   <button v-if="enrollmentCommand" type="button" class="enroll-copy-inline-btn" @click="copy(enrollmentCommand)">复制接入命令</button>
-                  <button type="button" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button>
                   <button type="button" @click="navigateTo('settings')">主控设置</button>
                 </div>
               </div>
@@ -2207,7 +2206,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
                 <div class="fleet-footer-actions">
                   <div class="fleet-footer-buttons">
-                    <button type="button" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button>
                     <button type="button" @click="navigateTo('settings')">主控设置</button>
                   </div>
                 </div>
