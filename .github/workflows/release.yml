@@ -126,12 +126,16 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf '%s\n\n' '## 更新摘要'
+            if [[ "$RELEASE_NOTES" != *"## 更新摘要"* ]]; then
+              printf '%s\n\n' '## 更新摘要'
+            fi
             printf '%s\n\n' "$RELEASE_NOTES"
-            printf '%s\n\n' '## 发布信息'
-            printf '%s\n' "- 版本：$RELEASE_VERSION"
-            printf '%s\n' "- 构建来源：main / $GITHUB_SHA"
-            printf '%s\n' '- 正式资产已由 GitHub Actions 构建并完成校验。'
+            if [[ "$RELEASE_NOTES" != *"## 发布信息"* ]]; then
+              printf '%s\n\n' '## 发布信息'
+              printf '%s\n' "- 版本：$RELEASE_VERSION"
+              printf '%s\n' "- 构建来源：main / $GITHUB_SHA"
+              printf '%s\n' '- 正式资产已由 GitHub Actions 构建并完成校验。'
+            fi
           } > release/RELEASE_NOTES.md
           test -s release/RELEASE_NOTES.md
 
