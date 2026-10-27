@@ -840,6 +840,65 @@ function hasSingBoxUpdate(host: FleetHost): boolean {
   return isNewerVersion(current, latestSingBoxVersion.value)
 }
 
+const fleetNexus = computed(() => {
+  const hosts = fleetHosts.value
+  let totalTrafficUsed = 0
+  let totalTrafficQuota = 0
+  let quotaHostCount = 0
+  let topHost: FleetHost | null = null
+  let topUsed = -1
+  let nearestExpiryHost: FleetHost | null = null
+  let nearestExpiryDays: number | null = null
+  let updatableHostCount = 0
+  let pendingUpdateItems = 0
+
+  for (const host of hosts) {
+    const used = host.snapshot?.overview?.trafficUsed || 0
+    const quota = host.trafficQuotaBytes || host.snapshot?.overview?.trafficQuota || 0
+    totalTrafficUsed += used
+    if (quota > 0) {
+      totalTrafficQuota += quota
+      quotaHostCount++
+    }
+    if (used > topUsed) {
+      topUsed = used
+      topHost = host
+    }
+    const days = expiryDays(host.expiresAt)
+    if (days !== null && (nearestExpiryDays === null || days < nearestExpiryDays)) {
+      nearestExpiryDays = days
+      nearestExpiryHost = host
+    }
+    const hostUpd = hasHostUpdate(host)
+    const sbUpd = hasSingBoxUpdate(host)
+    if (hostUpd || sbUpd) {
+      updatableHostCount++
+      pendingUpdateItems += (hostUpd ? 1 : 0) + (sbUpd ? 1 : 0)
+    }
+  }
+
+  const topTrafficHostName = topHost && topUsed > 0 ? (topHost.id === 'local' ? '中央本机' : topHost.name) : '暂无消耗'
+  const topTrafficShare = totalTrafficUsed > 0 && topUsed > 0 ? Math.round((topUsed / totalTrafficUsed) * 100) : 0
+  const selectedHostCount = fleetSelectedHosts.value.length
+  const selectedNodeCount = fleetSelectedHosts.value.reduce((sum, hostId) => sum + (fleetSelectedNodes.value[hostId] || []).length, 0)
+
+  return {
+    totalTrafficUsed,
+    totalTrafficQuota,
+    quotaHostCount,
+    topTrafficHostName,
+    topTrafficHostUsed: Math.max(0, topUsed),
+    topTrafficShare,
+    nearestExpiryHost,
+    nearestExpiryDays,
+    updatableHostCount,
+    pendingUpdateItems,
+    upToDateHostCount: Math.max(0, hosts.length - updatableHostCount),
+    selectedHostCount,
+    selectedNodeCount,
+  }
+})
+
 function singBoxUpdateSupported(host: FleetHost): boolean {
   if (isProbeHost(host)) return false
   return host.id === 'local' || (host.capabilities || []).includes('sing-box.update')
@@ -1981,6 +2040,96 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </div>
             <footer><div class="fleet-host-version-meta"><template v-if="isProbeHost(host)"><span class="fleet-host-version-text">Probe {{ host.panelVersion || '—' }} · {{ language === 'en-US' ? 'Monitoring only' : '轻量探针' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 v{{ latestReleaseVersion }}</span></button></template><template v-else><span class="fleet-host-version-text">Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 v{{ latestReleaseVersion }}</span></button><span class="fleet-version-dot">·</span><span class="fleet-host-version-text">sing-box {{ host.singBoxVersion || '—' }}</span><button v-if="hasSingBoxUpdate(host)" type="button" class="fleet-update-pill singbox-update-pill" :title="`发现新版本 ${latestSingBoxVersion}，点击更新`" @click.stop="openSingBoxUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 {{ latestSingBoxVersion }}</span></button></template></div><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
+          </article>
+          <article v-if="fleetHosts.length % 2 === 1" class="panel-card fleet-host-card fleet-companion-card" aria-label="舰队全局态势与扩容舱">
+            <header>
+              <div>
+                <span class="fleet-companion-seal" aria-hidden="true">阵</span>
+                <span>
+                  <span class="fleet-host-title">
+                    <b>舰队全局态势</b>
+                    <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
+                  </span>
+                  <small>全舰队账期汇总、租期预警与远端主机快速扩容</small>
+                </span>
+              </div>
+              <aside class="fleet-header-aside">
+                <div class="fleet-header-rates" title="全局聚合订阅当前纳入范围">
+                  <span class="fleet-rate-down">订阅 <b>{{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台</b></span>
+                  <span class="fleet-rate-up">共 <b>{{ fleetNexus.selectedNodeCount }} 节点</b></span>
+                </div>
+                <em>
+                  <span class="fleet-host-status">
+                    <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
+                    <span class="fleet-online-state">· 运行节点 {{ fleetAggregate.runningNodes }}</span>
+                  </span>
+                </em>
+              </aside>
+            </header>
+            <div class="fleet-host-body">
+              <section class="fleet-resource-grid" aria-label="舰队全局汇总">
+                <div class="fleet-resource">
+                  <small>全舰队月流量</small>
+                  <b :title="bytes(fleetNexus.totalTrafficUsed)">{{ bytes(fleetNexus.totalTrafficUsed) }}</b>
+                  <em>{{ fleetNexus.totalTrafficQuota > 0 ? (fleetNexus.quotaHostCount === fleetHosts.length ? `总配额 ${bytes(fleetNexus.totalTrafficQuota)}` : `${fleetNexus.quotaHostCount} 台设限 ${bytes(fleetNexus.totalTrafficQuota)}`) : '全部主机不限流量' }}</em>
+                </div>
+                <div class="fleet-resource">
+                  <small>流量榜首主机</small>
+                  <b :title="fleetNexus.topTrafficHostName">{{ fleetNexus.topTrafficHostName }}</b>
+                  <em>{{ fleetNexus.totalTrafficUsed > 0 ? `${bytes(fleetNexus.topTrafficHostUsed)} · 占 ${fleetNexus.topTrafficShare}%` : '本账期暂无消耗' }}</em>
+                </div>
+                <div class="fleet-resource">
+                  <small>最近到期租期</small>
+                  <b v-if="fleetNexus.nearestExpiryHost" :class="`nexus-expiry-${expiryTone(fleetNexus.nearestExpiryHost.expiresAt)}`" :title="`${fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name} · ${fleetNexus.nearestExpiryHost.expiresAt}`">{{ fleetNexus.nearestExpiryDays! < 0 ? `已过期 ${-fleetNexus.nearestExpiryDays!} 天` : fleetNexus.nearestExpiryDays === 0 ? '今日到期' : `剩余 ${fleetNexus.nearestExpiryDays} 天` }}</b>
+                  <b v-else>未登记租期</b>
+                  <em v-if="fleetNexus.nearestExpiryHost" :title="`${fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name} (${fleetNexus.nearestExpiryHost.expiresAt})`">{{ fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name }} · {{ fleetNexus.nearestExpiryHost.expiresAt }}</em>
+                  <em v-else>可在主机设置中登记</em>
+                </div>
+                <div class="fleet-resource">
+                  <small>组件版本态势</small>
+                  <b :class="{ 'nexus-version-ok': fleetNexus.updatableHostCount === 0, 'nexus-version-warn': fleetNexus.updatableHostCount > 0 }">{{ fleetNexus.updatableHostCount === 0 ? '全员最新' : `${fleetNexus.upToDateHostCount}/${fleetHosts.length} 台最新` }}</b>
+                  <em>{{ fleetNexus.pendingUpdateItems > 0 ? `${fleetNexus.pendingUpdateItems} 项组件可在线升级` : 'Panel 与内核均最新' }}</em>
+                </div>
+              </section>
+              <section class="fleet-host-network fleet-companion-enroll" aria-label="快速扩容远端主机">
+                <div class="fleet-network-heading">
+                  <div class="fleet-network-title-wrap">
+                    <strong>快速扩容 · 接入新远端主机</strong>
+                    <span class="fleet-companion-pill">10 分钟一次性令牌</span>
+                  </div>
+                  <small>HTTPS 双向鉴权 · 远端自治</small>
+                </div>
+                <div class="fleet-network-group fleet-enroll-col">
+                  <div class="fleet-network-region">
+                    <strong>完整面板主机</strong>
+                    <small>Panel · Nginx · sing-box</small>
+                  </div>
+                  <p class="fleet-enroll-col-desc">支持中央切换纳管、远程部署节点与全局订阅聚合。</p>
+                  <button type="button" class="fleet-enroll-card-btn primary-accent" :disabled="busy" @click="createFleetEnrollment('panel')"><span>＋</span> 生成完整面板接入命令</button>
+                </div>
+                <div class="fleet-network-group fleet-enroll-col">
+                  <div class="fleet-network-region">
+                    <strong>轻量监控探针</strong>
+                    <small>Probe Agent · 零侵入</small>
+                  </div>
+                  <p class="fleet-enroll-col-desc">仅采集系统负载、网络质量与已有节点，不改现有业务。</p>
+                  <button type="button" class="fleet-enroll-card-btn" :disabled="busy" @click="createFleetEnrollment('probe')"><span>＋</span> 生成轻量探针接入命令</button>
+                </div>
+              </section>
+            </div>
+            <footer>
+              <div class="fleet-host-version-meta">
+                <span v-if="enrollmentCommand" class="fleet-host-version-text fleet-enroll-active-hint"><i class="enroll-ready-dot" aria-hidden="true"></i>已就绪：{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</span>
+                <span v-else class="fleet-host-version-text">支持 2–10 台 VPS 协同 · 中央停机不影响远端现有节点</span>
+              </div>
+              <div class="fleet-footer-actions">
+                <div class="fleet-footer-buttons">
+                  <button v-if="enrollmentCommand" type="button" class="enroll-copy-inline-btn" @click="copy(enrollmentCommand)">复制接入命令</button>
+                  <button type="button" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button>
+                  <button type="button" @click="navigateTo('settings')">主控设置</button>
+                </div>
+              </div>
+            </footer>
           </article>
         </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
