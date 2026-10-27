@@ -2131,6 +2131,130 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               </div>
             </footer>
           </article>
+          <template v-else-if="fleetHosts.length > 0">
+            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card" aria-label="舰队全局态势">
+              <header>
+                <div>
+                  <span class="fleet-companion-seal" aria-hidden="true">阵</span>
+                  <span>
+                    <span class="fleet-host-title">
+                      <b>舰队全局态势</b>
+                      <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
+                    </span>
+                    <small>全舰队本账期流量汇总、租期预警与组件版本态势</small>
+                  </span>
+                </div>
+                <aside class="fleet-header-aside">
+                  <div class="fleet-header-rates" title="全局聚合订阅当前纳入范围">
+                    <span class="fleet-rate-down">订阅 <b>{{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台</b></span>
+                    <span class="fleet-rate-up">共 <b>{{ fleetNexus.selectedNodeCount }} 节点</b></span>
+                  </div>
+                  <em>
+                    <span class="fleet-host-status">
+                      <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
+                      <span class="fleet-online-state">· 运行节点 {{ fleetAggregate.runningNodes }}</span>
+                    </span>
+                  </em>
+                </aside>
+              </header>
+              <div class="fleet-host-body fleet-split-body">
+                <section class="fleet-resource-grid" aria-label="舰队全局汇总">
+                  <div class="fleet-resource">
+                    <small>全舰队月流量</small>
+                    <b :title="bytes(fleetNexus.totalTrafficUsed)">{{ bytes(fleetNexus.totalTrafficUsed) }}</b>
+                    <em>{{ fleetNexus.totalTrafficQuota > 0 ? (fleetNexus.quotaHostCount === fleetHosts.length ? `总配额 ${bytes(fleetNexus.totalTrafficQuota)}` : `${fleetNexus.quotaHostCount} 台设限 ${bytes(fleetNexus.totalTrafficQuota)}`) : '全部主机不限流量' }}</em>
+                  </div>
+                  <div class="fleet-resource">
+                    <small>流量榜首主机</small>
+                    <b :title="fleetNexus.topTrafficHostName">{{ fleetNexus.topTrafficHostName }}</b>
+                    <em>{{ fleetNexus.totalTrafficUsed > 0 ? `${bytes(fleetNexus.topTrafficHostUsed)} · 占 ${fleetNexus.topTrafficShare}%` : '本账期暂无消耗' }}</em>
+                  </div>
+                  <div class="fleet-resource">
+                    <small>最近到期租期</small>
+                    <b v-if="fleetNexus.nearestExpiryHost" :class="`nexus-expiry-${expiryTone(fleetNexus.nearestExpiryHost.expiresAt)}`" :title="`${fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name} · ${fleetNexus.nearestExpiryHost.expiresAt}`">{{ fleetNexus.nearestExpiryDays! < 0 ? `已过期 ${-fleetNexus.nearestExpiryDays!} 天` : fleetNexus.nearestExpiryDays === 0 ? '今日到期' : `剩余 ${fleetNexus.nearestExpiryDays} 天` }}</b>
+                    <b v-else>未登记租期</b>
+                    <em v-if="fleetNexus.nearestExpiryHost" :title="`${fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name} (${fleetNexus.nearestExpiryHost.expiresAt})`">{{ fleetNexus.nearestExpiryHost.id === 'local' ? '中央本机' : fleetNexus.nearestExpiryHost.name }} · {{ fleetNexus.nearestExpiryHost.expiresAt }}</em>
+                    <em v-else>可在主机设置中登记</em>
+                  </div>
+                  <div class="fleet-resource">
+                    <small>组件版本态势</small>
+                    <b :class="{ 'nexus-version-ok': fleetNexus.updatableHostCount === 0, 'nexus-version-warn': fleetNexus.updatableHostCount > 0 }">{{ fleetNexus.updatableHostCount === 0 ? '全员最新' : `${fleetNexus.upToDateHostCount}/${fleetHosts.length} 台最新` }}</b>
+                    <em>{{ fleetNexus.pendingUpdateItems > 0 ? `${fleetNexus.pendingUpdateItems} 项组件可在线升级` : 'Panel 与内核均最新' }}</em>
+                  </div>
+                </section>
+              </div>
+              <footer>
+                <div class="fleet-host-version-meta">
+                  <span class="fleet-host-version-text">全局订阅纳入 {{ fleetNexus.selectedHostCount }}/{{ fleetHosts.length }} 台主机 · {{ fleetNexus.selectedNodeCount }} 个节点</span>
+                </div>
+                <div class="fleet-footer-actions">
+                  <div class="fleet-footer-buttons">
+                    <button type="button" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button>
+                    <button type="button" @click="navigateTo('settings')">主控设置</button>
+                  </div>
+                </div>
+              </footer>
+            </article>
+            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card fleet-companion-enroll-card" aria-label="快速扩容远端主机">
+              <header>
+                <div>
+                  <span class="fleet-companion-seal jade-seal" aria-hidden="true">拓</span>
+                  <span>
+                    <span class="fleet-host-title">
+                      <b>快速扩容 · 接入新远端主机</b>
+                      <span class="fleet-companion-pill">10 分钟一次性令牌</span>
+                    </span>
+                    <small>HTTPS 双向鉴权 · 远端本机自治，中央停机不影响现有节点</small>
+                  </span>
+                </div>
+                <aside class="fleet-header-aside">
+                  <div class="fleet-header-rates">
+                    <span class="fleet-rate-down">模式 <b>完整面板</b></span>
+                    <span class="fleet-rate-up">或 <b>轻量探针</b></span>
+                  </div>
+                  <em>
+                    <span class="fleet-host-status">
+                      <span class="fleet-node-summary">支持 2–10 台协同</span>
+                      <span class="fleet-online-state">· 单次有效</span>
+                    </span>
+                  </em>
+                </aside>
+              </header>
+              <div class="fleet-host-body fleet-split-body">
+                <section class="fleet-host-network fleet-companion-enroll fleet-companion-enroll-split" aria-label="快速扩容远端主机">
+                  <div class="fleet-network-group fleet-enroll-col">
+                    <div class="fleet-network-region">
+                      <strong>完整面板主机</strong>
+                      <small>Panel · Nginx · sing-box</small>
+                    </div>
+                    <p class="fleet-enroll-col-desc">支持中央切换纳管、远程部署节点与全局订阅聚合。</p>
+                    <button type="button" class="fleet-enroll-card-btn primary-accent" :disabled="busy" @click="createFleetEnrollment('panel')"><span>＋</span> 生成完整面板接入命令</button>
+                  </div>
+                  <div class="fleet-network-group fleet-enroll-col">
+                    <div class="fleet-network-region">
+                      <strong>轻量监控探针</strong>
+                      <small>Probe Agent · 零侵入</small>
+                    </div>
+                    <p class="fleet-enroll-col-desc">仅采集系统负载、网络质量与已有节点，不改现有业务。</p>
+                    <button type="button" class="fleet-enroll-card-btn" :disabled="busy" @click="createFleetEnrollment('probe')"><span>＋</span> 生成轻量探针接入命令</button>
+                  </div>
+                </section>
+              </div>
+              <footer>
+                <div class="fleet-host-version-meta">
+                  <span v-if="enrollmentCommand" class="fleet-host-version-text fleet-enroll-active-hint"><i class="enroll-ready-dot" aria-hidden="true"></i>已就绪：{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</span>
+                  <span v-else class="fleet-host-version-text">点击上方按钮生成一次性安装脚本，在远端 VPS 以 root 执行</span>
+                </div>
+                <div class="fleet-footer-actions">
+                  <div class="fleet-footer-buttons">
+                    <button v-if="enrollmentCommand" type="button" class="enroll-copy-inline-btn" @click="copy(enrollmentCommand)">复制接入命令</button>
+                    <button type="button" :disabled="busy" @click="createFleetEnrollment('panel')">＋ 面板令牌</button>
+                    <button type="button" :disabled="busy" @click="createFleetEnrollment('probe')">＋ 探针令牌</button>
+                  </div>
+                </div>
+              </footer>
+            </article>
+          </template>
         </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
         <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><div class="fleet-scope-actions"><button type="button" class="secondary" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></div></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item) || (item.snapshot?.nodes || []).length > 0)" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : isProbeHost(host) ? '离线 · 节点已就绪' : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>

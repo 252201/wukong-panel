@@ -728,11 +728,23 @@ const english: Record<string, string> = {
   '已就绪：轻量探针一次性接入命令': 'Ready: One-time lightweight probe enrollment command',
   '已就绪：完整面板一次性接入命令': 'Ready: One-time full panel enrollment command',
   '支持 2–10 台 VPS 协同 · 中央停机不影响远端现有节点': 'Supports 2–10 autonomous VPS hosts · Controller downtime never affects remote nodes',
+  '全舰队本账期流量汇总、租期预警与组件版本态势': 'Fleet-wide billing summary, lease expiry alerts, and component version health',
+  'HTTPS 双向鉴权 · 远端本机自治，中央停机不影响现有节点': 'Mutual HTTPS auth · Autonomous remote hosts unaffected by controller downtime',
+  '点击上方按钮生成一次性安装脚本，在远端 VPS 以 root 执行': 'Generate a one-time installer above and run as root on the remote VPS',
+  '模式': 'Mode',
+  '完整面板': 'Full panel',
+  '或': 'or',
+  '支持 2–10 台协同': '2–10 hosts',
+  '· 单次有效': '· Single use',
+  '＋ 面板令牌': '＋ Panel token',
+  '＋ 探针令牌': '＋ Probe token',
+  '拓': 'E',
   '复制接入命令': 'Copy enrollment command',
   '主控设置': 'Controller settings',
 }
 
 const dynamicRules: Array<[RegExp, (...parts: string[]) => string]> = [
+  [/^全局订阅纳入 (\d+)\/(\d+) 台主机 · (\d+) 个节点$/, (_, sel, total, nodes) => `Global subscription includes ${sel}/${total} hosts · ${nodes} nodes`],
   [/^(\d+)\/(\d+) 台$/, (_, sel, total) => `${sel}/${total} hosts`],
   [/^(\d+) 节点$/, (_, count) => `${count} nodes`],
   [/^在线 (\d+)\/(\d+)$/, (_, online, total) => `Online ${online}/${total}`],
