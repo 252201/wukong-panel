@@ -69,6 +69,8 @@ const fleetSelectedHosts = ref<string[]>([])
 const fleetSelectedNodes = ref<Record<string, string[]>>({})
 const fleetDraftDirty = ref(false)
 const settingsDraftDirty = ref(false)
+const confirmRotateGlobalToken = ref(false)
+const confirmRotateHostToken = ref(false)
 let syncingFleetDraft = false
 let syncingSettingsDraft = false
 const overview = ref<Overview | null>(null)
@@ -1663,6 +1665,8 @@ watch(page, (next, previous) => {
   }
   if (previous === 'settings') {
     settingsDraftDirty.value = false
+    confirmRotateGlobalToken.value = false
+    confirmRotateHostToken.value = false
   }
   if (next !== 'security' && next !== 'fleet' && (previous === 'settings' || previous === 'security')) {
     refreshAll().catch(() => {})
@@ -2260,10 +2264,31 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       </div>
 
       <div v-else-if="page === 'settings'" class="page-content settings-page">
-        <div class="page-intro"><div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div><button class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button></div>
+        <div class="page-intro">
+          <div><p>CONTROL SETTINGS</p><h2>账期、隐私与访问设置</h2></div>
+          <div class="settings-intro-actions">
+            <span v-if="settingsDraftDirty" class="settings-dirty-pill">有未保存的主机设置</span>
+            <button class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button>
+          </div>
+        </div>
         <section v-if="selectedHostId === 'local'" class="panel-card fleet-controller-settings">
-          <div class="setting-title"><span>舰</span><div><h3>中央多机控制</h3><p>控制流与订阅流可使用各自独立的可信 HTTPS 入口</p></div></div>
-          <label class="toggle-row"><span><b>启用中央控制</b></span><span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span></label>
+          <div class="setting-title fleet-head-row">
+            <div class="setting-title-main">
+              <span>舰</span>
+              <div>
+                <div class="setting-title-inline">
+                  <h3>中央多机控制</h3>
+                  <span class="settings-state-badge" :class="{ active: fleetStatus?.enabled }">{{ fleetStatus?.enabled ? '已启用' : '未启用' }}</span>
+                  <span v-if="fleetDraftDirty" class="settings-dirty-pill">未保存修改</span>
+                </div>
+                <p>控制流与订阅流可使用各自独立的可信 HTTPS 入口</p>
+              </div>
+            </div>
+            <label class="fleet-header-switch">
+              <span><b>启用中央控制</b></span>
+              <span class="switch"><input v-model="fleetEnabledDraft" type="checkbox"><i></i></span>
+            </label>
+          </div>
           <div v-if="fleetEnabledDraft" class="fleet-url-grid">
             <label class="fleet-url-field">
               <span><b>01 · 主控通信地址</b><em>CONTROL PLANE</em></span>
@@ -2276,18 +2301,142 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <small>可留空以复用主控地址；建议使用独立标准 HTTPS 443 域名，只反代 <code>/fleet-sub/</code>。</small>
             </label>
           </div>
+          <div v-if="fleetStatus?.enabled && fleetStatus?.globalSubscription" class="fleet-global-sub-box">
+            <div class="fleet-sub-box-head">
+              <div class="fleet-sub-box-title">
+                <b>全局聚合订阅入口</b>
+                <span class="settings-scope-tag jade">Clash / Mihomo</span>
+              </div>
+              <div class="fleet-sub-box-actions">
+                <button type="button" class="secondary mini-action probe" :disabled="fleetSubscriptionProbeBusy" @click="probeFleetSubscription">{{ fleetSubscriptionProbeBusy ? '正在检测…' : '检测订阅入口' }}</button>
+                <button v-if="!confirmRotateGlobalToken" type="button" class="secondary mini-action warn-hover" :disabled="busy" @click="confirmRotateGlobalToken = true">轮换全局订阅 Token</button>
+                <span v-else class="inline-confirm-bar">
+                  <small>旧全局订阅将失效：</small>
+                  <button type="button" class="danger-mini-btn" :disabled="busy" @click="confirmRotateGlobalToken = false; saveFleetController(true)">确认轮换</button>
+                  <button type="button" class="secondary mini-action" @click="confirmRotateGlobalToken = false">取消</button>
+                </span>
+              </div>
+            </div>
+            <div v-if="fleetSubscriptionProbeBusy || fleetSubscriptionProbe || fleetSubscriptionProbeError" class="fleet-probe-result" :class="fleetSubscriptionProbeError ? 'error' : fleetSubscriptionProbe ? 'success' : 'running'">
+              <i></i><span v-if="fleetSubscriptionProbeBusy">正从主控服务器验证 TLS、HTTP 状态与订阅内容…</span><span v-else-if="fleetSubscriptionProbe"><b>入口可用</b> · HTTP {{ fleetSubscriptionProbe.status }} · {{ fleetSubscriptionProbe.nodeCount }} 个节点 · {{ fleetSubscriptionProbe.latencyMs }} ms</span><span v-else>{{ fleetSubscriptionProbeError }}</span>
+            </div>
+            <div class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button type="button" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div>
+          </div>
           <div class="fleet-setting-actions">
             <button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button>
-            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment('panel')">生成面板接入命令</button><button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="createFleetEnrollment('probe')">生成探针接入命令</button>
-            <button v-if="fleetStatus?.enabled" class="secondary probe" :disabled="fleetSubscriptionProbeBusy" @click="probeFleetSubscription">{{ fleetSubscriptionProbeBusy ? '正在检测…' : '检测订阅入口' }}</button>
-            <button v-if="fleetStatus?.enabled" class="secondary" :disabled="busy" @click="saveFleetController(true)">轮换全局订阅 Token</button>
+            <div v-if="fleetStatus?.enabled" class="fleet-enroll-btn-group">
+              <button class="secondary" :disabled="busy" @click="createFleetEnrollment('panel')">生成面板接入命令</button>
+              <button class="secondary" :disabled="busy" @click="createFleetEnrollment('probe')">生成探针接入命令</button>
+            </div>
           </div>
-          <div v-if="fleetSubscriptionProbeBusy || fleetSubscriptionProbe || fleetSubscriptionProbeError" class="fleet-probe-result" :class="fleetSubscriptionProbeError ? 'error' : fleetSubscriptionProbe ? 'success' : 'running'">
-            <i></i><span v-if="fleetSubscriptionProbeBusy">正从主控服务器验证 TLS、HTTP 状态与订阅内容…</span><span v-else-if="fleetSubscriptionProbe"><b>入口可用</b> · HTTP {{ fleetSubscriptionProbe.status }} · {{ fleetSubscriptionProbe.nodeCount }} 个节点 · {{ fleetSubscriptionProbe.latencyMs }} ms</span><span v-else>{{ fleetSubscriptionProbeError }}</span>
-          </div>
-          <div v-if="fleetStatus?.globalSubscription" class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div>
         </section>
-        <section class="settings-grid"><div class="settings-left-stack"><article class="panel-card localization-settings"><div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div><label>界面语言<select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select></label><label>时区<input v-model="settings.timezone" :disabled="mutationsDisabled"></label><div class="settings-row-split"><label>账期重置日<input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled"><small>{{ language === 'en-US' ? 'Days 1-28 each month' : '每月 1～28 日' }}</small></label><label>到期时间<input v-model="settings.expiresAt" type="date" :disabled="mutationsDisabled"><small>{{ settings.expiresAt ? expiryLabel(settings.expiresAt) : (language === 'en-US' ? 'Leave empty for no expiry' : '留空表示长期有效') }}</small></label></div><label>月流量额度（GB）<input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000"><small>0 表示不限量</small></label></article><article class="panel-card network-settings"><div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div><label>监控网卡<input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled"></label><label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label></article></div><div class="settings-right-stack"><article class="panel-card appearance-settings"><div class="setting-title"><span>景</span><div><h3>外观与主题</h3><p>东方科幻 · 当前浏览器独立保存</p></div></div><ThemePicker :model-value="themePreference" aria-label="设置界面主题" @update:model-value="setThemePreference" /><p class="help-text">切换立即生效，不会写入服务器或影响其他设备。选择“系统”后会实时跟随设备深浅色设置。</p></article><article class="panel-card subscription-settings"><div class="setting-title"><span>令</span><div><h3>订阅令牌</h3><p>与管理入口完全隔离</p></div></div><div class="token-box"><code>{{ settings.subscriptionToken || '尚未生成' }}</code><button :disabled="mutationsDisabled" @click="rotateSubscription">轮换</button></div><p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p></article><article class="panel-card danger-zone"><div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div><p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p></article></div></section>
+        <section class="settings-grid">
+          <div class="settings-left-stack">
+            <article class="panel-card localization-settings">
+              <div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div>
+              <div class="settings-row-split">
+                <label>
+                  <span>界面语言</span>
+                  <select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
+                </label>
+                <label>
+                  <span>时区</span>
+                  <input v-model="settings.timezone" :disabled="mutationsDisabled" placeholder="Asia/Shanghai">
+                  <span class="settings-chip-row">
+                    <button v-for="tz in ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'America/Los_Angeles']" :key="tz" type="button" class="settings-preset-chip" :class="{ active: settings.timezone === tz }" :disabled="mutationsDisabled" @click="settings.timezone = tz">{{ tz }}</button>
+                  </span>
+                </label>
+              </div>
+              <div class="settings-row-split">
+                <label>
+                  <span>账期重置日</span>
+                  <input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled">
+                  <small>{{ language === 'en-US' ? 'Days 1-28 each month' : '每月 1～28 日' }}</small>
+                </label>
+                <label>
+                  <span>到期时间</span>
+                  <input v-model="settings.expiresAt" type="date" :disabled="mutationsDisabled">
+                  <small>{{ settings.expiresAt ? expiryLabel(settings.expiresAt) : (language === 'en-US' ? 'Leave empty for no expiry' : '留空表示长期有效') }}</small>
+                </label>
+              </div>
+              <label>
+                <span class="settings-label-head">
+                  <span>月流量额度（GB）</span>
+                  <span class="settings-chip-row">
+                    <button v-for="quota in [0, 500, 1000, 2000, 5000]" :key="quota" type="button" class="settings-preset-chip" :class="{ active: Math.round(settings.trafficQuotaBytes / 1_000_000_000) === quota }" :disabled="mutationsDisabled" @click="settings.trafficQuotaBytes = quota * 1_000_000_000">{{ quota === 0 ? '不限' : `${quota}G` }}</button>
+                  </span>
+                </span>
+                <input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000">
+                <small>0 表示不限量</small>
+              </label>
+            </article>
+            <article class="panel-card network-settings">
+              <div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div>
+              <label>
+                <span class="settings-label-head">
+                  <span>监控网卡</span>
+                  <span class="settings-chip-row">
+                    <button v-for="nic in ['auto', 'eth0', 'ens3']" :key="nic" type="button" class="settings-preset-chip" :class="{ active: settings.interface === nic }" :disabled="mutationsDisabled" @click="settings.interface = nic">{{ nic }}</button>
+                  </span>
+                </span>
+                <input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled">
+              </label>
+              <label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label>
+              <div class="host-settings-footer">
+                <small>{{ settingsDraftDirty ? '当前主机配置有未保存的更改' : '以上账期与网卡配置保存在当前主机' }}</small>
+                <button type="button" class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button>
+              </div>
+            </article>
+          </div>
+          <div class="settings-right-stack">
+            <article class="panel-card appearance-settings">
+              <div class="setting-title"><span>景</span><div><h3>外观与主题</h3><p>东方科幻 · 当前浏览器独立保存</p></div></div>
+              <ThemePicker :model-value="themePreference" aria-label="设置界面主题" @update:model-value="setThemePreference" />
+              <p class="help-text">切换立即生效，不会写入服务器或影响其他设备。选择“系统”后会实时跟随设备深浅色设置。</p>
+            </article>
+            <article class="panel-card subscription-settings">
+              <div class="setting-title">
+                <span>令</span>
+                <div>
+                  <div class="setting-title-inline">
+                    <h3>订阅令牌</h3>
+                    <span class="settings-scope-tag">单机独立</span>
+                  </div>
+                  <p>与管理入口完全隔离</p>
+                </div>
+              </div>
+              <div class="token-box">
+                <code>{{ settings.subscriptionToken || '尚未生成' }}</code>
+                <button v-if="!confirmRotateHostToken" type="button" :disabled="mutationsDisabled" @click="confirmRotateHostToken = true">轮换</button>
+                <template v-else>
+                  <button type="button" class="danger-token-btn" :disabled="mutationsDisabled" @click="confirmRotateHostToken = false; rotateSubscription()">确认轮换</button>
+                  <button type="button" class="cancel-token-btn" @click="confirmRotateHostToken = false">取消</button>
+                </template>
+              </div>
+              <p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p>
+            </article>
+            <article class="panel-card danger-zone">
+              <div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div>
+              <p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p>
+              <div class="cli-ref-list">
+                <div class="cli-ref-item">
+                  <span>重置管理员密码</span>
+                  <div class="cli-cmd-row">
+                    <code>install.sh --reset-password</code>
+                    <button type="button" class="mini-copy-btn" @click="copy('curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --reset-password')">复制</button>
+                  </div>
+                </div>
+                <div class="cli-ref-item">
+                  <span>终端运维工具</span>
+                  <div class="cli-cmd-row">
+                    <code>sudo wukongctl --help</code>
+                    <button type="button" class="mini-copy-btn" @click="copy('sudo wukongctl --help')">复制</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
   </div>
