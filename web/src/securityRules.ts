@@ -60,6 +60,18 @@ export function securityBatchEligible(rule: SecurityRule, mode: 'adopt'|'delete'
  return rule.adoptable && (mode === 'adopt' ? !rule.managed : rule.managed && !rule.protected)
 }
 
+export function sortFirewallRules<T extends {protected: boolean; portFrom: number; portTo: number; protocol: string}>(rules: T[]): T[] {
+ return [...rules].sort((a, b) => {
+  if (a.protected !== b.protected) return a.protected ? -1 : 1
+  if (a.protected && b.protected) return 0
+  if (a.portFrom !== b.portFrom) return a.portFrom - b.portFrom
+  const aTo = a.portTo || a.portFrom
+  const bTo = b.portTo || b.portFrom
+  if (aTo !== bTo) return aTo - bTo
+  return String(a.protocol || '').localeCompare(String(b.protocol || ''))
+ })
+}
+
 export function securityRuleChange(text: string, language: string): string | null {
  const match = /^(?:(adopt|delete|add) )?(allow|deny):(tcp|udp|tcp\/udp|tcp\+udp):(\d+):(\d+):(.+):([^:]*)$/.exec(text)
  if (!match) return null
