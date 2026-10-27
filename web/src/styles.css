@@ -411,9 +411,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .egress-hub-panel { gap: 16px; }
 .egress-head-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .egress-channel-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.egress-channel-card { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px; background: rgba(var(--shadow-rgb), .14); color: var(--paper); text-align: left; cursor: pointer; transition: border-color .18s, background .18s, box-shadow .18s; }
-.egress-channel-card:hover { border-color: rgba(212, 173, 87, .38); background: rgba(var(--wash-rgb), .03); }
-.egress-channel-card.active { border-color: var(--gold); background: linear-gradient(135deg, rgba(212, 173, 87, .1), rgba(82, 182, 144, .03)); box-shadow: inset 0 0 0 1px rgba(212, 173, 87, .22); }
+.egress-channel-card { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px; background: rgba(var(--wash-rgb), .02); color: var(--paper); text-align: left; cursor: pointer; transition: border-color .18s, background .18s, box-shadow .18s; }
+.egress-channel-card:hover { border-color: rgba(212, 173, 87, .38); background: rgba(var(--wash-rgb), .04); }
+.egress-channel-card.active { border-color: var(--gold); background: linear-gradient(135deg, rgba(212, 173, 87, .11), rgba(82, 182, 144, .035)); box-shadow: inset 3px 0 var(--gold), inset 0 0 0 1px rgba(212, 173, 87, .22); }
 .egress-channel-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
 .egress-channel-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .egress-channel-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border: 1px solid rgba(212, 173, 87, .35); color: var(--gold); font-family: "STKaiti", serif; font-size: 15px; }
@@ -777,6 +777,35 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .fleet-host-card footer,
 :root[data-effective-theme="light"] .fleet-probe-result,
 :root[data-effective-theme="light"] .fleet-scope-hosts > article { background: #f6f8f7; }
+:root[data-effective-theme="light"] .egress-channel-card {
+  border-radius: 6px;
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, .1);
+}
+:root[data-effective-theme="light"] .egress-channel-card:hover {
+  background: #ffffff;
+  border-color: rgba(242, 138, 11, .42);
+  box-shadow: 0 4px 12px rgba(25, 35, 45, .04);
+}
+:root[data-effective-theme="light"] .egress-channel-card.active {
+  border-color: #f28a0b;
+  background: linear-gradient(115deg, rgba(255, 151, 29, .09), rgba(41, 180, 159, .035), #ffffff);
+  box-shadow: inset 3px 0 #f28a0b, 0 4px 14px rgba(242, 138, 11, .08);
+}
+:root[data-effective-theme="light"] .egress-channel-card.active .egress-channel-title b {
+  color: #bd6804;
+}
+:root[data-effective-theme="light"] .egress-proto-tag,
+:root[data-effective-theme="light"] .egress-state-pill:not(.is-online):not(.is-pending) {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, .11);
+}
+:root[data-effective-theme="light"] .egress-telemetry-strip,
+:root[data-effective-theme="light"] .residential-script {
+  border-radius: 6px;
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, .09);
+}
 
 /* Light theme overrides for IP reputation modal & probe nodes modal */
 :root[data-effective-theme="light"] .ip-chip {
