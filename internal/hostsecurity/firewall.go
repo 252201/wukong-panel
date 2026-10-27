@@ -947,37 +947,47 @@ func (c *Controller) firewallPreview(ctx context.Context, r model.SecurityReques
 		p.Changes = []string{"关闭当前防火墙入站保护；保留配置"}
 		p.NeedsConfirmation = true
 	case "add":
-		rr, e := normalizeRule(r.Rule)
-		if e != nil {
-			return p, e
+		protocols := []string{r.Rule.Protocol}
+		if r.Rule.Protocol == "tcp/udp" || r.Rule.Protocol == "tcp+udp" {
+			protocols = []string{"tcp", "udp"}
 		}
-		rr.Zone = f.Zone
-		for _, v := range f.Rules {
-			match := v
-			if v.Protocol == "tcp/udp" && ruleProtocolMatches(v, rr.Protocol) && contains(v.AddressFamilies, "ipv4") && contains(v.AddressFamilies, "ipv6") {
-				match.Protocol = rr.Protocol
-			}
-			if sameRule(rr, match) {
-				return p, errors.New("已有相同规则")
-			}
-		}
-		for _, v := range p.RequiredPorts {
-			if v.Protected && rr.Action == "deny" && v.Protocol == rr.Protocol && v.Port >= rr.PortFrom && v.Port <= rr.PortTo {
-				return p, errors.New("不能拒绝 SSH 或面板入口端口")
-			}
-		}
-		p.NeedsConfirmation = rr.Action == "deny"
-		if f.Backend == "ufw" {
-			replaced, e := ufwReplacements(rr, f.Rules)
+		for _, proto := range protocols {
+			ruleCopy := r.Rule
+			ruleCopy.Protocol = proto
+			rr, e := normalizeRule(ruleCopy)
 			if e != nil {
 				return p, e
 			}
-			for _, old := range replaced {
-				p.Changes = append(p.Changes, "delete "+ruleKey(old))
+			rr.Zone = f.Zone
+			for _, v := range f.Rules {
+				match := v
+				if v.Protocol == "tcp/udp" && ruleProtocolMatches(v, rr.Protocol) && contains(v.AddressFamilies, "ipv4") && contains(v.AddressFamilies, "ipv6") {
+					match.Protocol = rr.Protocol
+				}
+				if sameRule(rr, match) {
+					return p, errors.New("已有相同规则")
+				}
+			}
+			for _, v := range p.RequiredPorts {
+				if v.Protected && rr.Action == "deny" && v.Protocol == rr.Protocol && v.Port >= rr.PortFrom && v.Port <= rr.PortTo {
+					return p, errors.New("不能拒绝 SSH 或面板入口端口")
+				}
+			}
+			if rr.Action == "deny" {
 				p.NeedsConfirmation = true
 			}
+			if f.Backend == "ufw" {
+				replaced, e := ufwReplacements(rr, f.Rules)
+				if e != nil {
+					return p, e
+				}
+				for _, old := range replaced {
+					p.Changes = append(p.Changes, "delete "+ruleKey(old))
+					p.NeedsConfirmation = true
+				}
+			}
+			p.Changes = append(p.Changes, ruleKey(rr))
 		}
-		p.Changes = append(p.Changes, ruleKey(rr))
 	case "delete", "adopt", "batch-delete", "batch-adopt":
 		rules, e := selectedFirewallRules(r, f.Rules)
 		if e != nil {
@@ -1066,38 +1076,44 @@ func (c *Controller) applyFirewall(ctx context.Context, r model.SecurityRequest,
 	}
 	rules := append([]model.SecurityRule{}, f.Rules...)
 	if r.Operation == "add" {
-		rr, _ := normalizeRule(r.Rule)
-		rr.Zone = f.Zone
-		if f.Backend == "ufw" {
-			replaced, e := ufwReplacements(rr, f.Rules)
-			if e != nil {
-				return e
-			}
-			removed := map[string]bool{}
-			for _, old := range replaced {
-				if e := c.changeRule(ctx, f.Backend, old, true, j); e != nil {
+		protocols := []string{r.Rule.Protocol}
+		if r.Rule.Protocol == "tcp/udp" || r.Rule.Protocol == "tcp+udp" {
+			protocols = []string{"tcp", "udp"}
+		}
+		for _, proto := range protocols {
+			ruleCopy := r.Rule
+			ruleCopy.Protocol = proto
+			rr, _ := normalizeRule(ruleCopy)
+			rr.Zone = f.Zone
+			if f.Backend == "ufw" {
+				replaced, e := ufwReplacements(rr, f.Rules)
+				if e != nil {
 					return e
 				}
-				removed[old.ID] = true
-			}
-			// Do not reuse s.Rules' backing array: the rollback journal retains
-			// the original slice and must restore every original rule/ID.
-			kept := make([]model.SecurityRule, 0, len(s.Rules))
-			for _, old := range s.Rules {
-				if !removed[old.ID] {
-					kept = append(kept, old)
+				removed := map[string]bool{}
+				for _, old := range replaced {
+					if e := c.changeRule(ctx, f.Backend, old, true, j); e != nil {
+						return e
+					}
+					removed[old.ID] = true
 				}
+				kept := make([]model.SecurityRule, 0, len(s.Rules))
+				for _, old := range s.Rules {
+					if !removed[old.ID] {
+						kept = append(kept, old)
+					}
+				}
+				s.Rules = kept
 			}
-			s.Rules = kept
-		}
-		rr.Managed = true
-		rr.Adoptable = true
-		rr.ID = token()
-		rules = append(rules, rr)
-		s.Rules = append(s.Rules, rr)
-		if f.Backend != "nftables" {
-			if e = c.changeRule(ctx, f.Backend, rr, false, j); e != nil {
-				return e
+			rr.Managed = true
+			rr.Adoptable = true
+			rr.ID = token()
+			rules = append(rules, rr)
+			s.Rules = append(s.Rules, rr)
+			if f.Backend != "nftables" {
+				if e = c.changeRule(ctx, f.Backend, rr, false, j); e != nil {
+					return e
+				}
 			}
 		}
 	}

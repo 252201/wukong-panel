@@ -55,8 +55,15 @@ test('batch eligibility separates external adoption from managed deletion and pr
 })
 
 test('batch previews explain each rule, source and zone in both languages',async()=>{
- const {securityRuleChange}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
- assert.equal(securityRuleChange('delete allow:tcp/udp:8080:8080:any:','zh-CN'),'删除 · 允许 8080/TCP + UDP · 任意 IP')
+ const {securityRuleChange,formatProtocol}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+ assert.equal(formatProtocol('tcp'),'TCP')
+ assert.equal(formatProtocol('udp'),'UDP')
+ assert.equal(formatProtocol('tcp/udp'),'TCP+UDP')
+ assert.equal(formatProtocol('tcp+udp'),'TCP+UDP')
+ assert.equal(formatProtocol('ipv6-icmp'),'IPv6-ICMP')
+ assert.equal(securityRuleChange('delete allow:tcp/udp:8080:8080:any:','zh-CN'),'删除 · 允许 8080/TCP+UDP · 任意 IP')
+ assert.equal(securityRuleChange('allow:tcp:80:80:any:','zh-CN'),'添加 · 允许 80/TCP · 任意 IP')
+ assert.equal(securityRuleChange('allow:tcp+udp:8080:8080:any:','zh-CN'),'添加 · 允许 8080/TCP+UDP · 任意 IP')
  assert.equal(securityRuleChange('adopt deny:tcp:9000:9010:2001:db8::/64:public','en-US'),'Adopt · deny 9000–9010/TCP · 2001:db8::/64 · Zone public')
  assert.equal(securityRuleChange('unknown error','zh-CN'),null)
 })

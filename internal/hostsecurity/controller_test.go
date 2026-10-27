@@ -484,3 +484,102 @@ func TestSingleHostCIDRMatchesNativeAddress(t *testing.T) {
 		t.Fatal("ambiguous mapped CIDR accepted")
 	}
 }
+
+func TestFirewallAddTCPUDPExpandsBothProtocols(t *testing.T) {
+	c := testController(t)
+	ctx := context.Background()
+
+	addedRules := []string{"ufw allow 46961/tcp", "ufw allow 9443/tcp", "ufw allow 8080/tcp"}
+	baseRun := c.Run
+	c.Run = func(ctx context.Context, n string, a []string, in string) (string, error) {
+		args := strings.Join(a, " ")
+		if n == "ufw" {
+			if args == "show added" {
+				return "Added user rules:\n" + strings.Join(addedRules, "\n"), nil
+			}
+			if strings.HasPrefix(args, "allow ") {
+				addedRules = append(addedRules, "ufw "+args)
+				return "", nil
+			}
+		}
+		return baseRun(ctx, n, a, in)
+	}
+
+	// 1. Preview adding a tcp/udp rule expands to both tcp and udp changes
+	req := model.SecurityRequest{
+		Operation: "add",
+		Rule: model.SecurityRule{
+			Action:   "allow",
+			Protocol: "tcp/udp",
+			PortFrom: 7788,
+			Source:   "any",
+		},
+	}
+	p, err := c.Preview(ctx, "firewall", req)
+	if err != nil {
+		t.Fatalf("preview tcp/udp add: %v", err)
+	}
+	if len(p.Changes) != 2 || p.Changes[0] != "allow:tcp:7788:7788:any:" || p.Changes[1] != "allow:udp:7788:7788:any:" {
+		t.Fatalf("unexpected changes: %+v", p.Changes)
+	}
+	if p.NeedsConfirmation {
+		t.Fatal("allow rule should not require confirmation")
+	}
+
+	// 2. Preview adding a tcp+udp rule also expands to both
+	req2 := model.SecurityRequest{
+		Operation: "add",
+		Rule: model.SecurityRule{
+			Action:   "allow",
+			Protocol: "tcp+udp",
+			PortFrom: 7789,
+			Source:   "any",
+		},
+	}
+	p2, err := c.Preview(ctx, "firewall", req2)
+	if err != nil {
+		t.Fatalf("preview tcp+udp add: %v", err)
+	}
+	if len(p2.Changes) != 2 || p2.Changes[0] != "allow:tcp:7789:7789:any:" || p2.Changes[1] != "allow:udp:7789:7789:any:" {
+		t.Fatalf("unexpected changes: %+v", p2.Changes)
+	}
+
+	// 3. Applying req adds both rules
+	req.Revision = p.Revision
+	res, err := c.Apply(ctx, "firewall", req)
+	if err != nil {
+		t.Fatalf("apply tcp/udp: %v", err)
+	}
+	foundTCP, foundUDP := false, false
+	for _, r := range res.Firewall.Rules {
+		if r.PortFrom == 7788 && r.Protocol == "tcp" {
+			foundTCP = true
+		}
+		if r.PortFrom == 7788 && r.Protocol == "udp" {
+			foundUDP = true
+		}
+	}
+	if !foundTCP || !foundUDP {
+		t.Fatalf("expected both tcp and udp rules for 7788, got: %+v", res.Firewall.Rules)
+	}
+
+	// 4. Duplicate add fails
+	pDup, err := c.Preview(ctx, "firewall", req)
+	if err == nil || !strings.Contains(err.Error(), "已有相同规则") {
+		t.Fatalf("expected duplicate rule error, got: %+v, %v", pDup, err)
+	}
+
+	// 5. Protected port block fails
+	denyReq := model.SecurityRequest{
+		Operation: "add",
+		Rule: model.SecurityRule{
+			Action:   "deny",
+			Protocol: "tcp/udp",
+			PortFrom: 46961,
+			Source:   "any",
+		},
+	}
+	if _, err := c.Preview(ctx, "firewall", denyReq); err == nil || !strings.Contains(err.Error(), "不能拒绝") {
+		t.Fatalf("expected cannot deny protected port error, got: %v", err)
+	}
+}
