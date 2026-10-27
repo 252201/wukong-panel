@@ -368,13 +368,14 @@ const isTunnelProtocol = computed(() => createForm.protocol === 'vless-ws-tunnel
 
 const flattenedRealityPresets = computed(() => flattenRealityPresets(realityPresets))
 const activeRealityPreset = computed(() => findRealityPreset(createForm.domain, realityPresets))
-function selectRealityPreset(e: Event) {
-  const target = e.target as HTMLSelectElement
-  if (target && target.value) {
-    createForm.domain = target.value
-    target.value = ''
-  }
+const realityPickerOpen = ref(false)
+function chooseRealityPreset(domain: string) {
+  createForm.domain = domain
+  realityPickerOpen.value = false
 }
+watch(() => [modal.value, createForm.protocol], () => {
+  realityPickerOpen.value = false
+})
 
 function bytes(value = 0, fractionDigits?: number) {
   if (!Number.isFinite(value)) return '—'
@@ -2294,7 +2295,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
   <div v-if="mustChange && authenticated" class="modal-backdrop locked"><form class="modal-card compact" @submit.prevent="changePassword"><span class="modal-seal">钥</span><p class="eyebrow">首次登录安全检查</p><h2>设置新的管理员密码</h2><p>密码至少 12 位。提交后所有会话将失效，需要重新登录。</p><label>新密码<input v-model="newPassword" type="password" minlength="12" autocomplete="new-password" required></label><button class="primary wide" :disabled="busy">保存并重新登录</button></form></div>
 
   <div v-if="modal" class="modal-backdrop" @click.self="modal === 'fleet-host-action' ? closeFleetHostAction() : modal = null">
-    <form v-if="modal === 'create' || modal === 'device-create' || modal === 'edit'" class="modal-card node-form" @submit.prevent="createNode">
+    <form v-if="modal === 'create' || modal === 'device-create' || modal === 'edit'" class="modal-card node-form" @click="realityPickerOpen = false" @submit.prevent="createNode">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <p class="eyebrow">{{ deviceMode ? 'DEPLOY DEVICE FLEET' : isEditing ? 'EDIT MANAGED NODE' : 'DEPLOY PROXY NODE' }}</p><h2>{{ deviceMode ? '部署设备专用节点' : isEditing ? `重新编辑 ${selectedNode?.name}` : '部署一座新节点' }}</h2>
       <p v-if="isEditing" class="form-hint edit-safety-hint">保存前会建立配置快照并校验；重启失败自动恢复原配置。协议与凭据不会在编辑中改变。</p>
@@ -2311,19 +2312,41 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <span v-if="createForm.protocol !== 'vless'">{{ selectedProtocolInfo.domainLabel }}</span>
           <div v-else class="field-title-row">
             <span>{{ selectedProtocolInfo.domainLabel }}</span>
-            <select
-              class="reality-quick-select"
-              value=""
-              title="快速选用推荐伪装域名"
-              @change="selectRealityPreset"
-            >
-              <option value="" disabled selected>快捷选用推荐域名</option>
-              <optgroup v-for="cat in realityPresets" :key="cat.category" :label="cat.category">
-                <option v-for="item in cat.items" :key="item.domain" :value="item.domain">
-                  {{ item.title }} · {{ item.domain }}
-                </option>
-              </optgroup>
-            </select>
+            <div class="reality-picker-wrap" @keydown.esc.stop="realityPickerOpen = false">
+              <button
+                type="button"
+                class="reality-quick-select"
+                :class="{ open: realityPickerOpen }"
+                :aria-expanded="realityPickerOpen"
+                title="快速选用推荐伪装域名"
+                @click.prevent.stop="realityPickerOpen = !realityPickerOpen"
+              >
+                <span>快捷选用推荐域名</span>
+                <i class="reality-caret" aria-hidden="true">▾</i>
+              </button>
+              <div v-if="realityPickerOpen" class="reality-quick-menu" role="listbox" aria-label="快捷选用推荐域名" @click.stop>
+                <div class="reality-menu-head">快捷选用推荐域名</div>
+                <div v-for="cat in realityPresets" :key="cat.category" class="reality-menu-group">
+                  <div class="reality-menu-category">{{ cat.category }}</div>
+                  <button
+                    v-for="item in cat.items"
+                    :key="item.domain"
+                    type="button"
+                    role="option"
+                    class="reality-menu-option"
+                    :class="{ active: activeRealityPreset?.domain === item.domain }"
+                    :aria-selected="activeRealityPreset?.domain === item.domain"
+                    @click.prevent.stop="chooseRealityPreset(item.domain)"
+                  >
+                    <span class="reality-opt-title">
+                      <i class="reality-opt-check" aria-hidden="true">{{ activeRealityPreset?.domain === item.domain ? '✓' : '' }}</i>
+                      <span>{{ item.title }}</span>
+                    </span>
+                    <code class="reality-opt-domain">{{ item.domain }}</code>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           <input
             v-model="createForm.domain"
