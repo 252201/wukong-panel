@@ -1903,3 +1903,154 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .update-success-subhint {
   color: #047857;
 }
+
+/* Fleet odd-host companion card (Plan A: Global Nexus + Quick Enrollment) */
+.fleet-companion-card {
+  position: relative;
+  border-color: rgba(211, 169, 77, 0.26);
+  background: linear-gradient(145deg, var(--surface-card-start), var(--surface-card-end));
+}
+.fleet-companion-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--gold), var(--jade) 55%, transparent);
+  pointer-events: none;
+}
+.fleet-companion-card::after {
+  content: "阵";
+  position: absolute;
+  right: 12px;
+  top: 56px;
+  color: rgba(212, 173, 87, 0.032);
+  font-family: "STKaiti", "Kaiti SC", serif;
+  font-size: 132px;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+.fleet-companion-seal {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid rgba(211, 169, 77, 0.42);
+  background: rgba(211, 169, 77, 0.09);
+  color: var(--gold);
+  font-family: "STKaiti", "Kaiti SC", serif;
+  font-size: 13px;
+  line-height: 1;
+  transform: rotate(-2deg);
+}
+.fleet-companion-card > header .fleet-nexus-badge {
+  border-color: rgba(82, 182, 144, 0.34);
+  background: rgba(82, 182, 144, 0.08);
+  color: var(--jade-text);
+  font: 600 9px/1.35 "IBM Plex Mono", monospace;
+  letter-spacing: 0.11em;
+}
+.fleet-companion-card .fleet-resource b.nexus-expiry-danger {
+  color: var(--danger-text);
+}
+.fleet-companion-card .fleet-resource b.nexus-expiry-warning {
+  color: #ea9932;
+}
+.fleet-companion-card .fleet-resource b.nexus-expiry-info,
+.fleet-companion-card .fleet-resource b.nexus-version-warn {
+  color: var(--gold);
+}
+.fleet-companion-card .fleet-resource b.nexus-version-ok {
+  color: var(--jade-text);
+}
+.fleet-companion-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid rgba(211, 169, 77, 0.25);
+  background: rgba(211, 169, 77, 0.07);
+  color: var(--gold);
+  font: 600 10px/1.35 "IBM Plex Mono", monospace;
+  white-space: nowrap;
+}
+.fleet-companion-enroll .fleet-enroll-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 7px;
+}
+.fleet-enroll-col-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.fleet-enroll-card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 31px;
+  padding: 5px 10px;
+  border: 1px dashed rgba(211, 169, 77, 0.36);
+  background: rgba(var(--wash-rgb), 0.025);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.fleet-enroll-card-btn span {
+  color: var(--gold);
+  font-weight: 700;
+}
+.fleet-enroll-card-btn.primary-accent {
+  border-style: solid;
+  border-color: rgba(211, 169, 77, 0.42);
+  background: linear-gradient(105deg, rgba(211, 169, 77, 0.12), rgba(82, 182, 144, 0.05));
+}
+.fleet-enroll-card-btn:not(:disabled):hover,
+.fleet-enroll-card-btn:not(:disabled):focus-visible {
+  border-style: solid;
+  border-color: var(--gold);
+  background: rgba(211, 169, 77, 0.16);
+  color: var(--gold-bright);
+  transform: translateY(-1px);
+}
+.fleet-enroll-active-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--jade-text) !important;
+  font-weight: 600;
+}
+.enroll-ready-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--jade);
+  box-shadow: 0 0 8px rgba(74, 172, 130, 0.65);
+}
+.fleet-companion-card footer button.enroll-copy-inline-btn {
+  border-color: rgba(74, 172, 130, 0.42);
+  color: var(--jade-text);
+}
+:root[data-effective-theme="light"] .fleet-companion-card {
+  border-color: rgba(169, 122, 36, 0.28);
+}
+:root[data-effective-theme="light"] .fleet-companion-card::after {
+  color: rgba(169, 122, 36, 0.045);
+}
+:root[data-effective-theme="light"] .fleet-enroll-card-btn {
+  background: rgba(255, 255, 255, 0.68);
+  border-color: rgba(169, 122, 36, 0.34);
+}
+:root[data-effective-theme="light"] .fleet-enroll-card-btn.primary-accent {
+  background: linear-gradient(105deg, rgba(211, 169, 77, 0.14), rgba(82, 182, 144, 0.08));
+  border-color: rgba(169, 122, 36, 0.45);
+}
