@@ -1946,6 +1946,25 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   line-height: 1;
   transform: rotate(-2deg);
 }
+.fleet-companion-seal.jade-seal {
+  border-color: rgba(82, 182, 144, 0.42);
+  background: rgba(82, 182, 144, 0.09);
+  color: var(--jade-text);
+}
+.fleet-companion-enroll-card::after {
+  content: "拓";
+  color: rgba(82, 182, 144, 0.035);
+}
+.fleet-companion-split-card .fleet-split-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 18px;
+}
+.fleet-companion-enroll.fleet-companion-enroll-split {
+  padding-top: 0;
+  border-top: 0;
+}
 .fleet-companion-card > header .fleet-nexus-badge {
   border-color: rgba(82, 182, 144, 0.34);
   background: rgba(82, 182, 144, 0.08);
