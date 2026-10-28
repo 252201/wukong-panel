@@ -162,4 +162,15 @@ grep -Fqx "sing-box:check -c $TMP/configs/node.json" "$TMP/reload.log"
 grep -Fqx 'nginx:-t' "$TMP/reload.log"
 grep -Fqx 'systemctl:reload nginx.service' "$TMP/reload.log"
 
+cat > "$TMP/env-empty-tls" <<EOF
+WUKONG_TLS_CERT=
+WUKONG_SINGBOX_CONFIG_DIR=$TMP/configs
+WUKONG_SINGBOX_BIN=$TMP/sing-box
+EOF
+: > "$TMP/reload-empty.log"
+PATH="$TMP/bin:$PATH" WUKONG_TEST_LOG="$TMP/reload-empty.log" WUKONG_ENV_FILE="$TMP/env-empty-tls" sh "$TMP/wukong-cert-reload"
+! grep -q '^sing-box:' "$TMP/reload-empty.log"
+grep -Fqx 'nginx:-t' "$TMP/reload-empty.log"
+grep -Fqx 'systemctl:reload nginx.service' "$TMP/reload-empty.log"
+
 echo "installer certificate renewal: ok"

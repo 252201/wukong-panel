@@ -55,18 +55,38 @@ if [ "$ACTION" = install ]; then
 else
   [ -r "$CONFIG_DIR/config.json" ] || fail "未检测到已接入的探针"
 fi
+if ! command -v curl >/dev/null 2>&1; then
+  info "未检测到 curl，正在自动安装 ca-certificates 与 curl"
+  case "$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"')" in
+    debian|ubuntu)
+      apt-get update -qq >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl >/dev/null 2>&1 || true
+      ;;
+    rocky|almalinux|rhel|centos)
+      dnf install -y -q ca-certificates curl >/dev/null 2>&1 || true
+      ;;
+    alpine)
+      apk add -q ca-certificates curl >/dev/null 2>&1 || true
+      ;;
+  esac
+fi
 command -v curl >/dev/null 2>&1 || fail "需要 curl；安装 curl 和 ca-certificates 后重试"
-command -v sha256sum >/dev/null 2>&1 || fail "需要 sha256sum"
+command -v sha256sum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1 || fail "需要 sha256sum 或 openssl"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 BASE="https://github.com/$REPO/releases/$VERSION/download"
 if [ "$VERSION" = latest ]; then BASE="https://github.com/$REPO/releases/latest/download"; fi
 ASSET="wukong-probe-linux-$ARCH"
-curl -fsSL --retry 3 "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS" || fail "无法下载校验清单"
-curl -fsSL --retry 3 "$BASE/$ASSET" -o "$TMP/$ASSET" || fail "无法下载探针"
+curl -fsSL --connect-timeout 15 --max-time 60 --retry 3 "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS" || fail "无法下载校验清单"
+curl -fsSL --connect-timeout 15 --max-time 300 --retry 3 "$BASE/$ASSET" -o "$TMP/$ASSET" || fail "无法下载探针"
 EXPECTED=$(awk -v asset="$ASSET" '$2 == asset { print $1 }' "$TMP/SHA256SUMS")
 [ -n "$EXPECTED" ] || fail "校验清单缺少 $ASSET"
-printf '%s  %s\n' "$EXPECTED" "$TMP/$ASSET" | sha256sum -c - >/dev/null || fail "探针 SHA-256 校验失败"
+if command -v sha256sum >/dev/null 2>&1; then
+  printf '%s  %s\n' "$EXPECTED" "$TMP/$ASSET" | sha256sum -c - >/dev/null || fail "探针 SHA-256 校验失败"
+else
+  ACTUAL=$(openssl dgst -sha256 "$TMP/$ASSET" | awk '{print $NF}')
+  [ "$ACTUAL" = "$EXPECTED" ] || fail "探针 SHA-256 校验失败"
+fi
 chmod 0755 "$TMP/$ASSET"
 "$TMP/$ASSET" version >/dev/null || fail "探针二进制不可执行"
 if [ "$ACTION" = install ]; then
