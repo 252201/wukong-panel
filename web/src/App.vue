@@ -2068,7 +2068,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div><i></i><span class="fleet-host-head-text"><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates fleet-header-traffic-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
@@ -2102,7 +2102,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <header>
               <div>
                 <span class="fleet-companion-seal" aria-hidden="true">阵</span>
-                <span>
+                <span class="fleet-host-head-text">
                   <span class="fleet-host-title">
                     <b>舰队全局态势</b>
                     <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
@@ -2111,7 +2111,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </span>
               </div>
               <aside class="fleet-header-aside">
-                <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
+                <!-- 临时测试：单独关闭舰队全局态势卡片的实时流量上下行功能 -->
+                <div v-if="false" class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                   <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                 </div>
@@ -2192,7 +2193,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <header>
                 <div>
                   <span class="fleet-companion-seal" aria-hidden="true">阵</span>
-                  <span>
+                  <span class="fleet-host-head-text">
                     <span class="fleet-host-title">
                       <b>舰队全局态势</b>
                       <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
@@ -2201,7 +2202,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </span>
                 </div>
                 <aside class="fleet-header-aside">
-                  <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
+                  <!-- 临时测试：单独关闭舰队全局态势卡片的实时流量上下行功能 -->
+                  <div v-if="false" class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                     <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                     <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                   </div>
@@ -2254,7 +2256,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <header>
                 <div>
                   <span class="fleet-companion-seal jade-seal" aria-hidden="true">拓</span>
-                  <span>
+                  <span class="fleet-host-head-text">
                     <span class="fleet-host-title">
                       <b>快速扩容 · 接入新远端主机</b>
                       <span class="fleet-companion-pill">10 分钟一次性令牌</span>
