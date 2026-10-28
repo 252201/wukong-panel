@@ -2636,65 +2636,73 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
         </section>
         <section class="settings-grid">
-          <div class="settings-left-stack">
-            <article class="panel-card localization-settings">
-              <div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div>
-              <div class="settings-row-split">
-                <label>
-                  <span>界面语言</span>
-                  <select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
-                </label>
-                <label>
-                  <span>时区</span>
-                  <input v-model="settings.timezone" :disabled="mutationsDisabled" placeholder="Asia/Shanghai">
-                  <span class="settings-chip-row">
-                    <button v-for="tz in ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'America/Los_Angeles']" :key="tz" type="button" class="settings-preset-chip" :class="{ active: settings.timezone === tz }" :disabled="mutationsDisabled" @click="settings.timezone = tz">{{ tz }}</button>
-                  </span>
-                </label>
-              </div>
-              <div class="settings-row-split">
-                <label>
-                  <span>账期重置日</span>
-                  <input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled">
-                  <small>{{ language === 'en-US' ? 'Days 1-28 each month' : '每月 1～28 日' }}</small>
-                </label>
-                <label>
-                  <span>到期时间</span>
-                  <input v-model="settings.expiresAt" type="date" :disabled="mutationsDisabled">
-                  <small>{{ settings.expiresAt ? expiryLabel(settings.expiresAt) : (language === 'en-US' ? 'Leave empty for no expiry' : '留空表示长期有效') }}</small>
-                </label>
-              </div>
+          <article class="panel-card localization-settings">
+            <div class="setting-title"><span>时</span><div><h3>本地化与账期</h3><p>用于流量归档和面板时间</p></div></div>
+            <div class="settings-row-split">
               <label>
-                <span class="settings-label-head">
-                  <span>月流量额度（GB）</span>
-                  <span class="settings-chip-row">
-                    <button v-for="quota in [0, 500, 1000, 2000, 5000]" :key="quota" type="button" class="settings-preset-chip" :class="{ active: Math.round(settings.trafficQuotaBytes / 1_000_000_000) === quota }" :disabled="mutationsDisabled" @click="settings.trafficQuotaBytes = quota * 1_000_000_000">{{ quota === 0 ? '不限' : `${quota}G` }}</button>
-                  </span>
-                </span>
-                <input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000">
-                <small>0 表示不限量</small>
+                <span>界面语言</span>
+                <select v-model="settings.language" :disabled="mutationsDisabled"><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
               </label>
-            </article>
-            <article class="panel-card network-settings">
-              <div class="setting-title"><span>网</span><div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div></div>
               <label>
-                <span class="settings-label-head">
-                  <span>监控网卡</span>
-                  <span class="settings-chip-row">
-                    <button v-for="nic in ['auto', 'eth0', 'ens3']" :key="nic" type="button" class="settings-preset-chip" :class="{ active: settings.interface === nic }" :disabled="mutationsDisabled" @click="settings.interface = nic">{{ nic }}</button>
-                  </span>
+                <span>时区</span>
+                <input v-model="settings.timezone" :disabled="mutationsDisabled" placeholder="Asia/Shanghai">
+                <span class="settings-chip-row">
+                  <button v-for="tz in ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'America/Los_Angeles']" :key="tz" type="button" class="settings-preset-chip" :class="{ active: settings.timezone === tz }" :disabled="mutationsDisabled" @click="settings.timezone = tz">{{ tz }}</button>
                 </span>
-                <input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled">
               </label>
-              <label class="toggle-row"><span><b>采集客户端端点</b><small>关闭后仍保留整机流量统计</small></span><span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span></label>
-              <div class="host-settings-footer">
-                <small>{{ settingsDraftDirty ? '当前主机配置有未保存的更改' : '以上账期与网卡配置保存在当前主机' }}</small>
-                <button type="button" class="primary" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button>
+            </div>
+            <div class="settings-row-split">
+              <label>
+                <span>账期重置日</span>
+                <input v-model.number="settings.billingResetDay" type="number" min="1" max="28" :disabled="mutationsDisabled">
+                <small>{{ language === 'en-US' ? 'Days 1-28 each month' : '每月 1～28 日' }}</small>
+              </label>
+              <label>
+                <span>到期时间</span>
+                <input v-model="settings.expiresAt" type="date" :disabled="mutationsDisabled">
+                <small>{{ settings.expiresAt ? expiryLabel(settings.expiresAt) : (language === 'en-US' ? 'Leave empty for no expiry' : '留空表示长期有效') }}</small>
+              </label>
+            </div>
+            <label>
+              <span class="settings-label-head">
+                <span>月流量额度（GB）</span>
+                <span class="settings-chip-row">
+                  <button v-for="quota in [0, 500, 1000, 2000, 5000]" :key="quota" type="button" class="settings-preset-chip" :class="{ active: Math.round(settings.trafficQuotaBytes / 1_000_000_000) === quota }" :disabled="mutationsDisabled" @click="settings.trafficQuotaBytes = quota * 1_000_000_000">{{ quota === 0 ? '不限' : `${quota}G` }}</button>
+                </span>
+              </span>
+              <input :value="settings.trafficQuotaBytes / 1_000_000_000" type="number" min="0" :disabled="mutationsDisabled" @input="settings.trafficQuotaBytes = Number(($event.target as HTMLInputElement).value) * 1_000_000_000">
+              <small>0 表示不限量</small>
+            </label>
+          </article>
+          <article class="panel-card host-composite-settings">
+            <div class="composite-section network-settings-section">
+              <div class="setting-title composite-head-row">
+                <div class="setting-title-main">
+                  <span>网</span>
+                  <div><h3>网络采集</h3><p>自动识别默认出口网卡</p></div>
+                </div>
+                <button type="button" class="primary composite-save-btn" :disabled="mutationsDisabled" @click="saveSettings">保存更改</button>
               </div>
-            </article>
-          </div>
-          <div class="settings-right-stack">
-            <article class="panel-card subscription-settings">
+              <div class="settings-row-split network-split-row">
+                <label>
+                  <span class="settings-label-head">
+                    <span>监控网卡</span>
+                    <span class="settings-chip-row">
+                      <button v-for="nic in ['auto', 'eth0', 'ens3']" :key="nic" type="button" class="settings-preset-chip" :class="{ active: settings.interface === nic }" :disabled="mutationsDisabled" @click="settings.interface = nic">{{ nic }}</button>
+                    </span>
+                  </span>
+                  <input v-model="settings.interface" placeholder="auto" :disabled="mutationsDisabled">
+                </label>
+                <div class="network-endpoint-field">
+                  <span class="settings-label-head"><span>采集客户端端点</span></span>
+                  <label class="toggle-row compact-toggle-box">
+                    <span><small>关闭后仍保留整机流量统计</small></span>
+                    <span class="switch"><input v-model="settings.collectEndpoints" type="checkbox" :disabled="mutationsDisabled"><i></i></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="composite-section subscription-settings-section">
               <div class="setting-title">
                 <span>令</span>
                 <div>
@@ -2714,10 +2722,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </template>
               </div>
               <p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p>
-            </article>
-            <article class="panel-card danger-zone">
+            </div>
+            <div class="composite-section danger-zone-section">
               <div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div>
-              <p>卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p>
+              <p class="danger-desc">卸载与版本回滚请通过服务器上的 <code>wukongctl</code> 执行，避免浏览器会话误操作。</p>
               <div class="cli-ref-list">
                 <div class="cli-ref-item">
                   <span>重置管理员密码</span>
@@ -2734,8 +2742,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </div>
                 </div>
               </div>
-            </article>
-          </div>
+            </div>
+          </article>
         </section>
       </div>
     </section>
