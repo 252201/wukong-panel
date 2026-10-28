@@ -2064,13 +2064,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <div v-if="page === 'fleet'" class="page-content fleet-page">
         <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><div class="fleet-enroll-actions"><button class="primary" @click="createFleetEnrollment('panel')">＋ 接入面板</button><button class="secondary" @click="createFleetEnrollment('probe')">＋ 接入轻量探针</button></div></div>
-        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }}</em></article></section>
+        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article class="fleet-summary-traffic-card"><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }}</em></article></section>
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
               <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
               <aside class="fleet-header-aside">
-                <div class="fleet-header-rates" :title="fleetRateHint(host)">
+                <div class="fleet-header-rates fleet-header-traffic-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.txBps || 0) : '0 B/s' }}</b></span>
                 </div>
@@ -2111,7 +2111,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </span>
               </div>
               <aside class="fleet-header-aside">
-                <div class="fleet-header-rates" title="全舰队实时总吞吐速率">
+                <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                   <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                 </div>
@@ -2201,7 +2201,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </span>
                 </div>
                 <aside class="fleet-header-aside">
-                  <div class="fleet-header-rates" title="全舰队实时总吞吐速率">
+                  <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                     <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                     <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                   </div>
