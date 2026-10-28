@@ -590,7 +590,7 @@ func (c *Collector) processSnapshot(memoryTotal int64, nodeNamesByConfig map[str
 			name = statusName
 		}
 		var cmdline []byte
-		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") || (name != "cloudflared" && securityProcessCandidate(name)) {
+		if name == "wukong-panel" || name == "sing-box" || strings.HasPrefix(name, "ld-musl-") || (name != "cloudflared" && name != "systemd-journal" && name != "systemd-journald" && securityProcessCandidate(name)) {
 			cmdline, _ = os.ReadFile("/proc/" + entry.Name() + "/cmdline")
 		}
 		service := securityProcessService(name, cmdline)

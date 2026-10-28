@@ -10,6 +10,8 @@ func securityToolService(name string) string {
 	switch name {
 	case "cloudflared":
 		return "cloudflared"
+	case "systemd-journal", "systemd-journald":
+		return "systemd-journal"
 	case "fail2ban-server":
 		return "fail2ban"
 	case "fail2ban-client":
