@@ -230,6 +230,11 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .top-actions { display: flex; align-items: center; gap: 10px; }
 .clock { margin-right: 8px; color: var(--muted); font: 500 13px "IBM Plex Mono", monospace; }
 .avatar { display: grid; place-items: center; width: 36px; height: 36px; margin-left: 5px; border: 1px solid var(--gold-dark); border-radius: 50%; color: var(--gold-bright); background: rgba(212,173,87,.06); font: 600 14px "IBM Plex Mono", monospace; }
+.topbar-theme-toggle { display: grid; place-items: center; width: 38px; height: 38px; margin-left: 4px; padding: 0; border: 1px solid var(--gold-dark); border-radius: 50%; background: rgba(212,173,87,.06); cursor: pointer; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.topbar-theme-toggle .theme-swatch { width: 28px; height: 28px; border-color: rgba(212,173,87,.42); }
+.topbar-theme-toggle .theme-swatch b { width: 15px; height: 15px; }
+.topbar-theme-toggle .theme-swatch em { width: 6px; height: 6px; left: 5px; bottom: 5px; }
+.topbar-theme-toggle:hover, .topbar-theme-toggle:focus-visible { border-color: var(--gold); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(212,173,87,.18); outline: none; }
 .page-content { padding: clamp(24px, 3vw, 42px) clamp(22px, 3vw, 46px) 60px; }
 
 .panel-card { position: relative; background: linear-gradient(145deg, var(--surface-card-start), var(--surface-card-end)); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(var(--shadow-rgb),.12); }
@@ -799,6 +804,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .sidebar nav button.active i { border-color: #ffc982; color: #df7600; }
 :root[data-effective-theme="light"] .avatar { border-color: #ffc982; color: #d67200; background: #fff; }
+:root[data-effective-theme="light"] .topbar-theme-toggle { border-color: #ffc982; background: #fff; }
+:root[data-effective-theme="light"] .topbar-theme-toggle:hover, :root[data-effective-theme="light"] .topbar-theme-toggle:focus-visible { border-color: #f28a0b; box-shadow: 0 6px 18px rgba(242,138,11,.18); }
 :root[data-effective-theme="light"] .quota-ring {
   background: conic-gradient(from -90deg, #ff9518 0 var(--progress), rgba(242, 138, 11, .09) var(--progress) 360deg);
   filter: drop-shadow(0 10px 22px rgba(242, 138, 11, .1));
