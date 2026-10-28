@@ -15,11 +15,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
 
-var panelVersionPattern = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}$`)
+const defaultUpdateBackupRetention = 3
+
+var (
+	panelVersionPattern    = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}$`)
+	updateBackupDirPattern = regexp.MustCompile(`^update-\d{8}-\d{6}$`)
+)
 
 type panelReleasePayload struct {
 	TagName string `json:"tag_name"`
@@ -224,6 +230,8 @@ func (m *Manager) PanelUpdate(ctx context.Context, targetVersion string) error {
 		_ = os.Symlink(destBin, ctlSymlink)
 	}
 
+	m.PruneUpdateBackups(defaultUpdateBackupRetention)
+
 	_ = m.store.Audit("agent", "panel.update", "local", cleanVer)
 
 	// 6. Asynchronous service restart
@@ -313,4 +321,39 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	return out.Sync()
+}
+
+func (m *Manager) PruneUpdateBackups(keep int) {
+	if m == nil || m.cfg.Demo || strings.TrimSpace(m.cfg.DataDir) == "" {
+		return
+	}
+	pruneUpdateBackupsDir(filepath.Join(m.cfg.DataDir, "backups"), keep)
+}
+
+func pruneUpdateBackupsDir(backupRoot string, keep int) {
+	if keep < 0 {
+		keep = 0
+	}
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		return
+	}
+	var candidates []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !updateBackupDirPattern.MatchString(name) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(backupRoot, name, ".rollback-required")); err == nil {
+			continue
+		}
+		candidates = append(candidates, name)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
+	for i := keep; i < len(candidates); i++ {
+		_ = os.RemoveAll(filepath.Join(backupRoot, candidates[i]))
+	}
 }

@@ -66,6 +66,7 @@ type bindingAddressState struct {
 }
 
 func (m *Manager) RunReconciler(ctx context.Context) {
+	m.PruneUpdateBackups(defaultUpdateBackupRetention)
 	for errors.Join(m.recoverCloudflared(ctx), m.recoverSingBox(ctx)) != nil {
 		select {
 		case <-ctx.Done():
