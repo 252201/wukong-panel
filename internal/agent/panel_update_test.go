@@ -95,6 +95,52 @@ func TestPanelUpdateSuccessWithValidSHA256(t *testing.T) {
 	}
 }
 
+func TestPruneUpdateBackupsRetainsLatestThreeAndPreservesRollbackMarker(t *testing.T) {
+	dataDir := t.TempDir()
+	backupRoot := filepath.Join(dataDir, "backups")
+	for _, ts := range []string{
+		"20260901-000001",
+		"20260901-000002",
+		"20260901-000003",
+		"20260901-000004",
+		"20260901-000005",
+	} {
+		if err := os.MkdirAll(filepath.Join(backupRoot, "update-"+ts), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Mark the oldest backup as requiring rollback so it is never pruned
+	if err := os.WriteFile(filepath.Join(backupRoot, "update-20260901-000001", ".rollback-required"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated backup directory must not be touched
+	if err := os.MkdirAll(filepath.Join(backupRoot, "sing-box"), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(config.Config{DataDir: dataDir, Demo: false}, nil, nil)
+	m.PruneUpdateBackups(defaultUpdateBackupRetention)
+
+	// 000001 preserved due to .rollback-required
+	if _, err := os.Stat(filepath.Join(backupRoot, "update-20260901-000001")); err != nil {
+		t.Fatalf("rollback-required backup was removed: %v", err)
+	}
+	// 000002 pruned
+	if _, err := os.Stat(filepath.Join(backupRoot, "update-20260901-000002")); !os.IsNotExist(err) {
+		t.Fatalf("expected oldest completed backup 000002 to be pruned, got err=%v", err)
+	}
+	// 000003, 000004, 000005 retained
+	for _, ts := range []string{"20260901-000003", "20260901-000004", "20260901-000005"} {
+		if _, err := os.Stat(filepath.Join(backupRoot, "update-"+ts)); err != nil {
+			t.Fatalf("expected newest backup %s to be retained: %v", ts, err)
+		}
+	}
+	// Unrelated directory preserved
+	if _, err := os.Stat(filepath.Join(backupRoot, "sing-box")); err != nil {
+		t.Fatalf("expected sing-box directory to be preserved: %v", err)
+	}
+}
+
 func stringsContains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || (len(s) > 0 && len(sub) > 0 && containsHelper(s, sub)))
 }
