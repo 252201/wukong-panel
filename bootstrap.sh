@@ -8,8 +8,31 @@ INSTALL_URL=${WUKONG_INSTALL_URL:-https://github.com/252201/wukong-panel/release
   exit 1
 }
 
+if ! command -v curl >/dev/null 2>&1; then
+  case "$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"')" in
+    debian|ubuntu)
+      apt-get update -qq >&2
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl >&2
+      ;;
+    rocky|almalinux|rhel|centos)
+      dnf install -y -q ca-certificates curl >&2
+      ;;
+    alpine)
+      apk add -q ca-certificates curl >&2
+      ;;
+    *)
+      if command -v wget >/dev/null 2>&1; then
+        wget -qO- "$INSTALL_URL" | sh -s -- "$@"
+        exit 0
+      fi
+      printf '%s\n' '找不到 curl 或 wget，且当前系统没有受支持的包管理器。请先安装 curl。' >&2
+      exit 1
+      ;;
+  esac
+fi
+
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL --retry 3 "$INSTALL_URL" | sh -s -- "$@"
+  curl -fsSL --connect-timeout 15 --max-time 180 --retry 3 "$INSTALL_URL" | sh -s -- "$@"
   exit 0
 fi
 
@@ -18,21 +41,5 @@ if command -v wget >/dev/null 2>&1; then
   exit 0
 fi
 
-case "$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -1 | tr -d '"')" in
-  debian|ubuntu)
-    apt-get update -qq >&2
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl >&2
-    ;;
-  rocky|almalinux|rhel|centos)
-    dnf install -y -q ca-certificates curl >&2
-    ;;
-  alpine)
-    apk add -q ca-certificates curl >&2
-    ;;
-  *)
-    printf '%s\n' '找不到 curl 或 wget，且当前系统没有受支持的包管理器。请先安装 curl。' >&2
-    exit 1
-    ;;
-esac
-
-curl -fsSL --retry 3 "$INSTALL_URL" | sh -s -- "$@"
+printf '%s\n' '找不到 curl 或 wget，请先安装 curl。' >&2
+exit 1

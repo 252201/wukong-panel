@@ -505,15 +505,15 @@ install_runtime_packages() {
     apt)
       run_quiet apt-get update -qq || die "软件源更新失败"
       run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        ca-certificates curl openssl nginx tcpdump tar iproute2 || die "运行依赖安装失败"
+        ca-certificates curl openssl nginx tcpdump tar iproute2 socat || die "运行依赖安装失败"
       ;;
     dnf)
       run_quiet dnf install -y -q \
-        ca-certificates curl openssl nginx tcpdump tar iproute shadow-utils || die "运行依赖安装失败"
+        ca-certificates curl openssl nginx tcpdump tar iproute shadow-utils socat || die "运行依赖安装失败"
       ;;
     apk)
       run_quiet apk add -q \
-        ca-certificates curl openssl nginx tcpdump tar iproute2 || die "运行依赖安装失败"
+        ca-certificates curl openssl nginx tcpdump tar iproute2 socat || die "运行依赖安装失败"
       ;;
   esac
   for runtime_command in curl openssl nginx tar ss; do
@@ -776,8 +776,8 @@ download_panel_binary() {
       case "$VERSION" in v*) ;; *) VERSION="v$VERSION" ;; esac
       BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
     fi
-    curl -fL --retry 3 "$BASE_URL/wukong-panel-linux-${ASSET_ARCH}" -o "$TMP_DIR/wukong-panel"
-    curl -fL --retry 3 "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
+    curl -fL --connect-timeout 15 --max-time 300 --retry 3 "$BASE_URL/wukong-panel-linux-${ASSET_ARCH}" -o "$TMP_DIR/wukong-panel"
+    curl -fL --connect-timeout 15 --max-time 60 --retry 3 "$BASE_URL/SHA256SUMS" -o "$TMP_DIR/SHA256SUMS"
     expected=$(awk -v file="wukong-panel-linux-${ASSET_ARCH}" '$2 == file {print $1}' "$TMP_DIR/SHA256SUMS")
     [ -n "$expected" ] || die "发布清单中没有当前架构"
     actual=$(sha256_file "$TMP_DIR/wukong-panel")
@@ -966,7 +966,10 @@ config_dir=$(env_value WUKONG_SINGBOX_CONFIG_DIR)
 singbox_bin=$(env_value WUKONG_SINGBOX_BIN)
 config_dir=${config_dir:-/etc/s-box}
 singbox_bin=${singbox_bin:-/etc/s-box/sing-box}
-[ -r "$tls_cert" ] || { printf 'Wukong TLS certificate is unavailable: %s\n' "$tls_cert" >&2; exit 1; }
+if [ -n "$tls_cert" ] && [ ! -r "$tls_cert" ]; then
+  printf 'Wukong TLS certificate is unavailable: %s\n' "$tls_cert" >&2
+  exit 1
+fi
 
 restarted=" "
 failed=0
@@ -993,20 +996,22 @@ restart_openrc_config() {
   done
 }
 
-for config in "$config_dir"/*.json; do
-  [ -f "$config" ] || continue
-  grep -F "$tls_cert" "$config" >/dev/null 2>&1 || continue
-  if ! "$singbox_bin" check -c "$config"; then
-    printf 'Refusing to restart invalid sing-box config: %s\n' "$config" >&2
-    failed=1
-    continue
-  fi
-  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-    restart_systemd_config "$config"
-  elif command -v rc-service >/dev/null 2>&1; then
-    restart_openrc_config "$config"
-  fi
-done
+if [ -n "$tls_cert" ]; then
+  for config in "$config_dir"/*.json; do
+    [ -f "$config" ] || continue
+    grep -F "$tls_cert" "$config" >/dev/null 2>&1 || continue
+    if ! "$singbox_bin" check -c "$config"; then
+      printf 'Refusing to restart invalid sing-box config: %s\n' "$config" >&2
+      failed=1
+      continue
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+      restart_systemd_config "$config"
+    elif command -v rc-service >/dev/null 2>&1; then
+      restart_openrc_config "$config"
+    fi
+  done
+fi
 
 if command -v nginx >/dev/null 2>&1; then
   nginx -t
@@ -1170,7 +1175,7 @@ configure_subscription_domain() {
     case "$ACME_METHOD" in http|cloudflare) ;; *) die "独立订阅域名必须使用 http、cloudflare 或导入现有可信证书" ;; esac
     [ -n "$EMAIL" ] || EMAIL="admin@$(printf '%s' "$subscription_domain" | cut -d. -f2-)"
     if [ ! -x /root/.acme.sh/acme.sh ]; then
-      curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" >/dev/null
+      curl -fsSL --connect-timeout 15 --max-time 180 https://get.acme.sh | sh -s email="$EMAIL" --nocron >/dev/null
     fi
     subscription_acme_status=0
     if [ "$ACME_METHOD" = "http" ]; then
@@ -1226,11 +1231,15 @@ configure_subscription_domain() {
     subscription_nginx_backup="$TMP_DIR/wukong-subscription.conf.previous"
     cp "$subscription_nginx_config" "$subscription_nginx_backup"
   fi
+  subscription_listen_ipv6="listen [::]:443 ssl;"
+  if [ ! -e /proc/net/if_inet6 ]; then
+    subscription_listen_ipv6="# listen [::]:443 ssl; (IPv6 disabled on host)"
+  fi
   cat >"$subscription_nginx_config" <<EOF_WUKONG_SUBSCRIPTION_NGINX
 # Managed by Wukong Panel subscription gateway
 server {
     listen 443 ssl;
-    listen [::]:443 ssl;
+    $subscription_listen_ipv6
     server_name $subscription_domain;
 
     ssl_certificate $subscription_tls_cert;
@@ -1454,7 +1463,7 @@ download_singbox_binary() {
   download_archive="sing-box-${download_target_version}-linux-${ASSET_ARCH}.tar.gz"
   download_url="https://github.com/SagerNet/sing-box/releases/download/v${download_target_version}/${download_archive}"
   info "下载悟空验证版本 sing-box $download_target_version（linux-$ASSET_ARCH）"
-  curl -fL --retry 3 "$download_url" -o "$TMP_DIR/$download_archive"
+  curl -fL --connect-timeout 15 --max-time 300 --retry 3 "$download_url" -o "$TMP_DIR/$download_archive"
   download_actual=$(sha256_file "$TMP_DIR/$download_archive")
   [ "$download_actual" = "$download_expected" ] || die "sing-box 官方资产 SHA-256 校验失败"
   tar -xzf "$TMP_DIR/$download_archive" -C "$TMP_DIR"
@@ -1956,6 +1965,11 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --action|--residential-endpoint|--residential-public-key|--sing-box-version|--version|--join-controller|--enrollment-token|--host-name|--configure-subscription-domain|--domain|--port|--base-path|--acme|--acme-ip-version|--cert-file|--key-file|--email|--firewall-mode|--firewall-ports|--firewall-action|--firewall-open|--binary)
+      [ "$#" -ge 2 ] && [ -n "${2:-}" ] || die "参数 $1 缺少有效值"
+      ;;
+  esac
+  case "$1" in
     --action) ACTION="$2"; HAS_CONFIG_ARGS=true; shift 2 ;;
     --update) ACTION=update; HAS_CONFIG_ARGS=true; shift ;;
     --start|--start-panel) ACTION=start; HAS_CONFIG_ARGS=true; shift ;;
@@ -2243,6 +2257,7 @@ if [ "$ACTION" = "update" ]; then
   exit 0
 fi
 if [ "$ACTION" = "reset-password" ]; then
+  install_download_tools
   reset_panel_password
   exit 0
 fi
@@ -2305,7 +2320,7 @@ if [ -n "$CERT_FILE" ] || [ -n "$KEY_FILE" ]; then
 elif [ "$ACME_METHOD" = "http" ] || [ "$ACME_METHOD" = "cloudflare" ]; then
   [ -n "$DOMAIN" ] || die "ACME 申请需要 --domain"
   [ -n "$EMAIL" ] || EMAIL="admin@$(printf '%s' "$DOMAIN" | cut -d. -f2-)"
-  if [ ! -x /root/.acme.sh/acme.sh ]; then curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" >/dev/null; fi
+  if [ ! -x /root/.acme.sh/acme.sh ]; then curl -fsSL --connect-timeout 15 --max-time 180 https://get.acme.sh | sh -s email="$EMAIL" --nocron >/dev/null; fi
   ACME_ISSUE_STATUS=0
   if [ "$ACME_METHOD" = "http" ]; then
     if [ -n "$(port80_listener_lines)" ]; then
@@ -2420,6 +2435,7 @@ WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
   systemctl enable --now wukong-agent.service wukong-web.service
+  systemctl restart wukong-agent.service wukong-web.service
 else
   # OpenRC's start-stop-daemon opens these files after switching to command_user.
   # Pre-create them for the unprivileged Web process and keep reinstallations
@@ -2484,10 +2500,14 @@ fi
 
 SERVER_NAME=${DOMAIN:-_}
 if [ "$FAMILY" = "apk" ]; then NGINX_PANEL_CONF=/etc/nginx/http.d/wukong-panel.conf; else NGINX_PANEL_CONF=/etc/nginx/conf.d/wukong-panel.conf; fi
+PANEL_LISTEN_IPV6="listen [::]:$PORT ssl;"
+if [ ! -e /proc/net/if_inet6 ]; then
+  PANEL_LISTEN_IPV6="# listen [::]:$PORT ssl; (IPv6 disabled on host)"
+fi
 cat > "$NGINX_PANEL_CONF" <<EOF
 server {
     listen $PORT ssl;
-    listen [::]:$PORT ssl;
+    $PANEL_LISTEN_IPV6
     server_name $SERVER_NAME;
     ssl_certificate $TLS_CERT;
     ssl_certificate_key $TLS_KEY;
