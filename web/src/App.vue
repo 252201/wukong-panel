@@ -2111,7 +2111,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </span>
               </div>
               <aside class="fleet-header-aside">
-                <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
+                <!-- 临时测试：单独关闭舰队全局态势卡片的实时流量上下行功能 -->
+                <div v-if="false" class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                   <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                   <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                 </div>
@@ -2201,7 +2202,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </span>
                 </div>
                 <aside class="fleet-header-aside">
-                  <div class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
+                  <!-- 临时测试：单独关闭舰队全局态势卡片的实时流量上下行功能 -->
+                  <div v-if="false" class="fleet-header-rates fleet-header-traffic-rates" title="全舰队实时总吞吐速率">
                     <span class="fleet-rate-down">↓ <b>{{ rate(fleetAggregate.rx) }}</b></span>
                     <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                   </div>

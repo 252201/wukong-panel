@@ -2041,6 +2041,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   padding-top: 0;
   border-top: 0;
 }
+.fleet-companion-card > header .fleet-header-traffic-rates {
+  display: none !important;
+}
 .fleet-companion-card > header .fleet-nexus-badge {
   border-color: rgba(82, 182, 144, 0.34);
   background: rgba(82, 182, 144, 0.08);
