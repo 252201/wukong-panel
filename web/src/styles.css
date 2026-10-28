@@ -1230,7 +1230,16 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   overflow: hidden;
 }
 .fleet-host-card > header > div { min-width: 0; flex: 1 1 auto; overflow: hidden; }
-.fleet-host-card > header > div > span { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+.fleet-host-card > header > div > .fleet-host-head-text,
+.fleet-host-card > header > div > span:not(.fleet-companion-seal) { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+.fleet-host-card > header .fleet-companion-seal {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  box-sizing: border-box;
+}
 .fleet-host-card > header > div b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-host-card > header > div > span > .fleet-host-title { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .fleet-host-card > header .fleet-host-title b { min-width: 0; }
@@ -2000,8 +2009,11 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   display: inline-grid;
   place-items: center;
   width: 24px;
+  min-width: 24px;
+  max-width: 24px;
   height: 24px;
   flex: 0 0 24px;
+  box-sizing: border-box;
   border: 1px solid rgba(211, 169, 77, 0.42);
   background: rgba(211, 169, 77, 0.09);
   color: var(--gold);
