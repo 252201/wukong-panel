@@ -22,6 +22,13 @@ export function effectiveTheme(preference: ThemePreference): EffectiveTheme {
   return window.matchMedia(systemThemeQuery).matches ? 'light' : 'dark'
 }
 
+export function nextToggledThemePreference(preference: ThemePreference): ThemePreference {
+  const currentEffective = effectiveTheme(preference)
+  const targetEffective: EffectiveTheme = currentEffective === 'dark' ? 'light' : 'dark'
+  const systemEffective: EffectiveTheme = window.matchMedia(systemThemeQuery).matches ? 'light' : 'dark'
+  return targetEffective === systemEffective ? 'system' : targetEffective
+}
+
 function syncThemeChrome(preference: ThemePreference) {
   const effective = effectiveTheme(preference)
   document.documentElement.dataset.theme = preference
@@ -40,10 +47,15 @@ export function applyThemePreference(preference: ThemePreference, persist = true
   }
 }
 
-export function observeSystemTheme(getPreference: () => ThemePreference): () => void {
+export function observeSystemTheme(
+  getPreference: () => ThemePreference,
+  onChange?: (effective: EffectiveTheme) => void,
+): () => void {
   const query = window.matchMedia(systemThemeQuery)
   const handleChange = () => {
-    if (getPreference() === 'system') syncThemeChrome('system')
+    const pref = getPreference()
+    if (pref === 'system') syncThemeChrome('system')
+    onChange?.(effectiveTheme(pref))
   }
   query.addEventListener('change', handleChange)
   return () => query.removeEventListener('change', handleChange)

@@ -8,7 +8,7 @@ import SecurityPanel from './SecurityPanel.vue'
 import ComponentUpdatePanel from './ComponentUpdatePanel.vue'
 import { securityStatusCache } from './securityStatus'
 import NetworkHistoryBars from './NetworkHistoryBars.vue'
-import { applyThemePreference, observeSystemTheme, readThemePreference, type ThemePreference } from './theme'
+import { applyThemePreference, effectiveTheme, nextToggledThemePreference, observeSystemTheme, readThemePreference, type EffectiveTheme, type ThemePreference } from './theme'
 import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocumentLocale, translateText, type Locale } from './i18n'
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
@@ -108,6 +108,14 @@ const busy = ref(false)
 const toast = ref('')
 const language = ref<Locale>(readLocalePreference())
 const themePreference = ref<ThemePreference>(readThemePreference())
+const activeEffectiveTheme = ref<EffectiveTheme>(effectiveTheme(themePreference.value))
+const topbarThemeTitle = computed(() => {
+  const isDark = activeEffectiveTheme.value === 'dark'
+  if (language.value === 'en-US') {
+    return isDark ? 'Switch to light theme (Bright orange)' : 'Switch to dark theme (Midnight gold)'
+  }
+  return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
+})
 const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
@@ -1601,7 +1609,11 @@ async function changePassword() {
 async function logout() { try { await api.logout() } finally { securityStatusCache.clear(); authenticated.value = false; overview.value = null } }
 function setThemePreference(preference: ThemePreference) {
   themePreference.value = preference
+  activeEffectiveTheme.value = effectiveTheme(preference)
   applyThemePreference(preference)
+}
+function toggleThemePreference() {
+  setThemePreference(nextToggledThemePreference(themePreference.value))
 }
 async function refreshAll() {
   const [overviewData, nodeData, jobData, settingData, endpointData, timelineData, exitData, socksData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline(), api.residentialExit().catch(() => null), api.socksExit().catch(() => null)])
@@ -1986,7 +1998,7 @@ let releaseCheckTick = 0
 let stopObservingTheme = () => {}
 let stopLocalizing = () => {}
 const onWindowFocus = () => { if (authenticated.value && !mustChange.value) checkLatestRelease().catch(() => {}) }
-onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); stopObservingTheme = observeSystemTheme(() => themePreference.value); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
+onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); activeEffectiveTheme.value = effectiveTheme(themePreference.value); stopObservingTheme = observeSystemTheme(() => themePreference.value, next => { activeEffectiveTheme.value = next }); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
 onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); if (singBoxPollTimer) clearTimeout(singBoxPollTimer); window.removeEventListener('resize', updateDeviceLimit); window.removeEventListener('focus', onWindowFocus) })
 </script>
 
@@ -2022,7 +2034,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     <section class="workspace">
       <header class="topbar">
         <div><p class="breadcrumb">天宫 / {{ navItems.find(item => item.id === page)?.label }}</p><h1>{{ navItems.find(item => item.id === page)?.label }}</h1></div>
-        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button type="button" class="secondary ip-rep-topbar-btn" title="检测 IP 信誉分与威胁情报" @click="openReputationModal(currentFleetHost || undefined)">🛡️ IP 信誉</button><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span></div>
+        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.online ? '●' : '○' }} {{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button type="button" class="secondary ip-rep-topbar-btn" title="检测 IP 信誉分与威胁情报" @click="openReputationModal(currentFleetHost || undefined)">🛡️ IP 信誉</button><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><button type="button" class="topbar-theme-toggle" :title="topbarThemeTitle" :aria-label="topbarThemeTitle" @click="toggleThemePreference"><i class="theme-swatch" :class="`theme-swatch-${activeEffectiveTheme}`" aria-hidden="true"><b></b><em></em></i></button></div>
       </header>
 
       <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
@@ -2682,11 +2694,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </article>
           </div>
           <div class="settings-right-stack">
-            <article class="panel-card appearance-settings">
-              <div class="setting-title"><span>景</span><div><h3>外观与主题</h3><p>东方科幻 · 当前浏览器独立保存</p></div></div>
-              <ThemePicker :model-value="themePreference" aria-label="设置界面主题" @update:model-value="setThemePreference" />
-              <p class="help-text">切换立即生效，不会写入服务器或影响其他设备。选择“系统”后会实时跟随设备深浅色设置。</p>
-            </article>
             <article class="panel-card subscription-settings">
               <div class="setting-title">
                 <span>令</span>
