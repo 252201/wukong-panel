@@ -2064,7 +2064,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <div v-if="page === 'fleet'" class="page-content fleet-page">
         <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><div class="fleet-enroll-actions"><button class="primary" @click="createFleetEnrollment('panel')">＋ 接入面板</button><button class="secondary" @click="createFleetEnrollment('probe')">＋ 接入轻量探针</button></div></div>
-        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article class="fleet-summary-traffic-card"><small>实时流量</small><strong>↓ {{ rate(fleetAggregate.rx) }}</strong><em>↑ {{ rate(fleetAggregate.tx) }}</em></article></section>
+        <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article class="fleet-summary-traffic-card"><small>实时流量</small><strong>↓ <b>{{ rate(fleetAggregate.rx) }}</b></strong><em>↑ <b>{{ rate(fleetAggregate.tx) }}</b></em></article></section>
         <section class="fleet-host-grid">
           <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
             <header>
@@ -2098,16 +2098,16 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <footer><div class="fleet-host-version-meta"><template v-if="isProbeHost(host)"><span class="fleet-host-version-text">Probe {{ host.panelVersion || '—' }} · {{ language === 'en-US' ? 'Monitoring only' : '轻量探针' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 v{{ latestReleaseVersion }}</span></button></template><template v-else><span class="fleet-host-version-text">Panel {{ host.panelVersion || host.snapshot?.overview?.panelVersion || '—' }}</span><button v-if="hasHostUpdate(host)" type="button" class="fleet-update-pill" :title="`发现新版本 v${latestReleaseVersion}，点击更新`" @click.stop="openHostUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 v{{ latestReleaseVersion }}</span></button><span class="fleet-version-dot">·</span><span class="fleet-host-version-text">sing-box {{ host.singBoxVersion || '—' }}</span><button v-if="hasSingBoxUpdate(host)" type="button" class="fleet-update-pill singbox-update-pill" :title="`发现新版本 ${latestSingBoxVersion}，点击更新`" @click.stop="openSingBoxUpdateModal(host)"><i class="fleet-update-icon" aria-hidden="true">⬆</i><span><span class="fleet-update-lead">可</span>更新 {{ latestSingBoxVersion }}</span></button></template></div><div class="fleet-footer-actions"><div class="fleet-footer-buttons"><button v-if="!isProbeHost(host)" @click="switchFleetHost(host.id)">进入主机</button><button v-if="isProbeHost(host)" @click="openProbeNodesModal(host)">节点</button><button v-if="isProbeHost(host)" @click="openFleetHostSettings(host)">设置</button><button v-if="host.id !== 'local'" @click="stageFleetHostAction('rename', host)">重命名</button><button v-if="host.id !== 'local'" class="danger" @click="stageFleetHostAction('remove', host)">移除</button></div><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-footer" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></div></footer>
             <p v-if="!host.compatible" class="fleet-protocol-warning">fleetProtocolVersion {{ host.protocolVersion }} 与中央 v1 不兼容，仅显示状态。</p>
           </article>
-          <article v-if="fleetHosts.length % 2 === 1" class="panel-card fleet-host-card fleet-companion-card" aria-label="舰队全局态势与扩容舱">
+          <article v-if="fleetHosts.length % 2 === 1" class="panel-card fleet-host-card fleet-companion-card" aria-label="舰队全局与扩容舱">
             <header>
               <div>
                 <span class="fleet-companion-seal" aria-hidden="true">阵</span>
                 <span>
                   <span class="fleet-host-title">
-                    <b>舰队全局态势</b>
+                    <b>舰队全局</b>
                     <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
                   </span>
-                  <small>全舰队账期汇总、租期预警与远端主机快速扩容</small>
+                  <small>账期汇总、租期预警与主机扩容</small>
                 </span>
               </div>
               <aside class="fleet-header-aside">
@@ -2116,10 +2116,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                 </div>
                 <em>
-                  <span class="fleet-host-status">
-                    <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
-                    <span class="fleet-online-state">· 运行节点 {{ fleetAggregate.runningNodes }}</span>
-                  </span>
+                  <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
+                  <span class="fleet-online-state">运行节点 {{ fleetAggregate.runningNodes }}</span>
                 </em>
               </aside>
             </header>
@@ -2188,13 +2186,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </footer>
           </article>
           <template v-else-if="fleetHosts.length > 0">
-            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card" aria-label="舰队全局态势">
+            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card" aria-label="舰队全局">
               <header>
                 <div>
                   <span class="fleet-companion-seal" aria-hidden="true">阵</span>
                   <span>
                     <span class="fleet-host-title">
-                      <b>舰队全局态势</b>
+                      <b>舰队全局</b>
                       <span class="fleet-host-country fleet-nexus-badge">FLEET NEXUS</span>
                     </span>
                     <small>全舰队本账期流量汇总、租期预警与组件版本态势</small>
@@ -2206,10 +2204,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     <span class="fleet-rate-up">↑ <b>{{ rate(fleetAggregate.tx) }}</b></span>
                   </div>
                   <em>
-                    <span class="fleet-host-status">
-                      <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
-                      <span class="fleet-online-state">· 运行节点 {{ fleetAggregate.runningNodes }}</span>
-                    </span>
+                    <span class="fleet-node-summary">在线 {{ fleetAggregate.online }}/{{ fleetAggregate.total }}</span>
+                    <span class="fleet-online-state">运行节点 {{ fleetAggregate.runningNodes }}</span>
                   </em>
                 </aside>
               </header>
@@ -2268,10 +2264,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     <span class="fleet-rate-up">或 <b>轻量探针</b></span>
                   </div>
                   <em>
-                    <span class="fleet-host-status">
-                      <span class="fleet-node-summary">支持 2–10 台协同</span>
-                      <span class="fleet-online-state">· 单次有效</span>
-                    </span>
+                    <span class="fleet-node-summary">支持 2–10 台协同</span>
+                    <span class="fleet-online-state">单次有效</span>
                   </em>
                 </aside>
               </header>
