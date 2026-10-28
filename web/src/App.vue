@@ -490,24 +490,6 @@ async function refreshFleetStatus() {
   }
 }
 
-function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
-  }
-  return true
-}
-
-function sameSelectedNodesMap(a: Record<string, string[]>, b: Record<string, string[]>): boolean {
-  const aKeys = Object.keys(a)
-  const bKeys = Object.keys(b)
-  if (aKeys.length !== bKeys.length) return false
-  for (const key of aKeys) {
-    if (!Object.hasOwn(b, key) || !sameStringArray(a[key] || [], b[key] || [])) return false
-  }
-  return true
-}
-
 function applyFleetDraft(status: FleetStatus) {
   const selectedNodes: Record<string, string[]> = {}
   for (const host of status.hosts) {
@@ -523,21 +505,16 @@ function applyFleetDraft(status: FleetStatus) {
       selectedNodes[host.id] = [...rawSelected]
     }
   }
-  const nextSelectedHosts = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => {
-    const h = status.hosts.find(item => item.id === id)
-    return Boolean(h && (!isProbeHost(h) || (h.snapshot?.nodes || []).length > 0))
-  }) : status.hosts.filter(host => !isProbeHost(host) || (host.snapshot?.nodes || []).length > 0).map(host => host.id)
   syncingFleetDraft = true
   try {
     fleetEnabledDraft.value = status.enabled
     fleetPublicURL.value = status.publicUrl || `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
     fleetSubscriptionPublicURL.value = status.subscriptionPublicUrl || ''
-    if (!sameStringArray(fleetSelectedHosts.value, nextSelectedHosts)) {
-      fleetSelectedHosts.value = nextSelectedHosts
-    }
-    if (!sameSelectedNodesMap(fleetSelectedNodes.value, selectedNodes)) {
-      fleetSelectedNodes.value = selectedNodes
-    }
+    fleetSelectedHosts.value = status.selectedHostIds?.length ? status.selectedHostIds.filter(id => {
+      const h = status.hosts.find(item => item.id === id)
+      return Boolean(h && (!isProbeHost(h) || (h.snapshot?.nodes || []).length > 0))
+    }) : status.hosts.filter(host => !isProbeHost(host) || (host.snapshot?.nodes || []).length > 0).map(host => host.id)
+    fleetSelectedNodes.value = selectedNodes
   } finally { syncingFleetDraft = false }
 }
 
