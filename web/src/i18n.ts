@@ -23,6 +23,8 @@ const english: Record<string, string> = {
   '已有 TCP/UDP 合并规则，请先预览删除整条规则，再分别添加需要的协议': 'A combined TCP/UDP rule already exists. Preview deleting the whole rule before adding separate protocols',
 
   'Cloudflare 隧道': 'Cloudflare Tunnel',
+  '系统日志服务 · 内存含可回收日志缓存': 'System journal service · Includes reclaimable log cache',
+  'systemd-journal 的常驻内存（RSS）主要为 mmap 映射的日志文件页缓存，系统内存紧张时由内核自动回收。': 'systemd-journal RSS mainly reflects mmap-backed journal file page cache, which the kernel reclaims automatically under memory pressure.',
   '登录防护服务 · Fail2ban': 'Login protection service · Fail2ban',
   '登录防护管理工具 · Fail2ban': 'Login protection management tool · Fail2ban',
   '防火墙服务 · firewalld': 'Firewall service · firewalld',

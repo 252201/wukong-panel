@@ -33,7 +33,9 @@ func TestSecurityProcessService(t *testing.T) {
 		{"python3", "", ""},
 		{"python-worker", "python-worker\x00/usr/bin/fail2ban-server\x00", ""},
 		{"sh", "/bin/sh\x00-c\x00ufw status\x00", ""},
-		{"systemd-journal", "", ""},
+		{"systemd-journal", "", "systemd-journal"},
+		{"systemd-journald", "", "systemd-journal"},
+		{"systemd-logind", "", ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name+"/"+test.command, func(t *testing.T) {
