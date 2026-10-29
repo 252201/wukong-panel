@@ -292,14 +292,23 @@ test('host update and sing-box update modals display success banner and completi
   );
 });
 
-test('local panel update reconnect delays automatic page reload by 1 second', () => {
+test('local panel update reconnect displays 2-second countdown prompt before automatic page reload', () => {
   const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
 
-  // Verify startPanelReconnect delays reload by 1000ms (1 second)
+  // Verify startPanelReconnect initializes countdown to 2 seconds and reloads
+  assert.ok(
+    appVue.includes('hostReloadCountdown'),
+    'App.vue must track countdown for local panel reload'
+  );
   assert.match(
     appVue,
-    /window\.location\.reload\(\)\s*\}\s*,\s*1000\)/,
-    'App.vue startPanelReconnect must delay automatic page reload by 1000ms (1 second)'
+    /hostReloadCountdown\.value\s*=\s*2/,
+    'App.vue startPanelReconnect must initialize countdown to 2 seconds'
+  );
+  assert.match(
+    appVue,
+    /window\.location\.reload\(\)/,
+    'App.vue must trigger window.location.reload() after countdown'
   );
 });
 

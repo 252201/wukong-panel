@@ -123,6 +123,8 @@ const hostUpdateJob = ref<Job | null>(null)
 const hostUpdateError = ref('')
 const hostReconnecting = ref(false)
 const hostReconnectAttempts = ref(0)
+const hostReloadCountdown = ref(0)
+let hostReloadCountdownTimer: number | undefined
 let hostPollTimer: ReturnType<typeof setTimeout> | undefined
 let hostReconnectTimer: ReturnType<typeof setTimeout> | undefined
 const latestRelease = ref<ReleaseInfo | null>(null)
@@ -744,6 +746,11 @@ function openHostUpdateModal(host: FleetHost) {
   hostUpdateError.value = ''
   hostReconnecting.value = false
   hostReconnectAttempts.value = 0
+  hostReloadCountdown.value = 0
+  if (hostReloadCountdownTimer) {
+    clearInterval(hostReloadCountdownTimer)
+    hostReloadCountdownTimer = undefined
+  }
   if (hostPollTimer) {
     clearTimeout(hostPollTimer)
     hostPollTimer = undefined
@@ -764,11 +771,16 @@ function openHostUpdateModal(host: FleetHost) {
 }
 
 async function startHostUpgrade(host: FleetHost) {
-  if (hostUpdating.value || hostReconnecting.value) return
+  if (hostUpdating.value || hostReconnecting.value || hostReloadCountdown.value > 0) return
   hostUpdating.value = true
   hostUpdateError.value = ''
   hostReconnecting.value = false
   hostReconnectAttempts.value = 0
+  hostReloadCountdown.value = 0
+  if (hostReloadCountdownTimer) {
+    clearInterval(hostReloadCountdownTimer)
+    hostReloadCountdownTimer = undefined
+  }
   try {
     const comp = isProbeHost(host) ? 'probe' : 'panel'
     const client = componentUpdateAPI(host.id, comp)
@@ -853,10 +865,36 @@ function startPanelReconnect() {
   api.overview()
     .then(() => {
       hostReconnecting.value = false
-      notify(`面板已成功升级至 v${latestReleaseVersion.value}！`)
-      modal.value = null
-      setTimeout(() => {
-        window.location.reload()
+      if (hostUpdateJob.value) {
+        hostUpdateJob.value.status = 'success'
+        hostUpdateJob.value.progress = 100
+      } else {
+        hostUpdateJob.value = {
+          id: '',
+          kind: 'panel.update',
+          target: 'local',
+          status: 'success',
+          progress: 100,
+          message: '升级完成',
+          createdAt: '',
+          updatedAt: '',
+        }
+      }
+      hostReloadCountdown.value = 2
+      notify(`面板已成功升级至 v${latestReleaseVersion.value}！将在 2 秒后自动刷新页面…`)
+      if (hostReloadCountdownTimer) {
+        clearInterval(hostReloadCountdownTimer)
+      }
+      hostReloadCountdownTimer = window.setInterval(() => {
+        hostReloadCountdown.value--
+        if (hostReloadCountdown.value > 0) {
+          notify(`面板已成功升级至 v${latestReleaseVersion.value}！将在 ${hostReloadCountdown.value} 秒后自动刷新页面…`)
+        } else {
+          clearInterval(hostReloadCountdownTimer)
+          hostReloadCountdownTimer = undefined
+          modal.value = null
+          window.location.reload()
+        }
       }, 1000)
     })
     .catch(() => {
@@ -3314,7 +3352,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <span class="version-success-check">✓</span>
           <div class="version-success-text">
             <b>{{ isProbeHost(hostUpdateTarget) ? '轻量探针升级成功' : '面板服务升级成功' }}</b>
-            <span>当前运行版本：<strong>v{{ latestReleaseVersion }}</strong> · 远端进程已平滑重启并恢复正常通讯</span>
+            <span>当前运行版本：<strong>v{{ latestReleaseVersion }}</strong> · {{ hostUpdateTarget?.id === 'local' ? '本机进程已平滑重启并恢复正常，正在载入最新界面' : '远端进程已平滑重启并恢复正常通讯' }}</span>
           </div>
         </div>
       </div>
@@ -3337,7 +3375,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <div class="progress-header">
             <span class="progress-status">
               <i :class="hostReconnecting ? 'status-icon spinning' : (hostUpdateJob?.status === 'success' ? 'status-icon success' : (hostUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning'))"></i>
-              <b>{{ hostReconnecting ? `面板服务正在平滑重启，正在等待重新连接 (第 ${hostReconnectAttempts} 次重试)…` : (hostUpdateJob?.status === 'success' ? (isProbeHost(hostUpdateTarget) ? '轻量探针升级成功，已平滑重启' : '面板服务升级成功，已平滑重启') : (hostUpdateJob?.message || (hostUpdating ? '正在执行更新…' : '更新完成'))) }}</b>
+              <b>{{ hostReconnecting ? `面板服务正在平滑重启，正在等待重新连接 (第 ${hostReconnectAttempts} 次重试)…` : (hostReloadCountdown > 0 ? `面板服务升级成功，将在 ${hostReloadCountdown} 秒后自动刷新页面…` : (hostUpdateJob?.status === 'success' ? (isProbeHost(hostUpdateTarget) ? '轻量探针升级成功，已平滑重启' : '面板服务升级成功，已平滑重启') : (hostUpdateJob?.message || (hostUpdating ? '正在执行更新…' : '更新完成')))) }}</b>
             </span>
             <span class="progress-pct">{{ hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0) }}%</span>
           </div>
@@ -3345,7 +3383,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <div class="progress-bar-fill" :style="{ width: `${hostReconnecting ? 100 : (hostUpdateJob?.progress ?? 0)}%` }" :class="{ success: hostUpdateJob?.status === 'success' || hostReconnecting, failed: hostUpdateJob?.status === 'failed' }"></div>
           </div>
           <p v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" class="update-success-subhint">
-            ✓ 远端服务已平滑加载新版本二进制，保留现有认证凭据与网络配置，已恢复正常通讯。
+            ✓ {{ hostUpdateTarget?.id === 'local' ? '中央本机已平滑加载新版本二进制，保留现有数据库与凭据，即将自动刷新。' : '远端服务已平滑加载新版本二进制，保留现有认证凭据与网络配置，已恢复正常通讯。' }}
           </p>
           <p v-if="hostUpdateError" class="singbox-update-err-msg">{{ hostUpdateError }}</p>
           <div v-if="hostUpdateJob?.status === 'failed' || hostUpdateError" class="progress-retry-action">
@@ -3396,7 +3434,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </a>
         <div class="actions-right">
           <button v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" type="button" class="primary" @click="modal = null">
-            ✓ 升级完成（关闭）
+            ✓ 升级完成{{ hostReloadCountdown > 0 ? `（${hostReloadCountdown} 秒后刷新）` : '（关闭）' }}
           </button>
           <template v-else>
             <button type="button" class="secondary" @click="modal = null">关闭</button>
