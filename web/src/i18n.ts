@@ -440,6 +440,8 @@ const english: Record<string, string> = {
   '项提醒 ·': ' warnings ·',
   '项阻断': 'blockers',
   '扫描结果会列出字段迁移、共享配置、网卡依赖和无法自动处理的项目。可在上方 sing-box 卡片确认后升级。': 'The scan lists field migrations, shared configurations, interface dependencies, and items requiring manual action. Confirm the update in the sing-box card above to upgrade.',
+  '每 24 小时自动检查': 'Checked every 24 hours',
+  '更新前校验并迁移托管配置；更新后执行本机代理探测，失败自动恢复。每 24 小时自动检查一次更新。': 'Validates and migrates managed configurations, then probes the local proxy; failures restore the previous files. Checks for updates automatically every 24 hours.',
   '部署一座新节点': 'Deploy a new node',
   '部署设备节点': 'Deploy device nodes',
   '编辑节点': 'Edit node',

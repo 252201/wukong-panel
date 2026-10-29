@@ -259,6 +259,29 @@ func (m *Manager) recoverSingBox(ctx context.Context) error {
 	defer cancel()
 	return m.singBoxUpdater().Recover(ctx)
 }
+
+func (m *Manager) reconcileSingBoxUpdate(ctx context.Context) error {
+	m.mutation.Lock()
+	defer m.mutation.Unlock()
+	if m.cfg.Demo {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	c := m.singBoxUpdater()
+	s, e := c.Status(ctx)
+	if e != nil || !s.Installed {
+		return nil
+	}
+	if !s.CheckedAt.IsZero() && time.Since(s.CheckedAt) < 24*time.Hour {
+		return nil
+	}
+	_, err := c.Check(ctx)
+	if err != nil {
+		_ = m.store.Audit("agent", "sing-box.check.failed", "local", err.Error())
+	}
+	return err
+}
 func (c *Client) SingBoxUpdate(ctx context.Context, r model.ComponentUpdateRequest) (model.ComponentUpdateState, error) {
 	copyHTTP := *c.http
 	copyHTTP.Timeout = 5 * time.Minute

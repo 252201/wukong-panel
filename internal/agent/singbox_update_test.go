@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/252201/wukong-panel/internal/componentupdate"
 	"github.com/252201/wukong-panel/internal/model"
@@ -80,5 +81,56 @@ func TestSingBoxRecoverySkipsAlreadyStoppedOpenRCService(t *testing.T) {
 	}
 	if _, e := os.Stat(marker); !os.IsNotExist(e) {
 		t.Fatal("inactive service was stopped again")
+	}
+}
+
+func TestReconcileSingBoxUpdatePeriodicCheck(t *testing.T) {
+	m, _ := newDemoManager(t)
+
+	// Demo mode returns nil without performing check
+	if err := m.reconcileSingBoxUpdate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	m.cfg.Demo = false
+	// Not installed returns nil without performing check
+	if err := m.reconcileSingBoxUpdate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up dummy sing-box binary
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nif [ \"$1\" = \"version\" ]; then echo \"sing-box version 1.14.4\"; else exit 0; fi\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	m.cfg.SingBoxBin = binPath
+
+	// Pre-create state.json with recent CheckedAt (e.g. 1 hour ago)
+	secretsDir := m.cfg.SecretDir
+	updateDir := filepath.Join(secretsDir, "sing-box-update")
+	_ = os.MkdirAll(updateDir, 0700)
+	recentState := []byte(`{"checkedAt":"` + time.Now().Add(-1*time.Hour).Format(time.RFC3339) + `","currentVersion":"1.14.4","installed":true}`)
+	if err := os.WriteFile(filepath.Join(updateDir, "state.json"), recentState, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Because CheckedAt is 1 hour ago (< 24h), reconcileSingBoxUpdate must skip check and return nil
+	if err := m.reconcileSingBoxUpdate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// When CheckedAt is 25 hours ago (> 24h), reconcileSingBoxUpdate attempts a check.
+	// Since there is no internet in test, Check fails to download and audit records failure.
+	staleState := []byte(`{"checkedAt":"` + time.Now().Add(-25*time.Hour).Format(time.RFC3339) + `","currentVersion":"1.14.4","installed":true}`)
+	if err := os.WriteFile(filepath.Join(updateDir, "state.json"), staleState, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Attempt check (network error expected in sandbox, but check WAS attempted)
+	_ = m.reconcileSingBoxUpdate(t.Context())
+	// Verify state.json was updated with a newer CheckedAt
+	freshState, _ := os.ReadFile(filepath.Join(updateDir, "state.json"))
+	if bytes.Contains(freshState, []byte(`"checkedAt":"`+time.Now().Add(-25*time.Hour).Format(time.RFC3339))) {
+		t.Fatal("reconcileSingBoxUpdate did not attempt check when state was stale")
 	}
 }
