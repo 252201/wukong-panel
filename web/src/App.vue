@@ -2278,9 +2278,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             @drop.prevent="onHostDrop($event, host)"
             @dragend="onHostDragEnd"
           >
+            <span v-if="host.id !== 'local'" class="fleet-drag-handle" title="按住拖拽以调整卡片顺序" aria-label="按住拖拽调整顺序">⠿</span>
             <header>
               <div>
-                <span v-if="host.id !== 'local'" class="fleet-drag-handle" title="按住拖拽以调整卡片顺序" aria-label="按住拖拽调整顺序">⠿</span>
                 <i></i>
                 <span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span>
               </div>
