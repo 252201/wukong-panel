@@ -246,7 +246,7 @@ function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPla
 
 let csrf = ''
 let fleetHostID = ''
-export const latestSingBoxVersion = '1.14.1'
+export const latestSingBoxVersion = '1.14.4'
 export function setCSRF(value: string) { csrf = value }
 export function setFleetHost(value: string) { fleetHostID = value === 'local' ? '' : value }
 
@@ -269,7 +269,13 @@ export const api = {
   overview: () => request<Overview>('overview'),
   endpoints: () => request<EndpointStat[]>('metrics/endpoints'),
   timeline: () => request<TrafficTimeline>('metrics/timeline'),
-  singBoxMigration: async (target = latestSingBoxVersion) => normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`)),
+  singBoxMigration: async (target = latestSingBoxVersion, hostId?: string) => {
+    const prefix = hostId && hostId !== 'local' ? `fleet/hosts/${encodeURIComponent(hostId)}/` : (hostId === 'local' ? '' : undefined)
+    if (prefix !== undefined) {
+      return normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`${prefix}system/sing-box/migration?target=${encodeURIComponent(target)}`, {}, false))
+    }
+    return normalizeMigrationPlan(await request<SingBoxMigrationPlan>(`system/sing-box/migration?target=${encodeURIComponent(target)}`))
+  },
   residentialExit: () => request<ResidentialExit>('system/residential-exit'),
   configureResidentialExit: (data: {endpoint: string; listenPort: number; peerPublicKey?: string; expectedExitIp?: string}) => request<ResidentialExit>('system/residential-exit', { method: 'PUT', body: JSON.stringify(data) }),
   removeResidentialExit: (confirm: string) => request<{ok: boolean}>('system/residential-exit', { method: 'DELETE', body: JSON.stringify({ confirm }) }),

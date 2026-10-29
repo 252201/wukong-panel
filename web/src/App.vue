@@ -90,8 +90,9 @@ const jobs = ref<Job[]>([])
 const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, expiresAt: '', collectEndpoints: true })
 const endpoints = ref<EndpointStat[]>([])
 const timeline = ref<TrafficTimeline | null>(null)
-const migrationPlan = ref<SingBoxMigrationPlan | null>(null)
-const migrationLoading = ref(false)
+const singBoxMigrationPlan = ref<SingBoxMigrationPlan | null>(null)
+const singBoxMigrationLoading = ref(false)
+const singBoxMigrationDetailsOpen = ref(false)
 const residentialExit = ref<ResidentialExit | null>(null)
 const residentialForm = reactive({ endpoint: '', listenPort: 51820, peerPublicKey: '', expectedExitIp: '' })
 const residentialFormHydrated = ref(false)
@@ -1001,6 +1002,9 @@ async function openSingBoxUpdateModal(host: FleetHost) {
   singBoxUpdating.value = false
   singBoxUpdateJob.value = null
   singBoxUpdateError.value = ''
+  singBoxMigrationPlan.value = null
+  singBoxMigrationLoading.value = false
+  singBoxMigrationDetailsOpen.value = false
   if (singBoxPollTimer) {
     clearTimeout(singBoxPollTimer)
     singBoxPollTimer = undefined
@@ -1015,6 +1019,8 @@ async function openSingBoxUpdateModal(host: FleetHost) {
   }
 
   if (singBoxUpdateSupported(host) && host.online) {
+    const targetVer = latestSingBoxVersion.value || '1.14.4'
+    void loadSingBoxMigration(host, targetVer)
     try {
       const client = componentUpdateAPI(host.id, 'sing-box')
       singBoxUpdateState.value = await client.status()
@@ -1032,6 +1038,10 @@ async function copySingBoxUpdateCommand() {
 
 async function startSingBoxUpgrade(host: FleetHost) {
   if (singBoxUpdating.value) return
+  if (singBoxMigrationPlan.value && !singBoxMigrationPlan.value.compatible) {
+    notify('节点配置存在阻断项，请先人工排查修复后再升级')
+    return
+  }
   singBoxUpdating.value = true
   singBoxUpdateError.value = ''
   try {
@@ -1970,11 +1980,15 @@ async function rotateSubscription() {
 	try { const result = await api.rotateSubscription(); settings.value.subscriptionToken = `${result.token.slice(0, 4)}••••${result.token.slice(-4)}`; settingsDraftDirty.value = false; notify('订阅令牌已轮换') }
 	catch (error) { notify(error instanceof Error ? error.message : '轮换失败') }
 }
-async function scanSingBoxMigration() {
-  migrationLoading.value = true
-  try { migrationPlan.value = await api.singBoxMigration(); notify('sing-box 配置兼容性扫描完成') }
-  catch (error) { notify(error instanceof Error ? error.message : '兼容性扫描失败') }
-  finally { migrationLoading.value = false }
+async function loadSingBoxMigration(host: FleetHost, targetVersion: string) {
+  singBoxMigrationLoading.value = true
+  try {
+    singBoxMigrationPlan.value = await api.singBoxMigration(targetVersion, host.id)
+  } catch {
+    singBoxMigrationPlan.value = null
+  } finally {
+    singBoxMigrationLoading.value = false
+  }
 }
 async function configureResidentialExit() {
 	if (!ensureHostWritable()) return
@@ -2608,12 +2622,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               </div>
             </div>
           </div>
-        </section>
-        <section class="panel-card migration-panel">
-          <div class="card-head"><div><span class="section-mark">迁</span><div><h3>sing-box 升级预检</h3><p>配置迁移支持 1.14 系列 · 只读扫描，不修改配置</p></div></div><button class="secondary" :disabled="migrationLoading" @click="scanSingBoxMigration">{{ migrationLoading ? '扫描中…' : '扫描兼容性' }}</button></div>
-          <div v-if="migrationPlan" class="migration-summary" :class="migrationPlan.compatible ? 'compatible' : 'blocked'"><strong>{{ migrationPlan.compatible ? '可以安全生成迁移配置' : '存在阻断项，需要人工处理' }}</strong><span>{{ migrationPlan.files.length }} 个配置 · {{ migrationPlan.changes }} 项变更 · {{ migrationPlan.warnings }} 项提醒 · {{ migrationPlan.errors }} 项阻断</span></div>
-          <div v-if="migrationPlan" class="migration-files"><article v-for="file in migrationPlan.files" :key="file.path"><div><b>{{ file.path.split('/').pop() }}</b><small v-if="file.interfaces?.length">引用网卡 {{ file.interfaces.join(', ') }}</small></div><span>{{ (file.changes || []).length }} 项变更</span><ul v-if="(file.changes || []).length || (file.warnings || []).length || (file.errors || []).length"><li v-for="item in file.changes || []" :key="`c-${item}`">＋ {{ item }}</li><li v-for="item in file.warnings || []" :key="`w-${item}`" class="warning">! {{ item }}</li><li v-for="item in file.errors || []" :key="`e-${item}`" class="error">× {{ item }}</li></ul></article></div>
-          <p v-else class="migration-empty">扫描结果会列出字段迁移、共享配置、网卡依赖和无法自动处理的项目。可在上方 sing-box 卡片确认后升级。</p>
         </section>
         <section class="panel-card process-panel"><div class="card-head"><div><span class="section-mark">程</span><div><h3>进程</h3><p>按 CPU 与内存排序 · 不采集完整命令行</p></div></div><span class="process-count">{{ overview?.processCount || 0 }} 个</span></div><div class="process-table"><div class="process-row process-header"><span>PID</span><span>进程</span><span role="columnheader" :aria-sort="processSortKey === 'cpu' ? (processSortAscending ? 'ascending' : 'descending') : 'none'"><button type="button" class="process-sort" :class="{active:processSortKey === 'cpu'}" :aria-label="translateText('按 CPU 排序', language)" @click="changeProcessSort('cpu')">CPU {{processSortKey === 'cpu' ? (processSortAscending ? '↑' : '↓') : '↕'}}</button></span><span role="columnheader" :aria-sort="processSortKey === 'memory' ? (processSortAscending ? 'ascending' : 'descending') : 'none'"><button type="button" class="process-sort" :class="{active:processSortKey === 'memory'}" :aria-label="translateText('按内存排序', language)" @click="changeProcessSort('memory')">{{translateText('内存',language)}} {{processSortKey === 'memory' ? (processSortAscending ? '↑' : '↓') : '↕'}}</button></span></div><div class="process-scroll"><div v-for="process in sortedProcesses" :key="process.pid" class="process-row"><code>{{ process.pid }}</code><b :title="[process.name, processServiceLabel(process.service, process.name), ...(process.nodes || [])].filter(Boolean).join(' · ')"><span>{{ process.name }}</span><small v-if="processServiceLabel(process.service, process.name)">{{ process.service === 'cloudflared' ? [processServiceLabel(process.service, process.name), ...(process.nodes || [])].filter(Boolean).join(' · ') : processServiceLabel(process.service, process.name) }}</small><small v-if="process.nodes?.length && process.service !== 'cloudflared'">{{ process.nodes.join(' · ') }}</small></b><strong>{{ process.cpu.toFixed(1) }}%</strong><span class="process-memory"><em>{{ bytes(process.rssBytes) }}</em><small>{{ process.memoryPercent.toFixed(1) }}%</small></span></div><p v-if="!overview?.processes?.length" class="empty">等待 Agent 完成进程采样。</p></div></div><p v-if="(overview?.processCount || 0) > sortedProcesses.length" class="process-help">{{translateText('排序范围为已采集的进程，采样保留 CPU 与内存占用最高的进程。',language)}} {{sortedProcesses.length}} / {{overview?.processCount}}</p><p v-if="sortedProcesses.some(p => p.name === 'systemd-journal' || p.name === 'systemd-journald' || p.service === 'systemd-journal')" class="process-help">{{translateText('systemd-journal 的常驻内存（RSS）主要为 mmap 映射的日志文件页缓存，系统内存紧张时由内核自动回收。',language)}}</p><p class="process-help">UFW / nftables 通常没有常驻进程；防护是否生效请查看安全页。</p></section>
       </div>
@@ -3482,6 +3490,55 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
       </div>
 
+      <!-- 配置兼容性预检 -->
+      <div v-if="singBoxUpdateJob?.status !== 'success' && singBoxUpdateSupported(singBoxUpdateTarget)" class="singbox-preflight-card" :class="{ 'is-blocked': singBoxMigrationPlan && !singBoxMigrationPlan.compatible, 'is-success': singBoxMigrationPlan?.compatible }">
+        <div class="singbox-preflight-head">
+          <div class="singbox-preflight-title">
+            <span class="preflight-status-badge" :class="{ spinning: singBoxMigrationLoading, success: !singBoxMigrationLoading && singBoxMigrationPlan?.compatible, blocked: !singBoxMigrationLoading && singBoxMigrationPlan && !singBoxMigrationPlan.compatible }">
+              <i v-if="singBoxMigrationLoading" class="status-icon spinning"></i>
+              <span v-else-if="singBoxMigrationPlan?.compatible">✓</span>
+              <span v-else-if="singBoxMigrationPlan && !singBoxMigrationPlan.compatible">!</span>
+              <span v-else>迁</span>
+            </span>
+            <div class="singbox-preflight-text">
+              <div class="singbox-preflight-row">
+                <b>配置兼容性预检</b>
+                <span v-if="!singBoxMigrationLoading && singBoxMigrationPlan" class="preflight-tag" :class="singBoxMigrationPlan.compatible ? 'tag-success' : 'tag-blocked'">
+                  {{ singBoxMigrationPlan.compatible ? '可安全迁移' : '存在阻断' }}
+                </span>
+              </div>
+              <small v-if="singBoxMigrationLoading">正在只读扫描当前节点配置语法兼容性…</small>
+              <small v-else-if="singBoxMigrationPlan?.compatible">
+                {{ singBoxMigrationPlan.files.length }} 个节点配置已就绪 · {{ singBoxMigrationPlan.changes }} 项自动迁移 · 0 项阻断
+              </small>
+              <small v-else-if="singBoxMigrationPlan && !singBoxMigrationPlan.compatible" class="preflight-err-sub">
+                检测到 {{ singBoxMigrationPlan.errors }} 项阻断，可能需要人工排查后再升级
+              </small>
+              <small v-else>正在准备只读扫描当前节点配置兼容性…</small>
+            </div>
+          </div>
+          <button v-if="singBoxMigrationPlan?.files?.length && (singBoxMigrationPlan.changes > 0 || singBoxMigrationPlan.warnings > 0 || singBoxMigrationPlan.errors > 0)"
+                  type="button" class="mini-btn preflight-toggle-btn" @click="singBoxMigrationDetailsOpen = !singBoxMigrationDetailsOpen">
+            {{ singBoxMigrationDetailsOpen ? '收起详情 ▴' : '查看详情 ▾' }}
+          </button>
+        </div>
+
+        <div v-if="singBoxMigrationDetailsOpen && singBoxMigrationPlan" class="singbox-preflight-details">
+          <article v-for="file in singBoxMigrationPlan.files" :key="file.path" class="preflight-file-item">
+            <div class="file-head">
+              <b>{{ file.path.split(/[/\\]/).pop() || file.path }}</b>
+              <small v-if="file.interfaces?.length">引用网卡 {{ file.interfaces.join(', ') }}</small>
+              <span class="change-tag" v-if="file.changes?.length">{{ file.changes.length }} 项迁移</span>
+            </div>
+            <ul v-if="(file.changes || []).length || (file.warnings || []).length || (file.errors || []).length">
+              <li v-for="item in file.changes || []" :key="`c-${item}`" class="change">＋ {{ item }}</li>
+              <li v-for="item in file.warnings || []" :key="`w-${item}`" class="warning">! {{ item }}</li>
+              <li v-for="item in file.errors || []" :key="`e-${item}`" class="error">× {{ item }}</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+
       <!-- 在线一键更新进度或控制区 -->
       <div v-if="singBoxUpdateSupported(singBoxUpdateTarget)" class="singbox-online-update-section">
         <div v-if="singBoxUpdating || singBoxUpdateJob" class="singbox-update-progress-card" :class="{ 'update-success-card': singBoxUpdateJob?.status === 'success' }">
@@ -3508,8 +3565,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <h4>在线一键升级</h4>
             <small>无需登录终端，点击后由中央控制台向主机调度自动化升级管道：</small>
           </div>
-          <button type="button" class="primary singbox-start-btn" :disabled="singBoxUpdating || !singBoxUpdateTarget.online" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
-            🚀 立即升级内核至 {{ latestSingBoxVersion }}
+          <button type="button" class="primary singbox-start-btn" :disabled="singBoxUpdating || !singBoxUpdateTarget.online || singBoxMigrationLoading || Boolean(singBoxMigrationPlan && !singBoxMigrationPlan.compatible)" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
+            {{ singBoxMigrationLoading ? '正在检查配置兼容性…' : (singBoxMigrationPlan && !singBoxMigrationPlan.compatible) ? '存在配置阻断项，无法升级' : '🚀 立即升级内核至 ' + latestSingBoxVersion }}
           </button>
         </div>
       </div>
@@ -3538,8 +3595,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </button>
           <template v-else>
             <button type="button" class="secondary" @click="modal = null">关闭</button>
-            <button v-if="!singBoxUpdating && singBoxUpdateSupported(singBoxUpdateTarget)" type="button" class="primary" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
-              立即升级内核
+            <button v-if="!singBoxUpdating && singBoxUpdateSupported(singBoxUpdateTarget)" type="button" class="primary" :disabled="singBoxMigrationLoading || Boolean(singBoxMigrationPlan && !singBoxMigrationPlan.compatible)" @click="startSingBoxUpgrade(singBoxUpdateTarget)">
+              {{ (singBoxMigrationPlan && !singBoxMigrationPlan.compatible) ? '存在配置阻断' : '立即升级内核' }}
             </button>
             <button v-else type="button" class="primary" @click="copySingBoxUpdateCommand">
               复制升级命令

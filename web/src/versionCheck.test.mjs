@@ -312,4 +312,50 @@ test('local panel update reconnect displays 2-second countdown prompt before aut
   );
 });
 
+test('sing-box migration preflight is embedded into singbox-update modal and removed from system page', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+  const apiTs = readFileSync(new URL('./api.ts', import.meta.url), 'utf-8');
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // Standalone card removed from system page
+  assert.ok(
+    !appVue.includes('class="panel-card migration-panel"'),
+    'App.vue must remove standalone migration-panel from system page'
+  );
+
+  // Embedded into singbox-update modal
+  assert.ok(
+    appVue.includes('class="singbox-preflight-card"'),
+    'App.vue must embed singbox-preflight-card inside singbox-update modal'
+  );
+  assert.ok(
+    appVue.includes('loadSingBoxMigration'),
+    'App.vue must trigger loadSingBoxMigration when opening sing-box update modal'
+  );
+  assert.ok(
+    appVue.includes('singBoxMigrationPlan && !singBoxMigrationPlan.compatible'),
+    'App.vue must check compatibility and guard upgrade when blocking issues exist'
+  );
+
+  // API supports hostId scoping
+  assert.match(
+    apiTs,
+    /singBoxMigration:\s*async\s*\(target\s*=\s*latestSingBoxVersion,\s*hostId\?:?\s*string\)/,
+    'api.ts singBoxMigration must accept optional hostId'
+  );
+
+  // Styles exist for preflight card and themes
+  assert.match(
+    stylesCss,
+    /\.singbox-preflight-card\s*\{/,
+    'styles.css must include .singbox-preflight-card'
+  );
+  assert.match(
+    stylesCss,
+    /:root\[data-effective-theme="light"\]\s+\.singbox-preflight-card\s*\{/,
+    'styles.css must include light mode overrides for .singbox-preflight-card'
+  );
+});
+
+
 
