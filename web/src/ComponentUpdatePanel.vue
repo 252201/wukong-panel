@@ -157,7 +157,16 @@ async function load() {
   const pending = pendingComponentUpdateJob(props.hostId, props.component)
   if (pending && !jobRunning.value) { job.value = pending; void pollJob(pending.id) }
   if (job.value?.status !== 'failed') error.value = ''
-  try { const result = await client.status(); if (alive) state.value = result }
+  try {
+    const result = await client.status()
+    if (alive) {
+      state.value = result
+      const checkedTime = result.checkedAt && !result.checkedAt.startsWith('0001') ? Date.parse(result.checkedAt) : 0
+      if (!busy.value && !jobRunning.value && (!checkedTime || Date.now() - checkedTime >= 24 * 60 * 60 * 1000)) {
+        void check()
+      }
+    }
+  }
   catch (e) { if (alive && !error.value) error.value = message(e) }
 }
 async function check() {
@@ -217,9 +226,9 @@ onBeforeUnmount(() => { alive = false; if (timer) clearTimeout(timer) })
       <div class="connector-versions"><div><small>{{ t('当前版本', 'Installed version') }}</small><strong>{{ state?.currentVersion || (state && !state.installed ? t('未安装', 'Not installed') : '—') }}</strong></div><div><small>{{ t('最新稳定版', 'Latest stable version') }}</small><strong>{{ state?.latestVersion || '—' }}</strong></div><button :disabled="busy || jobRunning" @click="check">{{ busy ? t('处理中…', 'Working…') : t('检查更新', 'Check for updates') }}</button><button v-if="state?.updateAvailable" class="primary" :disabled="!writable" @click="confirmation = 'update'">{{ t('升级到', 'Update to') }} {{ state.latestVersion }}</button></div>
       <label v-if="isTunnel" class="toggle-row"><span><b>{{ t('自动更新 cloudflared', 'Update cloudflared automatically') }}</b><small>{{ t('每天检查稳定版；更新时短暂重启运行中的悟空隧道。', 'Checks stable releases daily; updates briefly restart running Wukong tunnels.') }}</small></span><span class="switch"><input type="checkbox" :checked="!!state?.autoUpdate" :disabled="!state || busy || jobRunning || (!state.autoUpdate && !writable)" @click.prevent="state?.autoUpdate ? setAuto(false) : confirmation = 'auto'"><i></i></span></label>
       <div v-if="confirmation" class="connector-confirm"><p>{{ confirmation === 'auto' ? t('启用后，悟空将自动安装官方稳定版，并重启正在运行的隧道。更新失败时恢复原版本。', 'Wukong will install official stable releases and restart running tunnels automatically. Failed updates restore the previous version.') : (isTunnel ? t('升级会短暂重启正在运行的悟空隧道；失败时恢复原版本。', 'Updating briefly restarts running Wukong tunnels; failures restore the previous version.') : t('更新会校验并迁移托管配置、备份并重启运行中的节点；失败时恢复原版本和配置。', 'Updating validates and migrates managed configurations, backs up files and restarts running nodes; failures restore the previous runtime and configurations.')) }}</p><div><button class="primary" :disabled="!writable" @click="confirmation === 'auto' ? setAuto(true) : upgrade()">{{ t('确认', 'Confirm') }}</button><button :disabled="busy" @click="confirmation = null">{{ t('取消', 'Cancel') }}</button></div></div>
-      <p v-if="!isTunnel" class="help-text runtime-update-note">{{ t('更新前校验并迁移托管配置；更新后执行本机代理探测，失败自动恢复。', 'Validates and migrates managed configurations, then probes the local proxy; failures restore the previous files.') }}</p>
+      <p v-if="!isTunnel" class="help-text runtime-update-note">{{ t('更新前校验并迁移托管配置；更新后执行本机代理探测，失败自动恢复。每 24 小时自动检查一次更新。', 'Validates and migrates managed configurations, then probes the local proxy; failures restore the previous files. Checks for updates automatically every 24 hours.') }}</p>
       <p v-if="state?.reason" class="help-text">{{ reasonText }}</p>
-      <p v-if="state?.checkedAt && !state.checkedAt.startsWith('0001')" class="help-text">{{ t('最后检查', 'Last checked') }} {{ new Date(state.checkedAt).toLocaleString(language) }}</p>
+      <p v-if="state?.checkedAt && !state.checkedAt.startsWith('0001')" class="help-text">{{ t('最后检查', 'Last checked') }} {{ new Date(state.checkedAt).toLocaleString(language) }} · {{ t('每 24 小时自动检查', 'Checked every 24 hours') }}</p>
       <p v-if="job" role="status">{{ job.message }} · {{ job.progress }}%</p>
       <p v-if="errorText" class="connector-error" role="alert">{{ errorText }}</p>
     </template>

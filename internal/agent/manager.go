@@ -75,6 +75,7 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 		}
 	}
 	_ = m.reconcileCloudflared(ctx)
+	_ = m.reconcileSingBoxUpdate(ctx)
 	_ = m.ReconcileDeviceGroups(ctx)
 	_ = m.ReconcileBindings(ctx)
 	_ = m.ReconcileInboundListeners(ctx)
@@ -91,6 +92,7 @@ func (m *Manager) RunReconciler(ctx context.Context) {
 				continue
 			}
 			_ = m.reconcileCloudflared(ctx)
+			_ = m.reconcileSingBoxUpdate(ctx)
 			_ = m.ReconcileDeviceGroups(ctx)
 			_ = m.ReconcileBindings(ctx)
 			_ = m.ReconcileInboundListeners(ctx)
