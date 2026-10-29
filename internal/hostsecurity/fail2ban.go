@@ -37,6 +37,11 @@ func validateConfig(r model.SSHProtectionConfig) (model.SSHProtectionConfig, err
 		} else {
 			return r, errors.New("白名单必须为有效 IP/CIDR，不能为全部地址")
 		}
+		if s == "127.0.0.0/8" || s == "127.0.0.1" {
+			s = "127.0.0.1/8"
+		} else if s == "::1/128" {
+			s = "::1"
+		}
 		if !contains(list, s) {
 			list = append(list, s)
 		}
@@ -129,10 +134,19 @@ func (reader *fail2banReader) effectiveConfig(ctx context.Context, name string) 
 	r.IgnoreIPs = []string{}
 	for _, v := range strings.Fields(s) {
 		v = strings.Trim(v, "[],\"'")
+		var item string
 		if a, e := netip.ParseAddr(v); e == nil {
-			r.IgnoreIPs = append(r.IgnoreIPs, a.String())
+			item = a.Unmap().String()
 		} else if p, e := netip.ParsePrefix(v); e == nil {
-			r.IgnoreIPs = append(r.IgnoreIPs, p.String())
+			item = p.String()
+		}
+		if item == "127.0.0.0/8" || item == "127.0.0.1" {
+			item = "127.0.0.1/8"
+		} else if item == "::1/128" {
+			item = "::1"
+		}
+		if item != "" && !contains(r.IgnoreIPs, item) {
+			r.IgnoreIPs = append(r.IgnoreIPs, item)
 		}
 	}
 	sort.Strings(r.IgnoreIPs)

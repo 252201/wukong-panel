@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>悟空面板 · 研发演进与实战攻坚全景看板 (v1.7.15 → v2.2.0)</title>
+  <style>
+    :root {
+      --bg: #070908;
+      --card-bg: rgba(18, 22, 20, 0.85);
+      --card-border: rgba(212, 173, 87, 0.22);
+      --card-border-glow: rgba(212, 173, 87, 0.45);
+      --gold: #d4ad57;
+      --gold-light: #f2ead4;
+      --gold-muted: #c8a86b;
+      --jade: #52b690;
+      --jade-glow: rgba(82, 182, 144, 0.25);
+      --red: #e65c5c;
+      --text-dim: #9ea8a2;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--gold-light);
+      font-family: var(--sans);
+      min-height: 100vh;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 10% 8%, rgba(212, 173, 87, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 90% 25%, rgba(82, 182, 144, 0.07) 0%, transparent 45%),
+        radial-gradient(circle at 50% 90%, rgba(212, 173, 87, 0.05) 0%, transparent 50%),
+        linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+      padding: 24px 16px 60px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Top Decorative Banner */
+    .top-glow-bar {
+      height: 3px;
+      width: 100%;
+      background: linear-gradient(90deg, transparent, var(--gold), var(--jade), transparent);
+      border-radius: 2px;
+      margin-bottom: 24px;
+    }
+
+    /* Header */
+    header {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 28px 32px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 2px;
+      background: linear-gradient(90deg, var(--gold), var(--jade));
+    }
+
+    .header-main {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .seal-box {
+      width: 54px;
+      height: 54px;
+      border: 2px solid var(--gold);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 900;
+      color: var(--gold);
+      background: radial-gradient(circle, rgba(212, 173, 87, 0.15) 0%, transparent 80%);
+      box-shadow: 0 0 18px rgba(212, 173, 87, 0.2);
+      flex-shrink: 0;
+    }
+
+    .header-titles h1 {
+      font-size: 24px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .header-titles h1 .ver-badge {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--jade);
+      background: rgba(82, 182, 144, 0.12);
+      border: 1px solid rgba(82, 182, 144, 0.35);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .header-titles p {
+      font-size: 13.5px;
+      color: var(--gold-muted);
+      margin-top: 4px;
+    }
+
+    .header-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .header-meta .date-range {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--gold);
+    }
+
+    .header-meta .edition-tag {
+      font-size: 11.5px;
+      color: var(--text-dim);
+    }
+
+    /* KPI Cards */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      position: relative;
+      transition: transform .2s, border-color .2s;
+    }
+
+    .kpi-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--card-border-glow);
+    }
+
+    .kpi-card small {
+      font-size: 12px;
+      color: var(--text-dim);
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .kpi-card .val-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .kpi-card .val-row strong {
+      font-family: var(--mono);
+      font-size: 34px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .kpi-card .val-row span {
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .kpi-card p {
+      font-size: 11.5px;
+      color: var(--gold-muted);
+      margin-top: 8px;
+    }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid rgba(212, 173, 87, 0.2);
+      margin-bottom: 24px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .nav-tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 18px;
+      cursor: pointer;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all .2s;
+      white-space: nowrap;
+      position: relative;
+    }
+
+    .nav-tab-btn:hover {
+      color: var(--gold-light);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .nav-tab-btn.active {
+      color: var(--gold);
+      background: rgba(212, 173, 87, 0.08);
+    }
+
+    .nav-tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: -4px; left: 0; right: 0;
+      height: 2px;
+      background: var(--gold);
+    }
+
+    /* Tab Contents */
+    .tab-pane {
+      display: none;
+      animation: fadeIn .25s ease-in-out;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Section Containers */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 20px;
+    }
+
+    .section-title i {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: rgba(212, 173, 87, 0.12);
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    /* Grid Layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    /* Feature Cards */
+    .feature-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+      transition: all .2s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(212, 173, 87, 0.3);
+      background: rgba(212, 173, 87, 0.03);
+    }
+
+    .feature-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feature-head .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--jade);
+      box-shadow: 0 0 8px var(--jade);
+      flex-shrink: 0;
+    }
+
+    .feature-head h3 {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .feature-card p {
+      font-size: 13px;
+      color: #c4cdc7;
+      line-height: 1.6;
+    }
+
+    .feature-tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .chip {
+      font-size: 11px;
+      font-family: var(--mono);
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--gold-muted);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .chip.green {
+      background: rgba(82, 182, 144, 0.12);
+      color: var(--jade);
+      border-color: rgba(82, 182, 144, 0.25);
+    }
+
+    /* Battle Cards */
+    .battle-card {
+      background: rgba(0, 0, 0, 0.35);
+      border-left: 3px solid var(--jade);
+      border-radius: 4px 10px 10px 4px;
+      padding: 18px 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+      border-right: 1px solid rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .battle-card .b-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .battle-card .b-head h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .battle-card .b-solution {
+      font-size: 11px;
+      font-family: var(--mono);
+      background: rgba(82, 182, 144, 0.15);
+      color: var(--jade);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(82, 182, 144, 0.3);
+      white-space: nowrap;
+    }
+
+    .battle-detail {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+    }
+
+    .battle-detail div strong {
+      font-size: 11.5px;
+      color: var(--gold);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .battle-detail div p {
+      font-size: 12.5px;
+      color: #c4cdc7;
+      line-height: 1.5;
+    }
+
+    /* Release Changelog Table / Cards */
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .filter-btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .filter-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .filter-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    .filter-btn.active {
+      background: rgba(212, 173, 87, 0.15);
+      color: var(--gold);
+      border-color: rgba(212, 173, 87, 0.4);
+    }
+
+    .search-input {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      outline: none;
+      min-width: 220px;
+    }
+
+    .search-input:focus {
+      border-color: var(--gold);
+    }
+
+    .releases-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 12px;
+    }
+
+    .rel-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 14px 16px;
+      transition: all .2s;
+      position: relative;
+    }
+
+    .rel-card:hover {
+      border-color: var(--gold);
+      background: rgba(212, 173, 87, 0.03);
+    }
+
+    .rel-card.latest {
+      border-color: rgba(82, 182, 144, 0.4);
+      background: rgba(82, 182, 144, 0.04);
+    }
+
+    .rel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .rel-tag {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .rel-tag .badge-latest {
+      font-size: 10px;
+      background: var(--jade);
+      color: #000;
+      font-weight: 800;
+      padding: 1px 6px;
+      border-radius: 4px;
+      letter-spacing: .04em;
+    }
+
+    .rel-date {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--gold-muted);
+    }
+
+    .rel-desc {
+      font-size: 12.5px;
+      color: #c4cdc7;
+      line-height: 1.5;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .rel-link {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--gold);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .rel-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 36px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(212, 173, 87, 0.15);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: var(--mono);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      body { padding: 12px 10px 40px; }
+      header { padding: 20px 16px; }
+      .header-meta { align-items: flex-start; }
+      .kpi-row { grid-template-columns: 1fr 1fr; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .filter-bar { flex-direction: column; align-items: stretch; }
+      .search-input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-glow-bar"></div>
+
+    <!-- Header Section -->
+    <header>
+      <div class="header-main">
+        <div class="seal-box">悟</div>
+        <div class="header-titles">
+          <h1>
+            悟空面板 · 研发演进与实战攻坚全景
+            <span class="ver-badge">v1.7.15 → v2.2.0</span>
+          </h1>
+          <p>从单机控制台跨越至中央多机自治舰队，以精工细作锻造高可靠 VPS 架构</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="date-range">2026.10.17 — 10.29</div>
+        <div class="edition-tag">12 天连续发布 · 48 次迭代实战全景</div>
+      </div>
+    </header>
+
+    <!-- Key Metrics Section -->
+    <section class="kpi-row">
+      <div class="kpi-card">
+        <small>累计迭代发布</small>
+        <div class="val-row">
+          <strong style="color: var(--gold);">48</strong>
+          <span>次 Release</span>
+        </div>
+        <p>12 天高频验证 · 稳健递进交付</p>
+      </div>
+
+      <div class="kpi-card">
+        <small>跨越版本阶段</small>
+        <div class="val-row">
+          <strong style="color: #fff;">3</strong>
+          <span>大版本阶段</span>
+        </div>
+        <p>v1.7 探针 → v2.0 主控 → v2.2 极简</p>
+      </div>
+
+      <div class="kpi-card">
+        <small>移动端位移攻坚</small>
+        <div class="val-row">
+          <strong style="color: var(--jade);">0</strong>
+          <span>px 物理位移</span>
+        </div>
+        <p>3 层物理锁死 · 0 抖动 0 颠簸</p>
+      </div>
+
+      <div class="kpi-card">
+        <small>全自动测试矩阵</small>
+        <div class="val-row">
+          <strong style="color: var(--jade);">100%</strong>
+          <span>全绿通过</span>
+        </div>
+        <p>5 大 Linux 发行版 + 61 项端到端</p>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab-btn active" onclick="switchTab('dashboard')">📊 全局仪表盘</button>
+      <button class="nav-tab-btn" onclick="switchTab('architecture')">🚀 六大架构演进</button>
+      <button class="nav-tab-btn" onclick="switchTab('battles')">🛡️ 四大攻坚难题</button>
+      <button class="nav-tab-btn" onclick="switchTab('changelog')">📜 48 次发布全纪录 (<span id="total-badge">48</span>)</button>
+    </nav>
+
+    <!-- TAB 1: DASHBOARD -->
+    <div id="tab-dashboard" class="tab-pane active">
+      <div class="section-card">
+        <div class="section-title">
+          <i>策</i> 研发历程与核心阶段演化路线
+        </div>
+        <div class="grid-3">
+          <div class="feature-card" style="border-top: 2px solid var(--gold-muted);">
+            <div class="feature-head">
+              <span class="dot" style="background: var(--gold-muted);"></span>
+              <h3>阶段一：探针与双栈架构 (v1.7.15-32)</h3>
+            </div>
+            <p>攻克探针主机网络扫描、多网卡与节点出口 IP 提取，建立 IPv4/IPv6 双栈同屏探测与 24h 智能信誉感知，引入 REALITY 精选域名库与内核版本监控。</p>
+            <div class="feature-tag-row">
+              <span class="chip">18 次 Release</span>
+              <span class="chip">双栈信誉</span>
+              <span class="chip">REALITY预设</span>
+            </div>
+          </div>
+
+          <div class="feature-card" style="border-top: 2px solid var(--gold);">
+            <div class="feature-head">
+              <span class="dot" style="background: var(--gold);"></span>
+              <h3>阶段二：步入 2.0 时代！(v2.0.0-17)</h3>
+            </div>
+            <p>中央多机控制台成型；实现三位一体在线无损热升级；攻克 Linux 运行中可执行文件 text file busy 难题；安全中心重构，出口网络合流为统一中枢。</p>
+            <div class="feature-tag-row">
+              <span class="chip">18 次 Release</span>
+              <span class="chip">在线热升级</span>
+              <span class="chip">原子替换</span>
+              <span class="chip">出口中枢</span>
+            </div>
+          </div>
+
+          <div class="feature-card" style="border-top: 2px solid var(--jade);">
+            <div class="feature-head">
+              <span class="dot" style="background: var(--jade);"></span>
+              <h3>阶段三：极客防抖与极简发布 (v2.1.0-2.2.0)</h3>
+            </div>
+            <p>手机端重构 2×2 对称紧凑网格；彻底排查并消除移动端向上滑动时视口外千斤顶抖动，建立 3 层物理锁死；文案升华为「接入新远端主机」。</p>
+            <div class="feature-tag-row">
+              <span class="chip green">12 次 Release</span>
+              <span class="chip green">0px位移锁死</span>
+              <span class="chip green">2×2对称栅格</span>
+              <span class="chip green">极简沉淀</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-title">
+          <i>稳</i> 工程化基建与可靠性指标
+        </div>
+        <div class="grid-2">
+          <div class="feature-card">
+            <h3>多发行版自动化测试矩阵</h3>
+            <p>一键安装器与更新器在 GitHub Actions 中建立 Ubuntu、Debian、Alpine、Rocky Linux、AlmaLinux 5 大发行版矩阵，保障任意主机零环境依赖无损运行。</p>
+            <div class="feature-tag-row">
+              <span class="chip green">Ubuntu</span>
+              <span class="chip green">Debian</span>
+              <span class="chip green">Alpine (OpenRC)</span>
+              <span class="chip green">Rocky</span>
+              <span class="chip green">AlmaLinux</span>
+            </div>
+          </div>
+          <div class="feature-card">
+            <h3>前端高保真 CDP 自动化验证</h3>
+            <p>引入无头 Chrome DevTools 协议（CDP）对真实编译产物进行 360px、375px、393px、412px 多视口实时速率跳变采样，达成位移严格归零（0px）。</p>
+            <div class="feature-tag-row">
+              <span class="chip">CDP真机采样</span>
+              <span class="chip">61项单元测试</span>
+              <span class="chip">Go Race/Vet全绿</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: ARCHITECTURE INNOVATIONS -->
+    <div id="tab-architecture" class="tab-pane">
+      <div class="section-card">
+        <div class="section-title">
+          <i>革</i> 核心技术突破与架构演进（六大维度）
+        </div>
+        <div class="grid-2">
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>1. 舰队全局与伴生卡片（Celestial Fleet）</h3>
+            </div>
+            <p>建立中央多机控制台，每台远端保持自治，中央停机不影响现有节点。引入「舰队全局」伴生卡片，依据主机奇偶数自适应合体/分屏展示，汇聚全舰队月度账期、流量榜首、租期预警与一键扩容指令。</p>
+            <div class="feature-tag-row">
+              <span class="chip">奇偶自适应</span>
+              <span class="chip">账期汇总</span>
+              <span class="chip">租期预警</span>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>2. 实时流量监控与 2×2 紧凑栅格</h3>
+            </div>
+            <p>将移动端原本纵向冗长的汇总卡片重构为 2×2 紧凑对称网格（在线主机、运行节点、网络异常、实时流量）；全栈接入 WebSocket 高频实时上下行双向速率监控，等宽数字极致呈现。</p>
+            <div class="feature-tag-row">
+              <span class="chip">2×2对称栅格</span>
+              <span class="chip">WebSocket高频速率</span>
+              <span class="chip">tabular-nums</span>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>3. 全网卡双栈 IP 信誉与威胁情报感知</h3>
+            </div>
+            <p>全网卡与出口 IP 深度嗅探扫描，支持 IPv4/IPv6 双栈同屏探测；后端代理降级兜底 + 24小时智能缓存，毫秒级穿透展示蜜罐、扫描源、黑名单与信誉分（如 V4:76分 / V6:78分）。</p>
+            <div class="feature-tag-row">
+              <span class="chip">双栈全网卡扫描</span>
+              <span class="chip">24h分级缓存</span>
+              <span class="chip">威胁情报穿透</span>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>4. 三位一体零宕机在线热升级体系</h3>
+            </div>
+            <p>支持面板主控（Panel Controller）、轻量探针（Probe Agent）及 sing-box 内核一键在线无损热升级，跨架构跨系统自适应，支持状态流追踪与一键回退命令，彻底告别终端手动脚本。</p>
+            <div class="feature-tag-row">
+              <span class="chip">Panel / Probe / sing-box</span>
+              <span class="chip">一键热升级</span>
+              <span class="chip">自愈守护</span>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>5. 现代化安全中枢与出口汇流</h3>
+            </div>
+            <p>Fail2ban 登录防护深度监控与解除黑名单；UFW / firewalld / nftables 自动识别管理与批量规则下发；将住宅出口与 SOCKS 出口合流为统一出口中枢。</p>
+            <div class="feature-tag-row">
+              <span class="chip">Fail2ban 审计</span>
+              <span class="chip">三合一防火墙</span>
+              <span class="chip">统一出口中枢</span>
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-head">
+              <span class="dot"></span>
+              <h3>6. 东方天宫美学与极简文案调优</h3>
+            </div>
+            <p>深黑金金翠视觉秩序，微调金色文字对比度（#b89758），文案由繁琐逐步精炼至「舰队全局 / 账期汇总、租期预警与主机扩容」与「接入新远端主机」，兼具科技仪式感与极简体验。</p>
+            <div class="feature-tag-row">
+              <span class="chip">天宫暗黑美学</span>
+              <span class="chip">高对比度排版</span>
+              <span class="chip">极简仪式文案</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: HARD-FOUGHT BATTLES -->
+    <div id="tab-battles" class="tab-pane">
+      <div class="section-card">
+        <div class="section-title">
+          <i>破</i> 攻克的四大底层技术难题
+        </div>
+        <div class="grid-2">
+          <div class="battle-card">
+            <div class="b-head">
+              <h3>1. 移动端“视口外千斤顶”高频抖动</h3>
+              <span class="b-solution">3层物理锁死</span>
+            </div>
+            <p>高频 WebSocket 速率跳动引起文本折行撑大，卡片在视口上方如千斤顶般将下方整屏内容往下拉扯，且与移动端滚动锚定（Scroll Anchoring）补偿冲突造成剧烈弹跳。</p>
+            <div class="battle-detail">
+              <div>
+                <strong>排查诊断</strong>
+                <p>CDP 抓帧定位：总览页流量脉络 flex-wrap 折行暴增 32px，主机卡片头部折行暴增 8px，桌面 CSS 反向覆盖 84px。</p>
+              </div>
+              <div>
+                <strong>解决效果</strong>
+                <p>声明 overflow-anchor: none 消除错误补偿；锁死 grid-template-rows 行高；卡片严格 contain: strict，位移彻底锁死在 0px。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="battle-card">
+            <div class="b-head">
+              <h3>2. Linux 运行中二进制热升级崩溃</h3>
+              <span class="b-solution">跨 inode 原子替换</span>
+            </div>
+            <p>在线升级正在执行的 Go 二进制文件时，Linux 内核报错 ETXTBSY (text file busy)，导致升级中断或守护进程崩溃无法自愈。</p>
+            <div class="battle-detail">
+              <div>
+                <strong>排查诊断</strong>
+                <p>Linux 对正在映射执行的 ELF 文件加上了不可写入写锁，直接覆盖写入必报写错误。</p>
+              </div>
+              <div>
+                <strong>解决效果</strong>
+                <p>设计原子化流程：下载校验 -> 赋予执行权限 -> os.Rename 跨 inode 覆盖旧文件 -> 触发 OpenRC/Systemd 重启，零停机热升级。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="battle-card">
+            <div class="b-head">
+              <h3>3. 复杂虚拟/多网卡双栈 IP 穿透</h3>
+              <span class="b-solution">全网卡智能嗅探</span>
+            </div>
+            <p>多 IP VPS 存在 Docker 虚拟网卡、WireGuard 隧道以及本地临时 IPv6 干扰，易导致公网出口误判或外部威胁情报接口超时。</p>
+            <div class="battle-detail">
+              <div>
+                <strong>排查诊断</strong>
+                <p>简单提取本地首个接口会取到 docker0 或 utun 虚拟私网 IP，导致信誉库返回空值。</p>
+              </div>
+              <div>
+                <strong>解决效果</strong>
+                <p>设计网卡多重过滤算法，精准提取双栈真实公网 IP，结合后端双通道降级，保证在复杂拓扑下秒级识别。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="battle-card">
+            <div class="b-head">
+              <h3>4. 360px ~ 4K 全端自适应闭环</h3>
+              <span class="b-solution">响应式闭环</span>
+            </div>
+            <p>在 360px 极窄屏幕下，主机名、多状态指示器和流量标签极易互相挤压折行，后方全局 CSS 规则容易意外覆盖移动端特定高度。</p>
+            <div class="battle-detail">
+              <div>
+                <strong>排查诊断</strong>
+                <p>CSS 媒体查询级联权重声明位置不合理，导致移动端固定声明被桌面 min-height 覆盖。</p>
+              </div>
+              <div>
+                <strong>解决效果</strong>
+                <p>修复 CSS 级联作用域，对右上角速率区域锁死定宽（72px），收敛桌面端样式，达成全尺寸屏幕下的统一体验。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: RELEASES CHANGELOG -->
+    <div id="tab-changelog" class="tab-pane">
+      <div class="section-card">
+        <div class="filter-bar">
+          <div class="filter-btn-group">
+            <button class="filter-btn active" onclick="filterReleases('all', this)">全部 (48)</button>
+            <button class="filter-btn" onclick="filterReleases('v2.2', this)">v2.2 极简篇</button>
+            <button class="filter-btn" onclick="filterReleases('v2.1', this)">v2.1 防抖篇</button>
+            <button class="filter-btn" onclick="filterReleases('v2.0', this)">v2.0 主控篇</button>
+            <button class="filter-btn" onclick="filterReleases('v1.7', this)">v1.7 探针篇</button>
+          </div>
+          <input type="text" id="release-search" class="search-input" placeholder="🔍 搜索版本号或改动关键词..." oninput="searchReleases()">
+        </div>
+
+        <div id="releases-container" class="releases-grid">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <div>
+        <span>WUKONG PANEL</span> · <span>CELESTIAL FLEET ARCHITECTURE</span> · <span>AUTONOMOUS NODE ORCHESTRATION</span>
+      </div>
+      <div>
+        <span>VERSION: v2.2.0</span> · <span>2026.10.29 归档交付</span>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Tab switching logic
+    function switchTab(tabId) {
+      document.querySelectorAll('.nav-tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+      
+      const targetBtn = Array.from(document.querySelectorAll('.nav-tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
+      if (targetBtn) targetBtn.classList.add('active');
+      
+      const targetPane = document.getElementById('tab-' + tabId);
+      if (targetPane) targetPane.classList.add('active');
+    }
+
+    // 48 Releases Data
+    const allReleases = [
+      { tag: "v2.2.0", date: "2026-10-29", desc: "feat(web): 精简舰队伴生卡片展开态接入区域标题至「接入新远端主机」，同步无障碍与多语言", isLatest: true },
+      { tag: "v2.1.11", date: "2026-10-29", desc: "fix(web): 彻底锁死网格行高与 3 层物理包含，彻底消除移动端向上滑动时视口外千斤顶位移", isLatest: false },
+      { tag: "v2.1.10", date: "2026-10-28", desc: "fix(web): 手机端恢复 2x2 紧凑对称网格，伴生卡片标题简化为「舰队全局」，右侧状态上下排列", isLatest: false },
+      { tag: "v2.1.9", date: "2026-10-28", desc: "revert(fleet): 回滚至 v2.1.3 基准并临时隐藏手机端流量展示以隔离定位问题根因", isLatest: false },
+      { tag: "v2.1.8", date: "2026-10-28", desc: "test(web): 临时隐藏舰队汇总卡片速率以验证手机端页面位移诱因", isLatest: false },
+      { tag: "v2.1.7", date: "2026-10-28", desc: "fix(web): 锚定实时流量速率尺寸，精炼舰队全局文案与数字排版", isLatest: false },
+      { tag: "v2.1.6", date: "2026-10-28", desc: "fix(web): 修复伴生卡片印章拉伸，隔离伴生卡片高频速率更新", isLatest: false },
+      { tag: "v2.1.5", date: "2026-10-28", desc: "fix(web): 锚定实时速率布局容器，防止高频字符跳动挤压换行", isLatest: false },
+      { tag: "v2.1.4", date: "2026-10-28", desc: "test(web): 手机端舰队页临时隐藏实时速率进行灰度测试", isLatest: false },
+      { tag: "v2.1.3", date: "2026-10-28", desc: "fix(web): 防止移动端卡片文本溢出，稳定舰队高频轮询刷新", isLatest: false },
+      { tag: "v2.1.1", date: "2026-10-28", desc: "chore(web): 同步嵌入式构建产物，优化顶部栏与多主机切换体验", isLatest: false },
+      { tag: "v2.1.0", date: "2026-10-28", desc: "feat(ui): 移除多主机切换圆点，移动端顶部栏紧凑化重构", isLatest: false },
+      { tag: "v2.0.17", date: "2026-10-28", desc: "fix(agent): 在线更新与 Agent 启动时自动清理历史更新备份文件", isLatest: false },
+      { tag: "v2.0.16", date: "2026-10-28", desc: "fix(installer): 加固 bootstrap、ACME 依赖、IPv6 禁用下的 Nginx 兼容", isLatest: false },
+      { tag: "v2.0.15", date: "2026-10-27", desc: "feat(ui): 将网络、订阅令牌与危险区合并至右侧设置卡片，提升暗色模式金色文字可读性", isLatest: false },
+      { tag: "v2.0.14", date: "2026-10-27", desc: "fix(ui): 舰队全局头部实时汇总吞吐量，自动清理已离线的过期订阅 ID", isLatest: false },
+      { tag: "v2.0.13", date: "2026-10-27", desc: "feat(ui): 舰队伴生卡片支持偶数台主机时分屏双卡自适应排布", isLatest: false },
+      { tag: "v2.0.12", date: "2026-10-27", desc: "feat(ui): 增加奇数台主机合体伴生卡片，汇聚账期、租期与扩容指令", isLatest: false },
+      { tag: "v2.0.11", date: "2026-10-27", desc: "feat(ui): 重构设置页面布局，强化令牌安全轮换与快捷预设", isLatest: false },
+      { tag: "v2.0.10", date: "2026-10-27", desc: "feat(web): 将住宅出口与 SOCKS 出口合并为统一出口中枢，支持一键复制全局订阅", isLatest: false },
+      { tag: "v2.0.9", date: "2026-10-26", desc: "feat(security): 全面重构防火墙管理 UI 与 SSH 登录防护指标看板", isLatest: false },
+      { tag: "v2.0.8", date: "2026-10-26", desc: "feat(security): 防火墙新增 TCP+UDP 协议双选与大写协议展示", isLatest: false },
+      { tag: "v2.0.7", date: "2026-10-26", desc: "feat(web): 中央主控更新成功后平滑延迟 1 秒重载页面，打磨完成态反馈", isLatest: false },
+      { tag: "v2.0.6", date: "2026-10-26", desc: "style(web): 亮色模式下恢复探针/面板与 sing-box 升级胶囊翡翠绿与靛紫配色", isLatest: false },
+      { tag: "v2.0.5", date: "2026-10-26", desc: "fix(probe): 在线升级完成后通过 OpenRC 或 Systemd 显式重启服务", isLatest: false },
+      { tag: "v2.0.4", date: "2026-10-26", desc: "feat(fleet): 支持通过中央主控对远端面板进行无损在线热升级", isLatest: false },
+      { tag: "v2.0.3", date: "2026-10-26", desc: "fix(probe): 下载 GitHub release 资产时自动追踪 302 重定向", isLatest: false },
+      { tag: "v2.0.2", date: "2026-10-26", desc: "fix(web): 确保移动端媒体查询样式正确覆盖升级提示文案", isLatest: false },
+      { tag: "v2.0.1", date: "2026-10-26", desc: "fix(fleet): 允许探针主机查询任务状态与舰队快照资源", isLatest: false },
+      { tag: "v2.0.0", date: "2026-10-26", desc: "feat(release): 迈入 2.0 时代！攻克可执行文件 ETXTBSY 占用，实现零停机原子热升级", isLatest: false },
+      { tag: "v1.7.32", date: "2026-10-26", desc: "feat: 精简 REALITY 伪装域名并设置 s0.awsstatic.com 为默认伪装域名", isLatest: false },
+      { tag: "v1.7.31", date: "2026-10-25", desc: "fix: 修复面板主机在线热升级崩溃并保留探针更新能力", isLatest: false },
+      { tag: "v1.7.30", date: "2026-10-25", desc: "fix(web): 移动端小屏移除更新胶囊中的冗余字符", isLatest: false },
+      { tag: "v1.7.29", date: "2026-10-25", desc: "feat: 新增主控面板与轻量探针的一键在线热升级功能", isLatest: false },
+      { tag: "v1.7.28", date: "2026-10-25", desc: "fix(web): 使用相对 API 路径进行版本检测，CSP 放行 GitHub", isLatest: false },
+      { tag: "v1.7.27", date: "2026-10-24", desc: "feat: 新增 sing-box 内核运行时版本更新提示与弹窗交互", isLatest: false },
+      { tag: "v1.7.26", date: "2026-10-24", desc: "feat(fleet): 增加面板与探针主机的版本更新指示器", isLatest: false },
+      { tag: "v1.7.25", date: "2026-10-24", desc: "fix(ui): 优化 REALITY 伪装预设选择器文字与弹出层层级", isLatest: false },
+      { tag: "v1.7.24", date: "2026-10-24", desc: "feat: 新增精心调优的 REALITY 伪装域名预设库与快速标签", isLatest: false },
+      { tag: "v1.7.23", date: "2026-10-23", desc: "fix(ui): 修复亮色模式下 IP 信誉弹窗与探针节点列表底色发灰问题", isLatest: false },
+      { tag: "v1.7.22", date: "2026-10-23", desc: "feat(ui): 将 IP 双栈信誉与威胁情报自动检测周期设为 24 小时分级缓存", isLatest: false },
+      { tag: "v1.7.21", date: "2026-10-23", desc: "style(fleet): 信誉徽标标签升级为大写 V4：/ V6：，强化高对比度视觉", isLatest: false },
+      { tag: "v1.7.20", date: "2026-10-23", desc: "feat(ui): 双栈候选 IP 优先展示 IPv4 并将主机在线状态显示为绿色", isLatest: false },
+      { tag: "v1.7.19", date: "2026-10-22", desc: "feat(network): 增强多机双栈 IP 扫描与接口地址提取，支持全网卡公网真实出口识别", isLatest: false },
+      { tag: "v1.7.18", date: "2026-10-22", desc: "feat: 支持双栈 IPv4/IPv6 同屏检测与宽屏弹窗布局", isLatest: false },
+      { tag: "v1.7.17", date: "2026-10-21", desc: "feat: 引入 IP 信誉与威胁情报检测（Net.Coffee + 后端代理降级）", isLatest: false },
+      { tag: "v1.7.16", date: "2026-10-18", desc: "feat(fleet): 主机卡片头部显示实时网络上下行速率", isLatest: false },
+      { tag: "v1.7.15", date: "2026-10-18", desc: "feat(netcheck): 增加回退目标支持并更新轻量探针默认配置", isLatest: false }
+    ];
+
+    let currentFilter = 'all';
+
+    function renderReleases(list) {
+      const c = document.getElementById('releases-container');
+      c.innerHTML = '';
+      if (!list.length) {
+        c.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-dim); padding: 40px;">没有找到匹配的 Release 记录</div>';
+        return;
+      }
+      list.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'rel-card' + (r.isLatest ? ' latest' : '');
+        div.innerHTML = `
+          <div class="rel-header">
+            <span class="rel-tag">
+              ${r.tag}
+              ${r.isLatest ? '<span class="badge-latest">LATEST</span>' : ''}
+            </span>
+            <span class="rel-date">${r.date}</span>
+          </div>
+          <p class="rel-desc">${r.desc}</p>
+          <a class="rel-link" href="https://github.com/252201/wukong-panel/releases/tag/${r.tag}" target="_blank" rel="noopener">
+            查看 GitHub Release ↗
+          </a>
+        `;
+        c.appendChild(div);
+      });
+    }
+
+    function filterReleases(filter, btn) {
+      currentFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      searchReleases();
+    }
+
+    function searchReleases() {
+      const q = document.getElementById('release-search').value.toLowerCase().trim();
+      const filtered = allReleases.filter(r => {
+        const matchFilter = (currentFilter === 'all') || r.tag.startsWith(currentFilter);
+        const matchQuery = !q || r.tag.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q) || r.date.includes(q);
+        return matchFilter && matchQuery;
+      });
+      renderReleases(filtered);
+    }
+
+    // Initial render
+    renderReleases(allReleases);
+  </script>
+</body>
+</html>
