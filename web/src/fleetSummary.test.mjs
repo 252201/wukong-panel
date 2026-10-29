@@ -207,4 +207,8 @@ test('fleet-order-modal layout is wide and flags are constrained to prevent dist
   // 4. Central host in pinned box has #1 badge and central styling
   assert.match(appVue, /class="fleet-order-pinned-box"/)
   assert.match(appVue, /class="order-index-badge">#1<\/span>/)
+
+  // 5. Fleet card drag handle is positioned at top-left corner
+  assert.match(stylesCss, /\.fleet-drag-handle\s*\{[^}]*position:\s*absolute;[^}]*top:\s*7px;[^}]*left:\s*8px;/)
+  assert.match(appVue, /<article[^>]*class="[^"]*fleet-host-card[^"]*"[^>]*>\s*<span v-if="host\.id !== 'local'" class="fleet-drag-handle"/)
 })

@@ -2531,21 +2531,30 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   line-height: 1;
 }
 .fleet-drag-handle {
+  position: absolute;
+  top: 7px;
+  left: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--muted-2);
   font-size: 13px;
   cursor: grab;
   user-select: none;
-  opacity: 0.55;
-  transition: opacity 0.15s, color 0.15s;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s, transform 0.15s;
+  z-index: 2;
 }
 .fleet-host-card:hover .fleet-drag-handle {
-  opacity: 1;
+  opacity: 0.85;
   color: var(--gold);
+}
+.fleet-drag-handle:hover {
+  opacity: 1;
+  color: var(--gold-bright);
+  transform: scale(1.15);
 }
 .fleet-drag-handle:active {
   cursor: grabbing;
