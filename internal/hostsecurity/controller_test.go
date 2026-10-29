@@ -277,6 +277,21 @@ func TestSSHConfigValidationAndRendering(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	for _, tc := range [][]string{
+		{"127.0.0.1/8", "::1"},
+		{"127.0.0.0/8", "127.0.0.1/8", "::1"},
+		{"127.0.0.1", "::1/128"},
+	} {
+		r := defaults()
+		r.IgnoreIPs = tc
+		validated, err := validateConfig(r)
+		if err != nil {
+			t.Fatalf("validateConfig failed for %v: %v", tc, err)
+		}
+		if len(validated.IgnoreIPs) != 2 || validated.IgnoreIPs[0] != "127.0.0.1/8" || validated.IgnoreIPs[1] != "::1" {
+			t.Fatalf("expected [127.0.0.1/8 ::1], got %v for input %v", validated.IgnoreIPs, tc)
+		}
+	}
 	for _, ip := range []string{"0.0.0.0/0", "::/0", "1.2.3.4\nbanaction=evil", "$(touch /tmp/pwn)", "fe80::1%eth0"} {
 		r := defaults()
 		r.IgnoreIPs = []string{ip}

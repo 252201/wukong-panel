@@ -168,7 +168,8 @@ function refresh(skip: ('firewall'|'fail2ban')[] = []): Promise<void> {
   loadLocations()
   if (!hydrated) {
    const existing = fb.jails.length === 1 && !fb.managedJail && fb.active ? fb.jails[0].config : fb.config
-   Object.assign(config,existing);whitelist.value = existing.ignoreIPs.join('\n');hydrated = true
+   const cleaned = Array.from(new Set((existing.ignoreIPs || []).map(ip => ip === '127.0.0.0/8' ? '127.0.0.1/8' : ip === '::1/128' ? '::1' : ip)))
+   Object.assign(config,existing);whitelist.value = cleaned.join('\n');hydrated = true
   }
  }).catch(e => {if (current()) {fbVerified.value = false;fbError.value = e instanceof Error ? e.message : String(e)}}).finally(() => {if (current()) fbLoading.value = false}) : Promise.resolve()
  // Each resource publishes immediately. Start SSH after the firewall read (or
@@ -257,8 +258,8 @@ const bansExpanded = ref(false)
 function displayedBannedIPs(ips: string[]): string[] {
  const q = banFilter.value.trim().toLowerCase()
  const filtered = q ? ips.filter(ip => ip.toLowerCase().includes(q) || sourceCountry(ip).toLowerCase().includes(q)) : ips
- if (q || bansExpanded.value || filtered.length <= 12) return filtered
- return filtered.slice(0, 12)
+ if (q || bansExpanded.value || filtered.length <= 10) return filtered
+ return filtered.slice(0, 10)
 }
 function stageSSH() {
  const existing = externalSSH.value
@@ -515,7 +516,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
        </div>
        <div v-if="jail.banned.length > 0" class="ssh-bans-tools">
         <input v-if="jail.banned.length > 6" v-model="banFilter" type="search" class="ssh-ban-search" :placeholder="t('搜索 IP 或国家…','Filter IP or country…')" :aria-label="t('搜索封禁 IP 或国家','Filter banned IP or country')">
-        <button v-if="!banFilter.trim() && jail.banned.length > 12" type="button" class="secondary ssh-expand-btn" @click="bansExpanded = !bansExpanded">{{bansExpanded ? t('收起列表','Collapse') : t(`展开全部 (${jail.banned.length})`,`Show all (${jail.banned.length})`)}}</button>
+        <button v-if="!banFilter.trim() && jail.banned.length > 10" type="button" class="secondary ssh-expand-btn" @click="bansExpanded = !bansExpanded">{{bansExpanded ? t('收起列表','Collapse') : t(`展开全部 (${jail.banned.length})`,`Show all (${jail.banned.length})`)}}</button>
        </div>
       </div>
       <div v-if="displayedBannedIPs(jail.banned).length" class="security-bans">
@@ -574,7 +575,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
      <label class="wide">
       <span>{{t('白名单 IP / CIDR','Whitelist IP / CIDR')}}</span>
       <textarea v-model="whitelist" rows="3" placeholder="192.0.2.1/32&#10;2001:db8::/64"></textarea>
-      <small>{{t('填写不希望被封禁的可信 IP，每行一个。本机地址始终放行；不会自动加入你当前的上网 IP。','Enter trusted IPs that should never be banned, one per line. Local addresses remain trusted; your current Internet IP is not added automatically.')}}</small>
+      <small>{{t('填写不希望被封禁的可信 IP，每行一个。默认放行 127.0.0.1/8 与 ::1（本机回环），防止本地反代、探针与系统服务被误封锁死；不会自动加入当前上网 IP。','Enter trusted IPs that should never be banned, one per line. Defaults include 127.0.0.1/8 and ::1 (loopback) to prevent local proxies/probes from being locked out; your current IP is not added automatically.')}}</small>
      </label>
      <button class="primary" :disabled="!fbWritable || !fail2ban?.installed">{{fail2ban?.canActivate ? t('预览并启用现有防护','Preview and enable existing protection') : externalSSH ? t('预览并交由面板管理','Preview panel management') : fail2ban?.managedJail ? t('预览并保存防护设置','Preview and save protection settings') : t('预览并启用 SSH 防护','Preview and enable SSH protection')}}</button>
     </form>
@@ -584,6 +585,7 @@ onBeforeUnmount(() => {alive = false;clearInterval(refreshTimer);clearInterval(c
      <summary>{{t('技术详情','Technical details')}}</summary>
      <p>{{t('配置名称（Fail2ban jail）','Configuration name (Fail2ban jail)')}}：<code>{{jail.name}}</code></p>
      <p>{{t('jail 是一组日志检测和封禁设置，页面称为“登录防护”。','A jail groups log detection and ban settings; this page calls it login protection.')}}</p>
+     <p>{{t('白名单默认包含 127.0.0.1/8 与 ::1（IPv4/IPv6 本机回环），确保本地代理、探针与系统进程间通信永不被阻断。','The whitelist always includes 127.0.0.1/8 and ::1 (IPv4/IPv6 loopback) so local proxies, probes and daemon communications are never blocked.')}}</p>
      <p>{{t('国家信息由 ipwho.is 查询，只发送公开 IP；内网或保留地址不查询。','Country lookup uses ipwho.is and sends only public IPs; private and reserved addresses are not queried.')}}</p>
     </details>
     <details v-if="fail2ban?.installed" class="security-reset">
