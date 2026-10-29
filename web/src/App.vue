@@ -2146,10 +2146,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <em>{{ fleetNexus.pendingUpdateItems > 0 ? `${fleetNexus.pendingUpdateItems} 项组件可在线升级` : 'Panel 与内核均最新' }}</em>
                 </div>
               </section>
-              <section class="fleet-host-network fleet-companion-enroll" aria-label="快速扩容远端主机">
+              <section class="fleet-host-network fleet-companion-enroll" aria-label="接入新远端主机">
                 <div class="fleet-network-heading">
                   <div class="fleet-network-title-wrap">
-                    <strong>快速扩容 · 接入新远端主机</strong>
+                    <strong>接入新远端主机</strong>
                     <span class="fleet-companion-pill">10 分钟一次性令牌</span>
                   </div>
                   <small>HTTPS 双向鉴权 · 远端自治</small>
@@ -2246,13 +2246,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
               </footer>
             </article>
-            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card fleet-companion-enroll-card" aria-label="快速扩容远端主机">
+            <article class="panel-card fleet-host-card fleet-companion-card fleet-companion-split-card fleet-companion-enroll-card" aria-label="接入新远端主机">
               <header>
                 <div>
                   <span class="fleet-companion-seal jade-seal" aria-hidden="true">拓</span>
                   <span>
                     <span class="fleet-host-title">
-                      <b>快速扩容 · 接入新远端主机</b>
+                      <b>接入新远端主机</b>
                       <span class="fleet-companion-pill">10 分钟一次性令牌</span>
                     </span>
                     <small>HTTPS 双向鉴权 · 远端本机自治，中央停机不影响现有节点</small>
@@ -2270,7 +2270,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </aside>
               </header>
               <div class="fleet-host-body fleet-split-body">
-                <section class="fleet-host-network fleet-companion-enroll fleet-companion-enroll-split" aria-label="快速扩容远端主机">
+                <section class="fleet-host-network fleet-companion-enroll fleet-companion-enroll-split" aria-label="接入新远端主机">
                   <div class="fleet-network-group fleet-enroll-col">
                     <div class="fleet-network-region">
                       <strong>完整面板主机</strong>
