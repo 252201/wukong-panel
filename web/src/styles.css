@@ -2082,6 +2082,160 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: var(--danger-text, #ef4444);
 }
 
+.singbox-preflight-card {
+  padding: 12px 14px;
+  background: rgba(var(--wash-rgb), 0.03);
+  border: 1px solid rgba(var(--wash-rgb), 0.08);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.singbox-preflight-card.is-success {
+  background: rgba(82, 182, 144, 0.04);
+  border-color: rgba(82, 182, 144, 0.25);
+}
+.singbox-preflight-card.is-blocked {
+  background: rgba(196, 70, 53, 0.06);
+  border-color: rgba(196, 70, 53, 0.35);
+}
+.singbox-preflight-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.singbox-preflight-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.preflight-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(var(--wash-rgb), 0.06);
+  color: var(--muted);
+  font: 600 12px "IBM Plex Mono", monospace;
+  flex-shrink: 0;
+}
+.preflight-status-badge.success {
+  background: rgba(82, 182, 144, 0.15);
+  color: var(--jade);
+}
+.preflight-status-badge.blocked {
+  background: rgba(196, 70, 53, 0.18);
+  color: var(--danger-text, #ef4444);
+}
+.singbox-preflight-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.singbox-preflight-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.singbox-preflight-row b {
+  font-size: 13px;
+  color: var(--paper);
+}
+.singbox-preflight-text small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.singbox-preflight-text small.preflight-err-sub {
+  color: var(--danger-text, #ef4444);
+}
+.preflight-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.preflight-tag.tag-success {
+  background: rgba(82, 182, 144, 0.14);
+  color: var(--jade);
+  border: 1px solid rgba(82, 182, 144, 0.3);
+}
+.preflight-tag.tag-blocked {
+  background: rgba(196, 70, 53, 0.14);
+  color: var(--danger-text, #ef4444);
+  border: 1px solid rgba(196, 70, 53, 0.35);
+}
+.preflight-toggle-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(var(--wash-rgb), 0.05);
+  border: 1px solid rgba(var(--wash-rgb), 0.08);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.preflight-toggle-btn:hover {
+  color: var(--paper);
+  background: rgba(var(--wash-rgb), 0.09);
+}
+.singbox-preflight-details {
+  border-top: 1px solid rgba(var(--wash-rgb), 0.06);
+  padding-top: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preflight-file-item {
+  padding: 6px 8px;
+  background: rgba(var(--wash-rgb), 0.02);
+  border-radius: 3px;
+}
+.preflight-file-item .file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.preflight-file-item b {
+  font-size: 11px;
+  color: var(--paper);
+}
+.preflight-file-item small {
+  color: var(--muted-2);
+  font: 500 9px "IBM Plex Mono", monospace;
+}
+.preflight-file-item .change-tag {
+  color: var(--gold);
+  font: 500 10px "IBM Plex Mono", monospace;
+}
+.preflight-file-item ul {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.preflight-file-item li.change {
+  color: var(--jade);
+}
+.preflight-file-item li.warning {
+  color: var(--gold);
+}
+.preflight-file-item li.error {
+  color: var(--danger-text, #ef4444);
+}
+
 /* Light mode overrides for version update */
 :root[data-effective-theme="light"] .fleet-update-pill {
   border-color: rgba(16, 185, 129, 0.4);
@@ -2157,6 +2311,42 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .update-success-subhint {
   color: #047857;
+}
+:root[data-effective-theme="light"] .singbox-preflight-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+:root[data-effective-theme="light"] .singbox-preflight-card.is-success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+:root[data-effective-theme="light"] .singbox-preflight-card.is-blocked {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+:root[data-effective-theme="light"] .preflight-status-badge {
+  background: #e2e8f0;
+  color: #475569;
+}
+:root[data-effective-theme="light"] .preflight-status-badge.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+:root[data-effective-theme="light"] .preflight-status-badge.blocked {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+:root[data-effective-theme="light"] .preflight-toggle-btn {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+:root[data-effective-theme="light"] .preflight-toggle-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+:root[data-effective-theme="light"] .preflight-file-item {
+  background: #f1f5f9;
 }
 
 /* Fleet odd-host companion card (Plan A: Global Nexus + Quick Enrollment) */
