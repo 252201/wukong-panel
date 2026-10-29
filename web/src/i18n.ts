@@ -722,6 +722,7 @@ const english: Record<string, string> = {
   'Panel 与内核均最新': 'Panel and kernel up to date',
   '快速扩容远端主机': 'Quick remote host expansion',
   '快速扩容 · 接入新远端主机': 'Quick expansion · Enroll remote host',
+  '接入新远端主机': 'Enroll remote host',
   '10 分钟一次性令牌': '10-min one-time token',
   'HTTPS 双向鉴权 · 远端自治': 'Mutual HTTPS auth · Autonomous remote',
   '完整面板主机': 'Full panel host',
