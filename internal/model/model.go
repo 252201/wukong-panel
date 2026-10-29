@@ -484,6 +484,7 @@ type FleetStatus struct {
 	LocalHostID           string              `json:"localHostId"`
 	Hosts                 []FleetHost         `json:"hosts"`
 	ArchivedHosts         []FleetHost         `json:"archivedHosts,omitempty"`
+	HostOrder             []string            `json:"hostOrder,omitempty"`
 	SelectedHostIDs       []string            `json:"selectedHostIds,omitempty"`
 	SelectedNodeIDs       map[string][]string `json:"selectedNodeIds,omitempty"`
 	GlobalSubscription    string              `json:"globalSubscription,omitempty"`

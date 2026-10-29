@@ -13,7 +13,15 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { fleetHostRateHint, networkGroupFrom, recentNetworkLossPct, summarizeFleet, type NetworkGroupName } from './fleetSummary'
+import {
+  fleetHostRateHint,
+  networkGroupFrom,
+  recentNetworkLossPct,
+  summarizeFleet,
+  sortFleetHostsByOrder,
+  sortRemoteHostsByPreset,
+  type NetworkGroupName,
+} from './fleetSummary'
 import { realityPresets, flattenRealityPresets, findRealityPreset } from './realityPresets'
 import {
   fetchLatestRelease,
@@ -117,7 +125,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -715,6 +723,132 @@ async function submitFleetHostSettings() {
   } finally {
     busy.value = false
   }
+}
+
+// Custom Fleet Host Ordering (excluding central local host and fleet companion card)
+const draggedHostId = ref<string | null>(null)
+const dragOverHostId = ref<string | null>(null)
+const modalDraggedIndex = ref<number | null>(null)
+const modalDragOverIndex = ref<number | null>(null)
+const fleetOrderList = ref<FleetHost[]>([])
+const fleetOrderSaving = ref(false)
+
+function openFleetOrderModal() {
+  fleetOrderList.value = remoteFleetHosts.value.map(h => ({ ...h }))
+  modal.value = 'fleet-order'
+}
+
+function moveFleetHostInList(fromIndex: number, toIndex: number) {
+  if (fromIndex < 0 || fromIndex >= fleetOrderList.value.length || toIndex < 0 || toIndex >= fleetOrderList.value.length || fromIndex === toIndex) return
+  const item = fleetOrderList.value.splice(fromIndex, 1)[0]
+  fleetOrderList.value.splice(toIndex, 0, item)
+}
+
+function applyHostPresetSort(preset: 'latency' | 'expiry' | 'traffic' | 'name' | 'default') {
+  fleetOrderList.value = sortRemoteHostsByPreset(fleetOrderList.value, preset)
+}
+
+async function applyFleetHostOrder(order: string[]) {
+  if (!fleetStatus.value) return
+  fleetStatus.value.hosts = sortFleetHostsByOrder(fleetStatus.value.hosts, order)
+  fleetStatus.value.hostOrder = order
+  await api.saveFleetHostOrder(order)
+}
+
+async function saveFleetOrderModal() {
+  fleetOrderSaving.value = true
+  const order = fleetOrderList.value.map(h => h.id)
+  try {
+    await applyFleetHostOrder(order)
+    modal.value = null
+    notify(language.value === 'en-US' ? 'Host order updated' : '主机卡片排序已保存')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : (language.value === 'en-US' ? 'Failed to save order' : '保存排序失败'))
+  } finally {
+    fleetOrderSaving.value = false
+  }
+}
+
+function onHostDragStart(e: DragEvent, host: FleetHost) {
+  if (host.id === 'local') {
+    e.preventDefault()
+    return
+  }
+  draggedHostId.value = host.id
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', host.id)
+  }
+}
+
+function onHostDragOver(e: DragEvent, host: FleetHost) {
+  if (!draggedHostId.value || host.id === 'local' || draggedHostId.value === host.id) return
+  dragOverHostId.value = host.id
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onHostDragLeave(_e: DragEvent, host: FleetHost) {
+  if (dragOverHostId.value === host.id) {
+    dragOverHostId.value = null
+  }
+}
+
+async function onHostDrop(_e: DragEvent, targetHost: FleetHost) {
+  const fromId = draggedHostId.value
+  const toId = targetHost.id
+  draggedHostId.value = null
+  dragOverHostId.value = null
+  if (!fromId || !toId || fromId === toId || toId === 'local' || fromId === 'local') return
+
+  const currentRemote = remoteFleetHosts.value.map(h => h.id)
+  const fromIndex = currentRemote.indexOf(fromId)
+  const toIndex = currentRemote.indexOf(toId)
+  if (fromIndex === -1 || toIndex === -1) return
+
+  currentRemote.splice(fromIndex, 1)
+  currentRemote.splice(toIndex, 0, fromId)
+
+  try {
+    await applyFleetHostOrder(currentRemote)
+    notify(language.value === 'en-US' ? 'Host order updated' : '主机卡片顺序已调整')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : (language.value === 'en-US' ? 'Failed to update order' : '更新排序失败'))
+  }
+}
+
+function onHostDragEnd() {
+  draggedHostId.value = null
+  dragOverHostId.value = null
+}
+
+function onModalDragStart(e: DragEvent, index: number) {
+  modalDraggedIndex.value = index
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(index))
+  }
+}
+
+function onModalDragOver(e: DragEvent, index: number) {
+  if (modalDraggedIndex.value === null || modalDraggedIndex.value === index) return
+  modalDragOverIndex.value = index
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onModalDrop(_e: DragEvent, toIndex: number) {
+  if (modalDraggedIndex.value === null) return
+  moveFleetHostInList(modalDraggedIndex.value, toIndex)
+  modalDraggedIndex.value = null
+  modalDragOverIndex.value = null
+}
+
+function onModalDragEnd() {
+  modalDraggedIndex.value = null
+  modalDragOverIndex.value = null
 }
 
 function hostVersionString(host: FleetHost): string {
@@ -2115,12 +2249,40 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
 
       <div v-if="page === 'fleet'" class="page-content fleet-page">
-        <div class="page-intro"><div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div><div class="fleet-enroll-actions"><button class="primary" @click="createFleetEnrollment('panel')">＋ 接入面板</button><button class="secondary" @click="createFleetEnrollment('probe')">＋ 接入轻量探针</button></div></div>
+        <div class="page-intro">
+          <div><p>CELESTIAL FLEET</p><h2>中央多机控制台</h2><small class="page-caption">每台远端保持本机自治；中央停机不会影响现有节点。</small></div>
+          <div class="fleet-enroll-actions">
+            <button v-if="remoteFleetHosts.length >= 2" type="button" class="secondary fleet-sort-btn" title="自定义远端主机卡片排列顺序" @click="openFleetOrderModal"><span class="fleet-sort-icon">⇅</span> 自定义排序</button>
+            <button class="primary" @click="createFleetEnrollment('panel')">＋ 接入面板</button>
+            <button class="secondary" @click="createFleetEnrollment('probe')">＋ 接入轻量探针</button>
+          </div>
+        </div>
         <section class="fleet-summary-grid"><article><small>主机在线</small><strong>{{ fleetAggregate.online }}<span>/{{ fleetAggregate.total }}</span></strong><em>30 秒在线窗口</em></article><article><small>运行节点</small><strong>{{ fleetAggregate.runningNodes }}<span>/{{ fleetAggregate.knownNodes }}</span></strong><em>在线运行 / 已知节点</em></article><article><small>网络探测异常</small><strong>{{ fleetAggregate.online ? fleetAggregate.networkAlerts : '—' }}<span v-if="fleetAggregate.online"> {{ language === 'en-US' ? 'hosts' : '台' }}</span></strong><em>{{ language === 'en-US' ? `30-min total loss ≥5% or probe outage${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} awaiting samples` : ''}` : `近 30 分钟总丢包率 ≥5% / 探测中断${fleetAggregate.networkPending ? ` · ${fleetAggregate.networkPending} 台待采样` : ''}` }}</em></article><article class="fleet-summary-traffic-card"><small>实时流量</small><strong>↓ <b>{{ rate(fleetAggregate.rx) }}</b></strong><em>↑ <b>{{ rate(fleetAggregate.tx) }}</b></em></article></section>
         <section class="fleet-host-grid">
-          <article v-for="host in fleetHosts" :key="host.id" class="panel-card fleet-host-card" :class="{ offline: !host.online, incompatible: !host.compatible }">
+          <article
+            v-for="host in fleetHosts"
+            :key="host.id"
+            class="panel-card fleet-host-card"
+            :class="{
+              offline: !host.online,
+              incompatible: !host.compatible,
+              'is-draggable': host.id !== 'local',
+              'is-dragging': draggedHostId === host.id,
+              'drag-over': dragOverHostId === host.id
+            }"
+            :draggable="host.id !== 'local'"
+            @dragstart="onHostDragStart($event, host)"
+            @dragover.prevent="onHostDragOver($event, host)"
+            @dragleave="onHostDragLeave($event, host)"
+            @drop.prevent="onHostDrop($event, host)"
+            @dragend="onHostDragEnd"
+          >
             <header>
-              <div><i></i><span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span></div>
+              <div>
+                <span v-if="host.id !== 'local'" class="fleet-drag-handle" title="按住拖拽以调整卡片顺序" aria-label="按住拖拽调整顺序">⠿</span>
+                <i></i>
+                <span><span class="fleet-host-title"><b>{{ host.id === 'local' ? '中央本机' : host.name }}</b><span v-if="host.snapshot?.location?.countryCode" class="fleet-host-country" :title="host.snapshot.location.publicIP"><img class="fleet-host-flag" :src="countryFlagURL(host.snapshot.location.countryCode)" alt="" aria-hidden="true"> {{ hostCountryName(host.snapshot.location.countryCode) }}</span><span v-if="host.expiresAt" class="fleet-host-expiry fleet-host-expiry-header" :class="expiryTone(host.expiresAt)" :title="`到期时间: ${host.expiresAt}`">{{ expiryLabel(host.expiresAt) }}</span></span><small>{{ host.os || 'Linux' }} · {{ host.arch || 'unknown' }}</small></span>
+              </div>
               <aside class="fleet-header-aside">
                 <div class="fleet-header-rates" :title="fleetRateHint(host)">
                   <span class="fleet-rate-down">↓ <b>{{ host.online ? rate(host.snapshot?.overview?.now?.rxBps || 0) : '0 B/s' }}</b></span>
@@ -3603,6 +3765,95 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </button>
           </template>
         </div>
+      </div>
+    </div>
+    <div v-else-if="modal === 'fleet-order'" class="modal-card compact fleet-order-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal">序</span>
+      <p class="eyebrow">FLEET REORDER</p>
+      <h2>主机卡片自定义排序</h2>
+      <p>拖拽或点击上下箭头调整远端主机的排列顺序；中央本机与全局卡片位置保持固定。</p>
+
+      <!-- 固定置顶中央本机提示 -->
+      <div class="fleet-order-pinned-box">
+        <div class="pinned-info">
+          <span class="pinned-lock-icon">🔒</span>
+          <div class="pinned-title">
+            <b>中央本机</b>
+            <span class="pinned-sub">固定首位（不可移动）</span>
+          </div>
+        </div>
+        <span class="pinned-badge">固定置顶</span>
+      </div>
+
+      <!-- 一键智能预设排序 -->
+      <div class="fleet-order-presets">
+        <span class="presets-label">快捷预设：</span>
+        <div class="presets-buttons">
+          <button type="button" class="mini-btn preset-btn" title="按国内延迟升序排列（网络最好排在前面）" @click="applyHostPresetSort('latency')">⚡ 国内延迟</button>
+          <button type="button" class="mini-btn preset-btn" title="按到期时间升序排列（最近到期排在前面）" @click="applyHostPresetSort('expiry')">📅 到期时间</button>
+          <button type="button" class="mini-btn preset-btn" title="按本账期已消耗流量降序排列" @click="applyHostPresetSort('traffic')">📊 账期流量</button>
+          <button type="button" class="mini-btn preset-btn" title="按主机名称字母 A-Z 排列" @click="applyHostPresetSort('name')">🔤 主机名称</button>
+          <button type="button" class="mini-btn preset-btn" title="恢复默认注册先后顺序" @click="applyHostPresetSort('default')">↺ 恢复默认</button>
+        </div>
+      </div>
+
+      <!-- 远端主机排序列表 -->
+      <div class="fleet-order-list">
+        <div
+          v-for="(h, idx) in fleetOrderList"
+          :key="h.id"
+          class="fleet-order-item"
+          :class="{
+            'is-dragging': modalDraggedIndex === idx,
+            'drag-over': modalDragOverIndex === idx
+          }"
+          draggable="true"
+          @dragstart="onModalDragStart($event, idx)"
+          @dragover.prevent="onModalDragOver($event, idx)"
+          @dragleave="modalDragOverIndex = null"
+          @drop.prevent="onModalDrop($event, idx)"
+          @dragend="onModalDragEnd"
+        >
+          <div class="order-item-left">
+            <span class="order-drag-handle" title="拖拽排序">⠿</span>
+            <span class="order-index-badge">#{{ idx + 2 }}</span>
+            <div class="order-host-info">
+              <div class="order-host-main">
+                <img v-if="h.snapshot?.location?.countryCode" class="fleet-host-flag" :src="countryFlagURL(h.snapshot.location.countryCode)" alt="" aria-hidden="true">
+                <b>{{ h.name }}</b>
+                <span class="order-type-badge">{{ isProbeHost(h) ? '轻量探针' : '面板' }}</span>
+                <span class="order-online-dot" :class="{ online: h.online }"></span>
+              </div>
+              <small class="order-host-meta">
+                <span v-if="h.expiresAt" :class="expiryTone(h.expiresAt)">{{ expiryLabel(h.expiresAt) }}</span>
+                <span v-if="h.expiresAt"> · </span>
+                <span>流量 {{ fleetBillingUsage(h.snapshot?.overview) }}</span>
+                <span v-if="fleetNetworkGroup(h, 'domestic')?.latencyMs"> · 国内 {{ fleetNetworkGroup(h, 'domestic')!.latencyMs.toFixed(1) }}ms</span>
+              </small>
+            </div>
+          </div>
+
+          <div class="order-item-actions">
+            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="置顶到远端首位" @click="moveFleetHostInList(idx, 0)">⤒</button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="上移一位" @click="moveFleetHostInList(idx, idx - 1)">▲</button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="下移一位" @click="moveFleetHostInList(idx, idx + 1)">▼</button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="置底到远端末位" @click="moveFleetHostInList(idx, fleetOrderList.length - 1)">⤓</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 舰队全局卡片固定提示 -->
+      <div v-if="(fleetOrderList.length + 1) % 2 === 1" class="fleet-order-companion-box">
+        <span class="companion-seal-small">阵</span>
+        <span><b>舰队全局扩容舱</b>（当前主机总数为奇数，固定排在最后一位扩展为双列网格）</span>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" @click="modal = null">取消</button>
+        <button type="button" class="primary" :disabled="fleetOrderSaving" @click="saveFleetOrderModal">
+          {{ fleetOrderSaving ? '正在保存…' : '保存排序' }}
+        </button>
       </div>
     </div>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>

@@ -146,6 +146,12 @@ func (s *Server) buildFleetStatus(ctx context.Context) (model.FleetStatus, error
 	publicURL, _ := s.store.Setting("fleet_public_url")
 	subscriptionPublicURL, _ := s.store.Setting("fleet_subscription_public_url")
 	status := model.FleetStatus{Enabled: s.fleetEnabled(), PublicURL: publicURL, SubscriptionPublicURL: subscriptionPublicURL, LocalHostID: localFleetHostID}
+	var hostOrder []string
+	if rawOrder, _ := s.store.Setting("fleet_host_order"); rawOrder != "" {
+		_ = json.Unmarshal([]byte(rawOrder), &hostOrder)
+	}
+	status.HostOrder = hostOrder
+	hosts = sortFleetHostsByOrder(hosts, hostOrder)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_hosts")), &status.SelectedHostIDs)
 	_ = json.Unmarshal([]byte(mustSetting(s.store, "fleet_subscription_nodes")), &status.SelectedNodeIDs)
 	singBoxVersion := s.singBoxVersion(ctx)
@@ -281,6 +287,63 @@ func (s *Server) saveFleetStatus(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func sortFleetHostsByOrder(hosts []model.FleetHost, order []string) []model.FleetHost {
+	if len(order) == 0 {
+		return hosts
+	}
+	indexMap := make(map[string]int, len(order))
+	for i, id := range order {
+		indexMap[id] = i
+	}
+	result := make([]model.FleetHost, len(hosts))
+	copy(result, hosts)
+	sort.SliceStable(result, func(i, j int) bool {
+		idxI, okI := indexMap[result[i].ID]
+		idxJ, okJ := indexMap[result[j].ID]
+		if okI && okJ {
+			return idxI < idxJ
+		}
+		if okI {
+			return true
+		}
+		if okJ {
+			return false
+		}
+		return false
+	})
+	return result
+}
+
+func (s *Server) saveFleetHostOrder(w http.ResponseWriter, r *http.Request, session store.Session) {
+	var request struct {
+		Order []string `json:"order"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	cleaned := make([]string, 0, len(request.Order))
+	seen := make(map[string]bool)
+	for _, id := range request.Order {
+		id = strings.TrimSpace(id)
+		if id == "" || id == localFleetHostID || seen[id] {
+			continue
+		}
+		seen[id] = true
+		cleaned = append(cleaned, id)
+	}
+	encoded, err := json.Marshal(cleaned)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.store.SetSetting("fleet_host_order", string(encoded)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.store.Audit(session.Username, "fleet.hosts.reorder", localFleetHostID, fmt.Sprintf("count=%d", len(cleaned)))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "order": cleaned})
 }
 
 func (s *Server) probeFleetSubscription(w http.ResponseWriter, r *http.Request, session store.Session) {
