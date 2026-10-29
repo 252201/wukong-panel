@@ -182,3 +182,29 @@ test('sortRemoteHostsByPreset correctly orders remote hosts by preset criteria',
   const byDefault = sortRemoteHostsByPreset(hosts, 'default')
   assert.deepEqual(byDefault.map(h => h.id), ['h2', 'h3', 'h1', 'h4'])
 })
+
+test('fleet-order-modal layout is wide and flags are constrained to prevent distortion', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const appVuePath = path.resolve(process.cwd(), 'src/App.vue')
+  const stylesCssPath = path.resolve(process.cwd(), 'src/styles.css')
+
+  const appVue = fs.readFileSync(appVuePath, 'utf8')
+  const stylesCss = fs.readFileSync(stylesCssPath, 'utf8')
+
+  // 1. App.vue should not use 'compact' class for fleet-order modal
+  assert.match(appVue, /modal === 'fleet-order'" class="modal-card fleet-order-modal"/)
+  assert.doesNotMatch(appVue, /modal === 'fleet-order'" class="modal-card compact fleet-order-modal"/)
+
+  // 2. styles.css should set wide dimensions for fleet-order-modal
+  assert.match(stylesCss, /\.fleet-order-modal\s*\{[^}]*width:\s*min\(920px,\s*94vw\)/)
+  assert.match(stylesCss, /\.fleet-order-modal\s*\{[^}]*max-width:\s*940px/)
+
+  // 3. Global .fleet-host-flag should be defined with width and height constraints
+  assert.match(stylesCss, /\.fleet-host-flag\s*\{[^}]*width:\s*16px;\s*height:\s*11px;\s*object-fit:\s*cover;/)
+  assert.match(stylesCss, /\.fleet-order-modal \.fleet-host-flag\s*\{[^}]*width:\s*18px;\s*height:\s*12px;\s*object-fit:\s*cover;/)
+
+  // 4. Central host in pinned box has #1 badge and central styling
+  assert.match(appVue, /class="fleet-order-pinned-box"/)
+  assert.match(appVue, /class="order-index-badge">#1<\/span>/)
+})
