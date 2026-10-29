@@ -208,6 +208,7 @@ const remoteHost = computed(() => selectedHostId.value !== 'local')
 const mutationsDisabled = computed(() => remoteHost.value && (!currentFleetHost.value?.online || !currentFleetHost.value?.compatible))
 const fleetHosts = computed(() => fleetStatus.value?.hosts || [])
 const remoteFleetHosts = computed(() => fleetHosts.value.filter(host => host.id !== 'local'))
+const centralFleetHost = computed<FleetHost | null>(() => fleetHosts.value.find(host => host.id === 'local') || null)
 const isProbeHost = (host: FleetHost) => host.capabilities?.includes('probe') || false
 function fleetHostNodeSummary(host: FleetHost): string {
   if (isProbeHost(host)) {
@@ -3767,7 +3768,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
       </div>
     </div>
-    <div v-else-if="modal === 'fleet-order'" class="modal-card compact fleet-order-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+    <div v-else-if="modal === 'fleet-order'" class="modal-card fleet-order-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <span class="modal-seal">序</span>
       <p class="eyebrow">FLEET REORDER</p>
@@ -3776,11 +3777,22 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <!-- 固定置顶中央本机提示 -->
       <div class="fleet-order-pinned-box">
-        <div class="pinned-info">
-          <span class="pinned-lock-icon">🔒</span>
-          <div class="pinned-title">
-            <b>中央本机</b>
-            <span class="pinned-sub">固定首位（不可移动）</span>
+        <div class="order-item-left">
+          <span class="order-drag-handle disabled" title="中央本机固定首位，不可移动">🔒</span>
+          <span class="order-index-badge">#1</span>
+          <div class="order-host-info">
+            <div class="order-host-main">
+              <img v-if="centralFleetHost?.snapshot?.location?.countryCode" class="fleet-host-flag" :src="countryFlagURL(centralFleetHost.snapshot.location.countryCode)" alt="" aria-hidden="true">
+              <b>中央本机</b>
+              <span class="order-type-badge central">本机</span>
+              <span class="order-online-dot online"></span>
+            </div>
+            <small class="order-host-meta">
+              <span v-if="centralFleetHost?.os">{{ centralFleetHost.os }} · {{ centralFleetHost.arch || 'amd64' }}</span>
+              <span v-if="centralFleetHost?.expiresAt"> · <span :class="expiryTone(centralFleetHost.expiresAt)">{{ expiryLabel(centralFleetHost.expiresAt) }}</span></span>
+              <span> · 流量 {{ fleetBillingUsage(centralFleetHost?.snapshot?.overview) }}</span>
+              <span v-if="centralFleetHost && fleetNetworkGroup(centralFleetHost, 'domestic')?.latencyMs"> · 国内 {{ fleetNetworkGroup(centralFleetHost, 'domestic')!.latencyMs.toFixed(1) }}ms</span>
+            </small>
           </div>
         </div>
         <span class="pinned-badge">固定置顶</span>
@@ -3816,7 +3828,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           @dragend="onModalDragEnd"
         >
           <div class="order-item-left">
-            <span class="order-drag-handle" title="拖拽排序">⠿</span>
+            <span class="order-drag-handle" title="按住拖拽调整顺序">⠿</span>
             <span class="order-index-badge">#{{ idx + 2 }}</span>
             <div class="order-host-info">
               <div class="order-host-main">
@@ -3826,6 +3838,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <span class="order-online-dot" :class="{ online: h.online }"></span>
               </div>
               <small class="order-host-meta">
+                <span v-if="h.os">{{ h.os }} · {{ h.arch }}</span>
+                <span v-if="h.os"> · </span>
                 <span v-if="h.expiresAt" :class="expiryTone(h.expiresAt)">{{ expiryLabel(h.expiresAt) }}</span>
                 <span v-if="h.expiresAt"> · </span>
                 <span>流量 {{ fleetBillingUsage(h.snapshot?.overview) }}</span>
@@ -3835,18 +3849,21 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
 
           <div class="order-item-actions">
-            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="置顶到远端首位" @click="moveFleetHostInList(idx, 0)">⤒</button>
-            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="上移一位" @click="moveFleetHostInList(idx, idx - 1)">▲</button>
-            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="下移一位" @click="moveFleetHostInList(idx, idx + 1)">▼</button>
-            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="置底到远端末位" @click="moveFleetHostInList(idx, fleetOrderList.length - 1)">⤓</button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="置顶到远端首位" @click="moveFleetHostInList(idx, 0)">⤒ <span class="move-label">置顶</span></button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === 0" title="上移一位" @click="moveFleetHostInList(idx, idx - 1)">▲ <span class="move-label">上移</span></button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="下移一位" @click="moveFleetHostInList(idx, idx + 1)">▼ <span class="move-label">下移</span></button>
+            <button type="button" class="mini-btn move-btn" :disabled="idx === fleetOrderList.length - 1" title="置底到远端末位" @click="moveFleetHostInList(idx, fleetOrderList.length - 1)">⤓ <span class="move-label">置底</span></button>
           </div>
         </div>
       </div>
 
       <!-- 舰队全局卡片固定提示 -->
       <div v-if="(fleetOrderList.length + 1) % 2 === 1" class="fleet-order-companion-box">
-        <span class="companion-seal-small">阵</span>
-        <span><b>舰队全局扩容舱</b>（当前主机总数为奇数，固定排在最后一位扩展为双列网格）</span>
+        <div class="companion-box-left">
+          <span class="companion-seal-small">阵</span>
+          <span><b>舰队全局扩容舱</b>（当前主机总数为奇数，固定排在最后一位扩展为双列网格）</span>
+        </div>
+        <span class="pinned-badge">固定末位</span>
       </div>
 
       <div class="modal-actions">
