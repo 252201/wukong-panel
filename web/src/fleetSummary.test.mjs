@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { recentNetworkLossPct, summarizeFleet, fleetHostLiveRates, fleetHostRateHint } from './fleetSummary.ts'
+import { recentNetworkLossPct, summarizeFleet, fleetHostLiveRates, fleetHostRateHint, sortFleetHostsByOrder, sortRemoteHostsByPreset } from './fleetSummary.ts'
 
 const now = Date.parse('2026-09-27T10:00:00Z')
 const sample = (checkedAt, packetsSent = 10, packetsReceived = packetsSent, status = 'ok') => ({
@@ -116,4 +116,69 @@ test('fleetHostRateHint formats Chinese and English tooltips correctly', () => {
 
   assert.equal(fleetHostRateHint(offlineHost, 'zh-CN'), '主机离线')
   assert.equal(fleetHostRateHint(offlineHost, 'en-US'), 'Host offline')
+})
+
+test('sortFleetHostsByOrder keeps central local host pinned at index 0 and orders remote hosts', () => {
+  const localHost = { id: 'local', name: '中央本机', online: true }
+  const h1 = { id: 'h1', name: 'HK Host', online: true }
+  const h2 = { id: 'h2', name: 'JP Host', online: true }
+  const h3 = { id: 'h3', name: 'US Host', online: true }
+  const h4 = { id: 'h4', name: 'SG Host', online: true }
+
+  // 1. Order specified: h3, h1, h2 (h4 unmentioned)
+  const sorted = sortFleetHostsByOrder([h1, localHost, h2, h4, h3], ['h3', 'h1', 'h2'])
+  assert.deepEqual(sorted.map(h => h.id), ['local', 'h3', 'h1', 'h2', 'h4'])
+
+  // 2. Order mentions 'local' (must be ignored and remain first)
+  const sortedWithLocal = sortFleetHostsByOrder([h2, h1, localHost], ['h1', 'local', 'h2'])
+  assert.deepEqual(sortedWithLocal.map(h => h.id), ['local', 'h1', 'h2'])
+
+  // 3. Empty or undefined order preserves existing order with local at index 0
+  const sortedEmpty = sortFleetHostsByOrder([h2, localHost, h1], [])
+  assert.deepEqual(sortedEmpty.map(h => h.id), ['local', 'h2', 'h1'])
+})
+
+test('sortRemoteHostsByPreset correctly orders remote hosts by preset criteria', () => {
+  const hosts = [
+    {
+      id: 'h1', name: 'Charlie', online: true, createdAt: '2026-01-03',
+      expiresAt: '2026-11-20',
+      snapshot: { overview: { trafficUsed: 500, network: { domestic: { latencyMs: 120 } } } }
+    },
+    {
+      id: 'h2', name: 'Alice', online: true, createdAt: '2026-01-01',
+      expiresAt: '2026-11-05',
+      snapshot: { overview: { trafficUsed: 800, network: { domestic: { latencyMs: 45 } } } }
+    },
+    {
+      id: 'h3', name: 'Bob', online: false, createdAt: '2026-01-02',
+      expiresAt: '', // no expiry
+      snapshot: { overview: { trafficUsed: 200, network: { domestic: { latencyMs: 30 } } } }
+    },
+    {
+      id: 'h4', name: 'Delta', online: true, createdAt: '2026-01-04',
+      expiresAt: '2026-11-10',
+      snapshot: { overview: { trafficUsed: 1200, network: { domestic: { latencyMs: 80 } } } }
+    },
+  ]
+
+  // Latency: h2 (45ms), h4 (80ms), h1 (120ms), h3 (offline -> end)
+  const byLatency = sortRemoteHostsByPreset(hosts, 'latency')
+  assert.deepEqual(byLatency.map(h => h.id), ['h2', 'h4', 'h1', 'h3'])
+
+  // Expiry: h2 (11-05), h4 (11-10), h1 (11-20), h3 (no expiry -> end)
+  const byExpiry = sortRemoteHostsByPreset(hosts, 'expiry')
+  assert.deepEqual(byExpiry.map(h => h.id), ['h2', 'h4', 'h1', 'h3'])
+
+  // Traffic: h4 (1200), h2 (800), h1 (500), h3 (200)
+  const byTraffic = sortRemoteHostsByPreset(hosts, 'traffic')
+  assert.deepEqual(byTraffic.map(h => h.id), ['h4', 'h2', 'h1', 'h3'])
+
+  // Name: Alice (h2), Bob (h3), Charlie (h1), Delta (h4)
+  const byName = sortRemoteHostsByPreset(hosts, 'name')
+  assert.deepEqual(byName.map(h => h.id), ['h2', 'h3', 'h1', 'h4'])
+
+  // Default (createdAt): h2 (01-01), h3 (01-02), h1 (01-03), h4 (01-04)
+  const byDefault = sortRemoteHostsByPreset(hosts, 'default')
+  assert.deepEqual(byDefault.map(h => h.id), ['h2', 'h3', 'h1', 'h4'])
 })

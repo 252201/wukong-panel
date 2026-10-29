@@ -99,3 +99,52 @@ export function fleetHostRateHint(host: FleetHost, locale: 'zh-CN' | 'en-US' = '
   }
   return `实时下载: ${formatRate(rx)} · 实时上传: ${formatRate(tx)}${iface ? ` · 出口网卡: ${iface}` : ''}`
 }
+
+export function sortFleetHostsByOrder(hosts: FleetHost[], order?: string[]): FleetHost[] {
+  const local = hosts.find(h => h.id === 'local')
+  const remote = hosts.filter(h => h.id !== 'local')
+  if (!order || !order.length) {
+    return local ? [local, ...remote] : remote
+  }
+  const orderMap = new Map<string, number>()
+  order.forEach((id, idx) => {
+    if (id && id !== 'local' && !orderMap.has(id)) {
+      orderMap.set(id, idx)
+    }
+  })
+  const sortedRemote = [...remote].sort((a, b) => {
+    const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : 999999
+    const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : 999999
+    if (idxA !== idxB) return idxA - idxB
+    return a.id.localeCompare(b.id)
+  })
+  return local ? [local, ...sortedRemote] : sortedRemote
+}
+
+export function sortRemoteHostsByPreset(
+  hosts: FleetHost[],
+  preset: 'latency' | 'expiry' | 'traffic' | 'name' | 'default'
+): FleetHost[] {
+  const list = [...hosts]
+  if (preset === 'latency') {
+    list.sort((a, b) => {
+      const latA = a.online ? (networkGroupFrom(a.snapshot?.overview?.network, 'domestic')?.latencyMs ?? 999990) : 999999
+      const latB = b.online ? (networkGroupFrom(b.snapshot?.overview?.network, 'domestic')?.latencyMs ?? 999990) : 999999
+      return latA - latB
+    })
+  } else if (preset === 'expiry') {
+    list.sort((a, b) => {
+      if (!a.expiresAt && !b.expiresAt) return 0
+      if (!a.expiresAt) return 1
+      if (!b.expiresAt) return -1
+      return a.expiresAt.localeCompare(b.expiresAt)
+    })
+  } else if (preset === 'traffic') {
+    list.sort((a, b) => (b.snapshot?.overview?.trafficUsed || 0) - (a.snapshot?.overview?.trafficUsed || 0))
+  } else if (preset === 'name') {
+    list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  } else if (preset === 'default') {
+    list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
+  }
+  return list
+}

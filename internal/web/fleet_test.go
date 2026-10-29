@@ -787,3 +787,44 @@ func TestRemotePanelUpdateCommandHandling(t *testing.T) {
 		t.Fatalf("expected 200 for panel update job query, got %d: %s", recJob.Code, recJob.Body.String())
 	}
 }
+
+func TestFleetHostCustomOrder(t *testing.T) {
+	hosts := []model.FleetHost{
+		{ID: "host-c", Name: "Host C"},
+		{ID: "host-a", Name: "Host A"},
+		{ID: "host-b", Name: "Host B"},
+		{ID: "host-d", Name: "Host D"},
+	}
+	order := []string{"host-b", "host-d", "host-a"}
+	sorted := sortFleetHostsByOrder(hosts, order)
+	if len(sorted) != 4 {
+		t.Fatalf("expected 4 hosts, got %d", len(sorted))
+	}
+	if sorted[0].ID != "host-b" || sorted[1].ID != "host-d" || sorted[2].ID != "host-a" || sorted[3].ID != "host-c" {
+		t.Fatalf("unexpected order: %v, %v, %v, %v", sorted[0].ID, sorted[1].ID, sorted[2].ID, sorted[3].ID)
+	}
+
+	server, db := fleetWebTestServer(t)
+	defer db.Close()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/fleet/host-order", strings.NewReader(`{"order":["local", "host-2", "host-1", "host-2"]}`))
+	rec := httptest.NewRecorder()
+	server.saveFleetHostOrder(rec, req, store.Session{Username: "admin"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var res struct {
+		OK    bool     `json:"ok"`
+		Order []string `json:"order"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || len(res.Order) != 2 || res.Order[0] != "host-2" || res.Order[1] != "host-1" {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+	saved, _ := db.Setting("fleet_host_order")
+	if saved != `["host-2","host-1"]` {
+		t.Fatalf("unexpected saved setting: %s", saved)
+	}
+}

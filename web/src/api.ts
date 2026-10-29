@@ -226,7 +226,7 @@ export interface FleetHost {
   expiresAt?: string
 }
 export interface FleetStatus {
-  enabled: boolean; publicUrl: string; subscriptionPublicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
+  enabled: boolean; publicUrl: string; subscriptionPublicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; hostOrder?: string[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
   globalSubscription?: string; subscriptionUpdated?: string
 }
 export interface FleetSubscriptionProbe { ok: boolean; status: number; nodeCount: number; latencyMs: number }
@@ -301,6 +301,7 @@ export const api = {
   rotateSubscription: () => request<{token: string}>('settings/subscription-token', { method: 'POST', body: '{}' }),
   fleetStatus: () => request<FleetStatus>('fleet/status', {}, false),
   saveFleetStatus: (data: {enabled: boolean; publicUrl: string; subscriptionPublicUrl?: string; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>; rotateGlobalToken?: boolean}) => request<FleetStatus>('fleet/status', { method: 'PUT', body: JSON.stringify(data) }, false),
+  saveFleetHostOrder: (order: string[]) => request<{ok: boolean; order: string[]}>('fleet/host-order', { method: 'PUT', body: JSON.stringify({ order }) }, false),
   probeFleetSubscription: (subscriptionPublicUrl: string) => request<FleetSubscriptionProbe>('fleet/subscription-probe', { method: 'POST', body: JSON.stringify({ subscriptionPublicUrl }) }, false),
   createFleetEnrollment: (mode: 'panel' | 'probe' = 'panel') => request<{token: string; expiresAt: string; command: string}>(`fleet/enrollments?type=${mode}`, { method: 'POST', body: '{}' }, false),
   renameFleetHost: (hostId: string, name: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'PATCH', body: JSON.stringify({ name }) }, false),
