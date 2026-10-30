@@ -179,7 +179,7 @@ const shareQR = ref('')
 const deleteConfirm = ref('')
 const residentialRemoveConfirm = ref('')
 const socksRemoveConfirm = ref('')
-const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deviceMode = computed(() => modal.value === 'device-create')
 const isEditing = computed(() => modal.value === 'edit')
 const deviceSequence = ref(0)
@@ -2154,7 +2154,7 @@ watch(fleetHosts, (hosts) => {
 }, { immediate: true })
 async function openNodeForm(kind: 'create' | 'device-create') {
 	if (!ensureHostWritable()) return
-  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: true, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
   if (kind === 'device-create') resetDeviceDrafts()
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
   modal.value = kind; defaultsLoading.value = true
@@ -2213,7 +2213,7 @@ async function openEdit(node: NodeItem) {
       protocol: current.protocol, name: current.name, mode: current.mode, egress: current.egress || 'direct', listenPort: current.listenPort,
       server: current.server || '', domain: current.domain || '', preferredServer: current.preferredServer || '',
       webSocketPath: current.webSocketPath || '', tunnelToken: '', ipv4Bind: current.ipv4Bind || '', ipv6Bind: current.ipv6Bind || '',
-      autoBind: current.autoBind, v6OnlyDomains: (details.v6OnlyDomains || []).join(','), certificatePath: '', keyPath: '',
+      autoBind: false, v6OnlyDomains: (details.v6OnlyDomains || []).join(','), certificatePath: '', keyPath: '',
     })
     bindChoice.ipv4 = deploymentDefaults.value.ipv4.some(item => item.address === createForm.ipv4Bind) ? createForm.ipv4Bind : createForm.ipv4Bind ? '__manual__' : ''
     bindChoice.ipv6 = deploymentDefaults.value.ipv6.some(item => item.address === createForm.ipv6Bind) ? createForm.ipv6Bind : createForm.ipv6Bind ? '__manual__' : ''
@@ -3617,14 +3617,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <input v-model="createForm.v6OnlyDomains" placeholder="例如：chatgpt.com,claude.ai,anthropic.com">
                 <small>列表中的域名将强制使用 IPv6 建立直连连接（以英文逗号分隔）</small>
               </label>
-
-              <label v-if="createForm.egress === 'direct'" class="toggle-row inline">
-                <span>
-                  <b>自动跟随 IP 变化</b>
-                  <small>动态公网地址改变时自动重新校验配置并安全重启受影响节点</small>
-                </span>
-                <span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span>
-              </label>
             </div>
 
             <div v-if="isEditing && selectedNode?.sharedGroup" class="edit-impact-note shared">
@@ -3785,13 +3777,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </template>
               </label>
             </div>
-            <label v-if="createForm.egress === 'direct'" class="toggle-row inline">
-              <span>
-                <b>自动跟随 IP 变化</b>
-                <small>动态公网地址变更时自动重新校验配置并安全重启整组编队</small>
-              </span>
-              <span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span>
-            </label>
           </div>
         </section>
       </div>
