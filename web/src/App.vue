@@ -191,9 +191,6 @@ const bindChoice = reactive({ ipv4: '', ipv6: '' })
 const defaultsLoading = ref(false)
 const formHydrating = ref(false)
 const probeJobs = reactive<Record<string, string>>({})
-const batchProbing = ref(false)
-const batchProbeProgress = reactive({ completed: 0, total: 0, success: 0, failed: 0 })
-const activeNodes = computed(() => nodes.value.filter(n => n.status === 'active'))
 const hostFirewall = ref<FirewallState | null>(null)
 const diagnosticNode = ref<NodeItem | null>(null)
 
@@ -2211,122 +2208,6 @@ async function watchProbeJob(nodeId: string, jobId: string) {
   } catch (error) { notify(error instanceof Error ? error.message : '无法读取检测结果') }
   finally { if (probeJobs[nodeId] === jobId) delete probeJobs[nodeId] }
 }
-async function probeAllActiveNodes() {
-  if (batchProbing.value) return
-  if (!ensureHostWritable()) return
-  const targets = activeNodes.value
-  if (!targets.length) {
-    notify(language.value === 'en-US' ? 'No active nodes available to probe' : '当前无在线运行的节点可供自检')
-    return
-  }
-  batchProbing.value = true
-  batchProbeProgress.completed = 0
-  batchProbeProgress.total = targets.length
-  batchProbeProgress.success = 0
-  batchProbeProgress.failed = 0
-
-  notify(language.value === 'en-US'
-    ? `Started proxy loopback probe for all ${targets.length} active nodes`
-    : `已启动全部 ${targets.length} 个在线节点的代理闭环全检`
-  )
-
-  const pendingJobs: Array<{ nodeId: string; name: string; jobId: string }> = []
-  for (const node of targets) {
-    try {
-      if (probeJobs[node.id]) {
-        pendingJobs.push({ nodeId: node.id, name: node.name, jobId: probeJobs[node.id] })
-        continue
-      }
-      const result = await api.nodeAction(node.id, 'probe')
-      probeJobs[node.id] = result.jobId
-      pendingJobs.push({ nodeId: node.id, name: node.name, jobId: result.jobId })
-    } catch {
-      batchProbeProgress.completed++
-      batchProbeProgress.failed++
-    }
-  }
-
-  if (!pendingJobs.length) {
-    batchProbing.value = false
-    notify(language.value === 'en-US' ? 'Failed to create probe tasks' : '未能创建自检任务，请检查节点状态')
-    return
-  }
-
-  const maxAttempts = 75
-  let attempt = 0
-  let remaining = [...pendingJobs]
-
-  try {
-    while (remaining.length > 0 && attempt < maxAttempts) {
-      await new Promise(resolve => window.setTimeout(resolve, 1000))
-      attempt++
-
-      const jobStatuses = await Promise.allSettled(remaining.map(p => api.job(p.jobId)))
-      const nextRemaining: Array<{ nodeId: string; name: string; jobId: string }> = []
-      let anyFinished = false
-
-      for (let i = 0; i < remaining.length; i++) {
-        const p = remaining[i]
-        const res = jobStatuses[i]
-
-        if (res.status === 'fulfilled') {
-          const job = res.value
-          if (job.status === 'success' || job.status === 'failed') {
-            anyFinished = true
-            batchProbeProgress.completed++
-            if (job.status === 'success') batchProbeProgress.success++
-            else batchProbeProgress.failed++
-            if (probeJobs[p.nodeId] === p.jobId) delete probeJobs[p.nodeId]
-            continue
-          }
-        }
-        nextRemaining.push(p)
-      }
-
-      remaining = nextRemaining
-
-      if (anyFinished || remaining.length === 0) {
-        try {
-          const [nodeData, jobData] = await Promise.all([api.nodes(), api.jobs()])
-          nodes.value = nodeData
-          jobs.value = jobData
-        } catch {}
-      }
-    }
-
-    if (remaining.length > 0) {
-      for (const p of remaining) {
-        batchProbeProgress.completed++
-        batchProbeProgress.failed++
-        if (probeJobs[p.nodeId] === p.jobId) delete probeJobs[p.nodeId]
-      }
-    }
-
-    if (batchProbeProgress.failed === 0) {
-      notify(language.value === 'en-US'
-        ? `⚡ All ${batchProbeProgress.total} active nodes probed successfully, all healthy`
-        : `⚡ 全部 ${batchProbeProgress.total} 个节点闭环自检完成，全部正常`
-      )
-    } else {
-      notify(language.value === 'en-US'
-        ? `⚡ Probed all nodes: ${batchProbeProgress.success} passed, ${batchProbeProgress.failed} failed`
-        : `⚡ 全检完成：${batchProbeProgress.success} 个正常，${batchProbeProgress.failed} 个异常`
-      )
-    }
-  } catch (err) {
-    notify(err instanceof Error ? `批量自检异常：${err.message}` : '批量自检异常')
-  } finally {
-    for (const p of pendingJobs) {
-      if (probeJobs[p.nodeId] === p.jobId) delete probeJobs[p.nodeId]
-    }
-    batchProbing.value = false
-    try {
-      const [nodeData, jobData] = await Promise.all([api.nodes(), api.jobs()])
-      nodes.value = nodeData
-      jobs.value = jobData
-    } catch {}
-  }
-}
 async function deleteNode() {
 	if (!ensureHostWritable()) return
   if (!selectedNode.value) return
@@ -2903,17 +2784,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <div class="page-intro">
           <div><p>NODE ARSENAL</p><h2>管理所有代理入站</h2><small class="page-caption">“检测”执行本机完整代理闭环；公网防火墙与 NAT 可达性仍需异地验证。</small></div>
           <div class="summary-pills">
-            <button
-              type="button"
-              class="batch-probe-btn"
-              :class="{ running: batchProbing }"
-              :disabled="batchProbing || !activeNodes.length || mutationsDisabled"
-              :title="batchProbing ? (language === 'en-US' ? 'Batch probing in progress...' : '正在批量自检中...') : (activeNodes.length ? (language === 'en-US' ? `Probe all ${activeNodes.length} active nodes` : `一键自检全部 ${activeNodes.length} 个在线节点代理闭环`) : (language === 'en-US' ? 'No active nodes' : '当前无在线节点'))"
-              @click="probeAllActiveNodes"
-            >
-              <i class="batch-probe-icon" :class="{ spinning: batchProbing }">⚡</i>
-              <span>{{ batchProbing ? (language === 'en-US' ? `Probing (${batchProbeProgress.completed}/${batchProbeProgress.total})` : `全检中 (${batchProbeProgress.completed}/${batchProbeProgress.total})`) : (language === 'en-US' ? 'Probe All' : '一键全检') }}</span>
-            </button>
             <span><i class="active"></i>{{ overview?.onlineNodes || 0 }} 在线</span>
             <span>{{ nodes.filter(n => n.ownership === 'imported').length }} 已接管</span>
           </div>
@@ -2985,7 +2855,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               </span>
               <em class="probe-diag-hint" aria-hidden="true">诊断 ↗</em>
             </div>
-            <div class="node-actions"><button :disabled="mutationsDisabled" @click="revealShare(node)">分享</button><button class="probe-button" :disabled="mutationsDisabled || node.status !== 'active' || probeState(node) === 'running' || batchProbing" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button :disabled="mutationsDisabled" @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" :disabled="mutationsDisabled" @click="nodeAction(node, 'restart')">重启</button><button v-else :disabled="mutationsDisabled" @click="nodeAction(node, 'start')">启动</button><button class="danger" :disabled="mutationsDisabled" @click="nodeAction(node, 'delete')">删除</button></div>
+            <div class="node-actions"><button :disabled="mutationsDisabled" @click="revealShare(node)">分享</button><button class="probe-button" :disabled="mutationsDisabled || node.status !== 'active' || probeState(node) === 'running'" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button :disabled="mutationsDisabled" @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" :disabled="mutationsDisabled" @click="nodeAction(node, 'restart')">重启</button><button v-else :disabled="mutationsDisabled" @click="nodeAction(node, 'start')">启动</button><button class="danger" :disabled="mutationsDisabled" @click="nodeAction(node, 'delete')">删除</button></div>
           </article>
           <button class="add-node-card" :disabled="mutationsDisabled" @click="openCreate"><span>＋</span><b>部署新节点</b><small>七协议 · 自动生成安全凭据</small></button>
         </section>
@@ -4471,14 +4341,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <li v-if="diagnosticNode.protocol === 'vless-ws-tunnel'">
               Cloudflare Tunnel 节点：请检查 cloudflared 进程连接状态、隧道 Token 是否有效以及 Cloudflare 优选节点连通性。
             </li>
-            <li>可点击下方“任务日志”查阅系统详细排错日志。</li>
+            <li>{{ language === 'en-US' ? 'Check "Jobs" in the left sidebar for detailed system troubleshooting logs.' : '可查阅左侧导航“任务日志”了解系统详细排错日志。' }}</li>
           </ul>
         </div>
       </div>
 
       <div class="modal-actions">
         <button type="button" class="secondary" @click="modal = null">关闭</button>
-        <button type="button" class="secondary" @click="modal = null; showJobLog()">查看任务日志</button>
         <button
           type="button"
           class="primary"
