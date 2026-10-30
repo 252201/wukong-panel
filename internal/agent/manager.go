@@ -1045,7 +1045,7 @@ func (m *Manager) CreateBatch(ctx context.Context, request model.NodeBatchCreate
 }
 
 func sameBatchRuntimeSettings(a, b model.NodeCreateRequest) bool {
-	if a.Mode != b.Mode || a.Egress != b.Egress || a.IPv4Bind != b.IPv4Bind || a.IPv6Bind != b.IPv6Bind || a.AutoBind != b.AutoBind || len(a.V6OnlyDomains) != len(b.V6OnlyDomains) {
+	if a.Mode != b.Mode || a.Egress != b.Egress || a.IPv4Bind != b.IPv4Bind || a.IPv6Bind != b.IPv6Bind || a.AutoBind != b.AutoBind || a.AutoAllowPort != b.AutoAllowPort || len(a.V6OnlyDomains) != len(b.V6OnlyDomains) {
 		return false
 	}
 	for index := range a.V6OnlyDomains {
@@ -1195,6 +1195,9 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 		}
 		created = append(created, item.node)
 		_ = m.store.Audit("admin", "create_node", item.node.ID, item.node.Name)
+		if item.request.AutoAllowPort {
+			m.autoAllowFirewallPort(ctx, item.node.ListenPort, item.node.Protocol)
+		}
 	}
 	return created, nil
 }
@@ -1362,6 +1365,9 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 		return model.Node{}, err
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
+	if request.AutoAllowPort {
+		m.autoAllowFirewallPort(ctx, node.ListenPort, node.Protocol)
+	}
 	return node, nil
 }
 
@@ -1823,7 +1829,7 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		Protocol: node.Protocol, Name: edit.Name, Mode: edit.Mode, Egress: edit.Egress, ListenPort: edit.ListenPort,
 		Server: edit.Server, Domain: edit.Domain, PreferredServer: edit.PreferredServer,
 		WebSocketPath: edit.WebSocketPath, IPv4Bind: edit.IPv4Bind, IPv6Bind: edit.IPv6Bind,
-		AutoBind: edit.AutoBind, V6OnlyDomains: normalizeDomainList(edit.V6OnlyDomains),
+		AutoBind: edit.AutoBind, AutoAllowPort: edit.AutoAllowPort, V6OnlyDomains: normalizeDomainList(edit.V6OnlyDomains),
 		TunnelToken: credentials.TunnelToken,
 	}
 	request, err = prepareCreateRequest(request)
@@ -1997,6 +2003,9 @@ func (m *Manager) Edit(ctx context.Context, id string, edit model.NodeEditReques
 		return fmt.Errorf("persist edited node failed; previous configuration restored: %w", err)
 	}
 	_ = m.store.Audit("admin", "node_edit", node.ID, fmt.Sprintf("%s port=%d mode=%s", updated.Name, updated.ListenPort, updated.Mode))
+	if edit.AutoAllowPort {
+		m.autoAllowFirewallPort(ctx, updated.ListenPort, updated.Protocol)
+	}
 	return nil
 }
 

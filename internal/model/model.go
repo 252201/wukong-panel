@@ -71,6 +71,7 @@ type NodeCreateRequest struct {
 	IPv4Bind        string         `json:"ipv4Bind"`
 	IPv6Bind        string         `json:"ipv6Bind"`
 	AutoBind        bool           `json:"autoBind"`
+	AutoAllowPort   bool           `json:"autoAllowPort"`
 	V6OnlyDomains   []string       `json:"v6OnlyDomains"`
 	CertificatePath string         `json:"certificatePath"`
 	KeyPath         string         `json:"keyPath"`
@@ -124,6 +125,7 @@ type NodeEditRequest struct {
 	IPv4Bind        string   `json:"ipv4Bind"`
 	IPv6Bind        string   `json:"ipv6Bind"`
 	AutoBind        bool     `json:"autoBind"`
+	AutoAllowPort   bool     `json:"autoAllowPort"`
 	V6OnlyDomains   []string `json:"v6OnlyDomains"`
 }
 

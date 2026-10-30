@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"github.com/252201/wukong-panel/internal/hostsecurity"
 	"github.com/252201/wukong-panel/internal/model"
 	"net/http"
@@ -49,6 +50,55 @@ func (m *Manager) SecurityConfirm(ctx context.Context, id string) (model.Securit
 }
 func (m *Manager) SecurityTransaction(ctx context.Context, id string) (model.SecurityTransaction, error) {
 	return m.securityController().Transaction(id)
+}
+func (m *Manager) autoAllowFirewallPort(ctx context.Context, port int, protocol string) {
+	if port <= 0 || port > 65535 || m.cfg.Demo || normalizeProtocol(protocol) == protocolVLESSWSTunnel {
+		return
+	}
+	c := m.securityController()
+	f, err := c.Firewall(ctx, "")
+	if err != nil || !f.Installed || !f.Active {
+		return
+	}
+	proto := "tcp"
+	if protocolUsesUDP(protocol) && !protocolUsesTCP(protocol) {
+		proto = "udp"
+	} else if protocolUsesUDP(protocol) && protocolUsesTCP(protocol) {
+		proto = "tcp/udp"
+	}
+	for _, r := range f.Rules {
+		if r.Action == "allow" && (r.Source == "any" || r.Source == "") &&
+			r.PortFrom <= port && r.PortTo >= port &&
+			(r.Protocol == proto || proto == "tcp/udp" && (r.Protocol == "tcp" || r.Protocol == "udp") || (r.Protocol == "tcp/udp" || r.Protocol == "tcp+udp") && (proto == "tcp" || proto == "udp")) {
+			return
+		}
+	}
+	req := model.SecurityRequest{
+		Operation: "add",
+		Zone:      f.Zone,
+		Rule: model.SecurityRule{
+			Action:   "allow",
+			Protocol: proto,
+			PortFrom: port,
+			PortTo:   port,
+			Source:   "any",
+		},
+	}
+	p, err := c.Preview(ctx, "firewall", req)
+	if err != nil {
+		return
+	}
+	req.Revision = p.Revision
+	result, err := c.Apply(ctx, "firewall", req)
+	if err != nil {
+		return
+	}
+	if result.Transaction != nil && result.Transaction.ID != "" {
+		_, _ = c.Confirm(ctx, result.Transaction.ID)
+	}
+	if m.store != nil {
+		_ = m.store.Audit("agent", "security.firewall", "system", fmt.Sprintf("auto-allow port=%d proto=%s", port, proto))
+	}
 }
 func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request) {
 	kind := r.PathValue("kind")

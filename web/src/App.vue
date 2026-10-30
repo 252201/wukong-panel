@@ -179,7 +179,7 @@ const shareQR = ref('')
 const deleteConfirm = ref('')
 const residentialRemoveConfirm = ref('')
 const socksRemoveConfirm = ref('')
-const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+const createForm = reactive({ protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, autoAllowPort: true, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
 const deviceMode = computed(() => modal.value === 'device-create')
 const isEditing = computed(() => modal.value === 'edit')
 const deviceSequence = ref(0)
@@ -1995,8 +1995,12 @@ async function createNode() {
         name: common.name.trim(), mode: common.mode, egress: common.egress, listenPort: common.listenPort,
         server: common.server.trim(), domain: common.domain.trim(), preferredServer: common.preferredServer.trim(),
         webSocketPath: common.webSocketPath.trim(), ipv4Bind: common.ipv4Bind.trim(), ipv6Bind: common.ipv6Bind.trim(),
-        autoBind: common.autoBind, v6OnlyDomains: common.v6OnlyDomains,
+        autoBind: common.autoBind, autoAllowPort: common.autoAllowPort, v6OnlyDomains: common.v6OnlyDomains,
       })
+      if (!isTunnelProtocol.value && common.autoAllowPort) {
+        securityStatusCache.clear(selectedHostId.value)
+        void fetchFirewallStatus()
+      }
       modal.value = null; notify('节点编辑任务已进入队列'); await showJobLog()
       return
     }
@@ -2005,6 +2009,7 @@ async function createNode() {
         ...common,
         name: device.name.trim(),
         listenPort: device.listenPort,
+        autoAllowPort: common.autoAllowPort,
         ...(isTunnelProtocol.value ? {
           server: device.server.trim(),
           domain: device.server.trim(),
@@ -2015,6 +2020,10 @@ async function createNode() {
       await api.createNodeBatch(requests)
     } else {
       await api.createNode(common)
+    }
+    if (!isTunnelProtocol.value && common.autoAllowPort) {
+      securityStatusCache.clear(selectedHostId.value)
+      void fetchFirewallStatus()
     }
     modal.value = null; notify(creatingDeviceBatch ? `${deviceNodes.length} 台设备的部署任务已进入队列` : '部署任务已进入队列'); await showJobLog()
   } catch (error) { notify(error instanceof Error ? error.message : '部署失败') }
@@ -2154,7 +2163,7 @@ watch(fleetHosts, (hosts) => {
 }, { immediate: true })
 async function openNodeForm(kind: 'create' | 'device-create') {
 	if (!ensureHostWritable()) return
-  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
+  Object.assign(createForm, { protocol: 'hysteria2', name: '', mode: 'prefer_v6', egress: 'direct', listenPort: 0, autoAllowPort: true, server: '', domain: '', preferredServer: '', webSocketPath: '', tunnelToken: '', ipv4Bind: '', ipv6Bind: '', autoBind: false, v6OnlyDomains: 'chatgpt.com,claude.ai,anthropic.com', certificatePath: '', keyPath: '' })
   if (kind === 'device-create') resetDeviceDrafts()
   bindChoice.ipv4 = ''; bindChoice.ipv6 = ''
   modal.value = kind; defaultsLoading.value = true
@@ -2211,6 +2220,7 @@ async function openEdit(node: NodeItem) {
     const current = details.node
     Object.assign(createForm, {
       protocol: current.protocol, name: current.name, mode: current.mode, egress: current.egress || 'direct', listenPort: current.listenPort,
+      autoAllowPort: true,
       server: current.server || '', domain: current.domain || '', preferredServer: current.preferredServer || '',
       webSocketPath: current.webSocketPath || '', tunnelToken: '', ipv4Bind: current.ipv4Bind || '', ipv6Bind: current.ipv6Bind || '',
       autoBind: false, v6OnlyDomains: (details.v6OnlyDomains || []).join(','), certificatePath: '', keyPath: '',
@@ -3405,25 +3415,33 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </label>
 
             <div class="field-grid-2">
-              <label class="field-item">
+              <div class="field-item">
                 <div class="field-label-row">
                   <span class="field-label-text">{{ isTunnelProtocol ? '本地 Origin 端口 (TCP)' : `监听端口 (${selectedProtocolInfo.transport})` }}</span>
                   <button v-if="!isTunnelProtocol" type="button" class="mini-dice-btn" title="随机生成 15000~62000 可用端口" @click="pickRandomAvailablePort">🎲 随机端口</button>
                 </div>
                 <input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动分配">
-                <small v-if="isTunnelProtocol">仅监听 127.0.0.1 本地；客户端连接 Cloudflare 443</small>
-                <small v-else-if="conflictingNodeName" class="port-conflict-hint">⚠️ 端口 {{ createForm.listenPort }} 已被节点「{{ conflictingNodeName }}」占用</small>
-                <small v-else>填 0 由系统自动分配高位空闲端口</small>
-              </label>
+                <div class="field-foot-row">
+                  <small v-if="isTunnelProtocol">仅监听 127.0.0.1 本地；客户端连接 Cloudflare 443</small>
+                  <small v-else-if="conflictingNodeName" class="port-conflict-hint">⚠️ 端口 {{ createForm.listenPort }} 已被节点「{{ conflictingNodeName }}」占用</small>
+                  <small v-else>填 0 由系统自动分配高位空闲端口</small>
+                  <label v-if="!isTunnelProtocol" class="port-auto-allow-label" :title="language === 'en-US' ? 'Automatically allow inbound port in host firewall' : '创建或更新节点时，自动在主机系统防火墙放行该端口'">
+                    <input v-model="createForm.autoAllowPort" type="checkbox" class="mini-checkbox">
+                    <span>{{ language === 'en-US' ? 'Auto-allow' : '自动放行' }}</span>
+                  </label>
+                </div>
+              </div>
 
-              <label class="field-item">
+              <div class="field-item">
                 <div class="field-label-row">
                   <span class="field-label-text">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }} <em class="req-star">*</em></span>
                 </div>
                 <input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required>
-                <small v-if="isTunnelProtocol">填写 Published application 对应的公开主机名</small>
-                <small v-else-if="deploymentDefaults.panelDomain">默认已采用面板域名，可按需修改</small>
-              </label>
+                <div class="field-foot-row">
+                  <small v-if="isTunnelProtocol">填写 Published application 对应的公开主机名</small>
+                  <small v-else-if="deploymentDefaults.panelDomain">默认已采用面板域名，可按需修改</small>
+                </div>
+              </div>
             </div>
 
             <!-- Domain / REALITY / TLS -->
