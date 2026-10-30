@@ -68,17 +68,6 @@ export const OFFICIAL_PANEL_UPDATE_COMMAND =
 export const OFFICIAL_SINGBOX_UPDATE_COMMAND =
   'curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --update-sing-box';
 
-export const SHORT_PANEL_UPDATE_COMMAND = 'sudo wukongctl update';
-export const SHORT_SINGBOX_UPDATE_COMMAND = 'sudo wukongctl update sing-box';
-
-export function getShortPanelUpdateCommand(): string {
-  return SHORT_PANEL_UPDATE_COMMAND;
-}
-
-export function getShortSingBoxUpdateCommand(): string {
-  return SHORT_SINGBOX_UPDATE_COMMAND;
-}
-
 export function getProbeUpdateCommand(): string {
   return OFFICIAL_PROBE_UPDATE_COMMAND;
 }
