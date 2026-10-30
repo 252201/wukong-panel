@@ -96,6 +96,10 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.modal-card label.port-auto-allow-label'), 'Must override .modal-card label for port-auto-allow-label')
   assert.ok(cssSource.includes('.port-auto-allow-label'), 'Must style port-auto-allow-label')
 
+  // Reality quick menu upward expansion and full height display
+  assert.ok(cssSource.includes('.reality-quick-menu { position: absolute; right: 0; bottom: calc(100% + 6px);'), 'Must expand reality quick menu upwards')
+  assert.ok(cssSource.includes('max-height: min(450px, 80vh);'), 'Must adjust reality quick menu max-height to display all presets')
+
   // Device fleet grid and tools
   assert.ok(cssSource.includes('.device-fleet-grid'), 'Must style device fleet grid')
   assert.ok(cssSource.includes('.tunnel-fleet-banner'), 'Must style .tunnel-fleet-banner')
