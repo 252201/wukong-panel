@@ -392,6 +392,26 @@ test('host-update and singbox-update modals use wide layout with enhanced target
   assert.match(stylesCss, /\.merged-action-group\s*\{[^}]*display:\s*flex/);
 });
 
+test('host-update warning banner is guarded and only shown when host does not support online upgrade', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
 
+  // Both probe and remote panel warning banners must explicitly check !hostUpdateOnlineSupported
+  assert.match(
+    appVue,
+    /v-else-if="!hostUpdateOnlineSupported\(hostUpdateTarget\)\s*&&\s*isProbeHost\(hostUpdateTarget\)"\s+class="host-update-warning-banner"/,
+    'Probe warning banner must only be shown when hostUpdateOnlineSupported is false'
+  );
+  assert.match(
+    appVue,
+    /v-else-if="!hostUpdateOnlineSupported\(hostUpdateTarget\)"\s+class="host-update-warning-banner"/,
+    'Remote panel warning banner must only be shown when hostUpdateOnlineSupported is false'
+  );
 
+  // Must not have a fallthrough v-else warning banner that accidentally matches when online update is supported
+  assert.doesNotMatch(
+    appVue,
+    /<div\s+v-else\s+class="host-update-warning-banner">/,
+    'Must not have an unguarded v-else host-update-warning-banner'
+  );
+});
 
