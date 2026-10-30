@@ -4279,16 +4279,11 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <span>{{ nodeFirewallStatus(diagnosticNode).title }}</span>
         </div>
         <div class="diag-metric-card">
-          <small>{{ language === 'en-US' ? 'Real-Time Downlink Rate' : '实时窗口下行速率' }}</small>
-          <strong>{{ rate(nodeRate(diagnosticNode.id)) }}</strong>
-          <span>{{ language === 'en-US' ? 'Traffic rate in latest sampling window' : '当前采集窗口流量传输速度' }}</span>
-        </div>
-        <div class="diag-metric-card">
           <small>{{ language === 'en-US' ? 'Cumulative Traffic' : '节点累计传输流量' }}</small>
           <strong>{{ bytes(diagnosticNode.trafficBytes || 0) }}</strong>
           <span>{{ nodeTrafficTooltip(diagnosticNode) }}</span>
         </div>
-        <div class="diag-metric-card diag-metric-card-wide">
+        <div class="diag-metric-card">
           <small>{{ language === 'en-US' ? 'Last Verification' : '最后校验时间' }}</small>
           <b class="diag-timestamp">{{ diagnosticNode.probeCheckedAt ? formatFullDateTime(diagnosticNode.probeCheckedAt, language) : (language === 'en-US' ? 'Not yet probed' : '尚未检测') }}</b>
           <span>{{ diagnosticNode.probeCheckedAt ? formatRelativeTime(diagnosticNode.probeCheckedAt, undefined, language) : (language === 'en-US' ? 'Click button below to probe' : '点击下方按钮发起检测') }}</span>

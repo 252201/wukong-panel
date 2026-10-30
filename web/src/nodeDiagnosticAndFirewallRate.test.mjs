@@ -138,7 +138,8 @@ test('App.vue contains rate badge, firewall indicator, relative probe strip and 
   assert.ok(vueSource.includes('落地公网出口 IP'), 'Must display egress public IP')
   assert.ok(vueSource.includes('openReputationModal(currentFleetHost || undefined, diagnosticNode.probeExitIp)'), 'Must support 1-click IP reputation query')
   assert.ok(vueSource.includes('主机防火墙状态'), 'Must display firewall allow status')
-  assert.ok(vueSource.includes('实时窗口下行速率'), 'Must display live traffic rate')
+  assert.ok(!vueSource.includes('实时窗口下行速率'), 'Must remove redundant live rate card from diagnostic modal')
+  assert.ok(vueSource.includes('class="node-rate-badge"'), 'Must display rate badge in diagnostic header')
   assert.ok(vueSource.includes('节点累计传输流量'), 'Must display cumulative traffic metric in diagnostic modal')
   assert.ok(vueSource.includes('最后校验时间'), 'Must display last checked time with relative format')
 
