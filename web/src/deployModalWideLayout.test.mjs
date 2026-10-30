@@ -42,6 +42,9 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(vueSource.includes('class="port-auto-allow-label"'), 'Must render port-auto-allow-label checkbox container')
   assert.ok(vueSource.includes('v-model="createForm.autoAllowPort"'), 'Must bind autoAllowPort to createForm')
 
+  // REALITY domain input group must be div to restrict click trigger solely to quick select button
+  assert.ok(vueSource.includes('<div v-if="createForm.protocol !== \'shadowsocks\' && !isTunnelProtocol" class="field-item domain-input-group">'), 'domain-input-group must be div, not label, to lock trigger scope to button')
+
   // Device fleet tools and responsive grid
   assert.ok(vueSource.includes('class="fleet-deploy-grid"'), 'Must render fleet-deploy-grid in deviceMode')
   assert.ok(vueSource.includes('fleet-devices-card'), 'Must render fleet-devices-card')

@@ -3445,7 +3445,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </div>
 
             <!-- Domain / REALITY / TLS -->
-            <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="field-item domain-input-group">
+            <div v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="field-item domain-input-group">
               <span v-if="createForm.protocol !== 'vless'" class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
               <div v-else class="field-title-row">
                 <span class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
@@ -3505,7 +3505,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </template>
               </small>
               <small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small>
-            </label>
+            </div>
 
             <!-- Tunnel specific fields -->
             <template v-if="isTunnelProtocol">
