@@ -46,14 +46,33 @@ wget -qO- https://github.com/252201/wukong-panel/releases/latest/download/bootst
 
 ### 3. 常用运维与更新
 
+**极简运维（推荐，已安装面板环境）**：
 ```bash
-# 安全更新到最新版本（保留现有配置、证书与节点）
+# 升级面板主程序（推荐，极简 21 字符）
+sudo wukongctl update
+
+# 升级 sing-box 代理内核
+sudo wukongctl update sing-box
+
+# 升级 Cloudflare Tunnel 连接器
+sudo wukongctl update cloudflared
+
+# 重置管理员密码并撤销所有现有会话
+sudo wukongctl reset-password
+
+# 查看命令行工具帮助菜单
+wukongctl --help
+```
+
+**通用远程脚本（备选 / 未安装面板 / 故障恢复）**：
+```bash
+# 远程一键更新面板主程序
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --update
 
 # 固定版本、自定义端口与访问路径
 sudo sh install.sh --version v2.2.10 --port 9443 --base-path /my-secret-panel/
 
-# 忘记管理员密码：撤销现有会话并生成一次性临时登录密码
+# 远程重置管理员密码
 curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --reset-password
 ```
 
