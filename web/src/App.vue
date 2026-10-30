@@ -3658,35 +3658,22 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <option value="v6only">纯 IPv6</option>
                 </select>
               </label>
-              <label v-if="!isTunnelProtocol" class="field-item">
-                <span class="field-label-text">公网域名 / IP <em class="req-star">*</em></span>
-                <input v-model="createForm.server" placeholder="node.example.com" required>
-              </label>
-              <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="field-item">
-                <span class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
-                <input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'">
+              <template v-if="!isTunnelProtocol">
+                <label class="field-item" :class="{ 'span-2': createForm.protocol === 'shadowsocks' }">
+                  <span class="field-label-text">公网域名 / IP <em class="req-star">*</em></span>
+                  <input v-model="createForm.server" placeholder="node.example.com" required>
+                </label>
+                <label v-if="createForm.protocol !== 'shadowsocks'" class="field-item">
+                  <span class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
+                  <input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'">
+                </label>
+              </template>
+              <label v-else class="field-item tunnel-token-field span-2">
+                <span class="field-label-text">共享 Tunnel Token <em class="req-star">*</em></span>
+                <input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required>
+                <small>整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口</small>
               </label>
             </div>
-
-            <template v-if="isTunnelProtocol">
-              <div class="field-grid-2 tunnel-fleet-grid">
-                <label class="field-item tunnel-token-field">
-                  <span class="field-label-text">共享 Tunnel Token <em class="req-star">*</em></span>
-                  <input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required>
-                  <small>整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口</small>
-                </label>
-                <div class="tunnel-guide">
-                  <span>隧</span>
-                  <div>
-                    <b>一个 Tunnel，多条设备路由</b>
-                    <ol>
-                      <li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li>
-                      <li>为下方每台设备添加一条 Published application，把独立主机名路由到对应 <code>http://127.0.0.1:端口</code>。</li>
-                    </ol>
-                  </div>
-                </div>
-              </div>
-            </template>
           </div>
         </section>
 
@@ -3704,6 +3691,18 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <button type="button" class="mini-tool-btn" title="为设备批量命名为：设备 01、设备 02…" @click="batchRenameDevices()">🪄 批量命名</button>
               <button type="button" class="mini-tool-btn" title="按连续递增方式分配端口" @click="autoAssignSequentialPorts()">⚡ 连续端口</button>
               <button type="button" class="add-device-btn" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button>
+            </div>
+          </div>
+
+          <!-- Tunnel Route Guide Banner in Fleet Devices Card -->
+          <div v-if="isTunnelProtocol" class="tunnel-guide tunnel-fleet-banner">
+            <span>隧</span>
+            <div>
+              <b>一个 Tunnel，多条设备路由</b>
+              <ol>
+                <li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token 填入上方共享配置。</li>
+                <li>为下方每台设备添加一条 Published application，把独立主机名路由到对应 <code>http://127.0.0.1:端口</code>。</li>
+              </ol>
             </div>
           </div>
 
