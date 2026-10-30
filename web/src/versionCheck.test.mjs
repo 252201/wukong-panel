@@ -384,6 +384,12 @@ test('host-update and singbox-update modals use wide layout with enhanced target
 
   // 6. Responsive styles for mobile
   assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*100%/);
+
+  // 7. Merged version diff and online update card for single-row compact layout
+  assert.match(appVue, /class="version-update-merged-card"/);
+  assert.match(stylesCss, /\.version-update-merged-card\s*\{[^}]*display:\s*flex/);
+  assert.match(stylesCss, /\.merged-diff-group\s*\{[^}]*display:\s*flex/);
+  assert.match(stylesCss, /\.merged-action-group\s*\{[^}]*display:\s*flex/);
 });
 
 
