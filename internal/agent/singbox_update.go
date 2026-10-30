@@ -262,7 +262,13 @@ func (m *Manager) SingBoxUpdate(ctx context.Context, r model.ComponentUpdateRequ
 	case "check":
 		return c.Check(ctx)
 	case "update":
-		e := c.Update(ctx, r.CurrentVersion, r.TargetVersion)
+		updateCtx := ctx
+		if r.JobID != "" && m.store != nil {
+			updateCtx = componentupdate.WithProgress(ctx, func(progress int, message string) {
+				_ = m.store.UpdateJob(r.JobID, "running", progress, message, "")
+			})
+		}
+		e := c.Update(updateCtx, r.CurrentVersion, r.TargetVersion)
 		if e == nil {
 			_ = m.store.UpdateNodeConfigVersions(r.TargetVersion)
 		}

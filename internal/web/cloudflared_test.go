@@ -16,11 +16,13 @@ import (
 
 type cloudflaredFake struct {
 	fakeAgent
-	calls atomic.Int32
+	calls   atomic.Int32
+	lastReq model.CloudflaredRequest
 }
 
 func (a *cloudflaredFake) Cloudflared(_ context.Context, r model.CloudflaredRequest) (model.CloudflaredState, error) {
 	a.calls.Add(1)
+	a.lastReq = r
 	return model.CloudflaredState{Installed: true, CurrentVersion: "2026.8.2", LatestVersion: "2026.9.3", Writable: true}, nil
 }
 
@@ -77,6 +79,9 @@ func TestCloudflaredAuthAndJob(t *testing.T) {
 						t.Fatal("job did not complete", job)
 					}
 					time.Sleep(time.Millisecond)
+				}
+				if a.lastReq.JobID != result.JobID {
+					t.Fatalf("expected JobID %s in request to agent, got %s", result.JobID, a.lastReq.JobID)
 				}
 			}
 		}
@@ -183,6 +188,9 @@ func TestSingBoxUpdateAuthAndJob(t *testing.T) {
 						t.Fatal("job did not complete", job)
 					}
 					time.Sleep(time.Millisecond)
+				}
+				if a.lastReq.JobID != result.JobID {
+					t.Fatalf("expected JobID %s in request to agent, got %s", result.JobID, a.lastReq.JobID)
 				}
 			}
 		}

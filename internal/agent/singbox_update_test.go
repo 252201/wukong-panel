@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,5 +177,29 @@ func TestSingBoxUpdatePrepareParallelConfigs(t *testing.T) {
 		if bytes.Contains(f.New, []byte(`"sniff":`)) {
 			t.Fatalf("config %s was not migrated properly", f.Path)
 		}
+	}
+}
+
+func TestSingBoxUpdateProgressWiresToStore(t *testing.T) {
+	m, db := newDemoManager(t)
+	m.cfg.Demo = false
+	job, err := db.CreateJob("sing-box.update", "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := componentupdate.WithProgress(t.Context(), func(progress int, message string) {
+		_ = m.store.UpdateJob(job.ID, "running", progress, message, "")
+	})
+
+	c := componentupdate.New(t.TempDir(), filepath.Join(t.TempDir(), "sb"), "amd64")
+	c.ReportProgress(ctx, 55, "正在下载 sing-box (18.2 MB / 33.1 MB)…")
+
+	updated, err := db.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Progress != 55 || !strings.Contains(updated.Message, "18.2 MB / 33.1 MB") {
+		t.Fatalf("job progress not recorded in store: %#v", updated)
 	}
 }

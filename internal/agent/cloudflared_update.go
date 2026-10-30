@@ -102,7 +102,13 @@ func (m *Manager) Cloudflared(ctx context.Context, r model.CloudflaredRequest) (
 		}
 		return c.Configure(ctx, *r.AutoUpdate)
 	case "update":
-		e := c.Update(ctx, r.CurrentVersion, r.TargetVersion)
+		updateCtx := ctx
+		if r.JobID != "" && m.store != nil {
+			updateCtx = componentupdate.WithProgress(ctx, func(progress int, message string) {
+				_ = m.store.UpdateJob(r.JobID, "running", progress, message, "")
+			})
+		}
+		e := c.Update(updateCtx, r.CurrentVersion, r.TargetVersion)
 		_ = m.store.Audit("agent", "cloudflared.update", "local", r.CurrentVersion+" -> "+r.TargetVersion)
 		s, statusErr := c.Status(ctx)
 		return s, errors.Join(e, statusErr)

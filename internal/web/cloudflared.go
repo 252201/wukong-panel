@@ -58,6 +58,7 @@ func (s *Server) componentUpdate(w http.ResponseWriter, r *http.Request, session
 			writeError(w, 500, e.Error())
 			return
 		}
+		req.JobID = job.ID
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()

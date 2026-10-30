@@ -2,9 +2,11 @@ package agent
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/252201/wukong-panel/internal/componentupdate"
 	"github.com/252201/wukong-panel/internal/model"
 )
 
@@ -59,5 +61,29 @@ func TestCloudflaredNodeKeySharesOnlyManagedDeviceGroups(t *testing.T) {
 	individual := model.Node{ID: "single", Ownership: "managed"}
 	if got := cloudflaredNodeKey(individual); got != individual.ID {
 		t.Fatalf("individual node connector key changed: %q", got)
+	}
+}
+
+func TestCloudflaredUpdateProgressWiresToStore(t *testing.T) {
+	m, db := newDemoManager(t)
+	m.cfg.Demo = false
+	job, err := db.CreateJob("cloudflared.update", "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := componentupdate.WithProgress(t.Context(), func(progress int, message string) {
+		_ = m.store.UpdateJob(job.ID, "running", progress, message, "")
+	})
+
+	c := componentupdate.New(t.TempDir(), filepath.Join(t.TempDir(), "cf"), "amd64")
+	c.ReportProgress(ctx, 49, "正在下载 cloudflared (24.8 MB / 40.3 MB)…")
+
+	updated, err := db.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Progress != 49 || !strings.Contains(updated.Message, "24.8 MB / 40.3 MB") {
+		t.Fatalf("job progress not recorded in store: %#v", updated)
 	}
 }
