@@ -987,6 +987,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
+.field-grid-4 > .span-2 {
+  grid-column: span 2;
+}
 .field-label-row {
   display: flex;
   align-items: center;
@@ -1096,6 +1099,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .add-device-btn:hover:not(:disabled) {
   border-color: var(--gold);
   background: rgba(212,173,87,.18);
+}
+.tunnel-fleet-banner {
+  margin: 0;
+  border-radius: 4px;
 }
 .device-fleet-grid {
   display: grid;
@@ -1249,8 +1256,12 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .protocol-matrix {
     grid-template-columns: repeat(2, 1fr);
   }
-  .field-grid-2 {
+  .field-grid-2,
+  .field-grid-4 {
     grid-template-columns: 1fr;
+  }
+  .field-grid-4 > .span-2 {
+    grid-column: auto;
   }
   .node-form-foot {
     flex-direction: column-reverse;

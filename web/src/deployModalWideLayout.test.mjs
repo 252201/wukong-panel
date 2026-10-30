@@ -36,6 +36,7 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(vueSource.includes('class="fleet-deploy-grid"'), 'Must render fleet-deploy-grid in deviceMode')
   assert.ok(vueSource.includes('fleet-devices-card'), 'Must render fleet-devices-card')
   assert.ok(vueSource.includes('class="device-fleet-grid"'), 'Must render multi-column device-fleet-grid')
+  assert.ok(vueSource.includes('class="tunnel-guide tunnel-fleet-banner"'), 'Must render tunnel-fleet-banner guide inside fleet-devices-card')
   assert.ok(vueSource.includes('@click="batchRenameDevices()"'), 'Must support batchRenameDevices')
   assert.ok(vueSource.includes('@click="autoAssignSequentialPorts()"'), 'Must support autoAssignSequentialPorts')
   assert.ok(vueSource.includes('const hasDevicePortDuplicate = computed('), 'Must compute hasDevicePortDuplicate')
@@ -72,6 +73,8 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
 
   // Device fleet grid and tools
   assert.ok(cssSource.includes('.device-fleet-grid'), 'Must style device fleet grid')
+  assert.ok(cssSource.includes('.tunnel-fleet-banner'), 'Must style .tunnel-fleet-banner')
+  assert.ok(cssSource.includes('.field-grid-4 > .span-2'), 'Must style .field-grid-4 > .span-2')
   assert.ok(cssSource.includes('.mini-tool-btn'), 'Must style batch mini tools')
   assert.ok(cssSource.includes('.node-form-foot'), 'Must style footer bar')
 
