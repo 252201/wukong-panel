@@ -37,10 +37,15 @@ func WithProgress(ctx context.Context, fn ProgressReporter) context.Context {
 	return context.WithValue(ctx, progressContextKey{}, fn)
 }
 
-func (c *Controller) reportProgress(ctx context.Context, percent int, message string) {
+// ReportProgress delivers an update to the ProgressReporter registered in ctx if present.
+func (c *Controller) ReportProgress(ctx context.Context, percent int, message string) {
 	if fn, ok := ctx.Value(progressContextKey{}).(ProgressReporter); ok && fn != nil {
 		fn(percent, message)
 	}
+}
+
+func (c *Controller) reportProgress(ctx context.Context, percent int, message string) {
+	c.ReportProgress(ctx, percent, message)
 }
 
 type progressReader struct {

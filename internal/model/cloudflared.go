@@ -21,6 +21,7 @@ type ComponentUpdateRequest struct {
 	CurrentVersion string `json:"currentVersion,omitempty"`
 	TargetVersion  string `json:"targetVersion,omitempty"`
 	AutoUpdate     *bool  `json:"autoUpdate,omitempty"`
+	JobID          string `json:"jobId,omitempty"`
 }
 
 type CloudflaredState = ComponentUpdateState
