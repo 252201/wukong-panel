@@ -41,10 +41,28 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertScopes([path], "backend")
 
-    def test_security_and_shared_dependencies_trigger_native_checks(self):
-        for path in ("internal/hostsecurity/firewall.go", "internal/model/model.go", "internal/config/config.go", "internal/security/auth.go", "internal/agent/manager.go", "internal/store/store.go", "internal/web/server.go", "cmd/wukong-panel/main.go", "scripts/security/setup.sh", "scripts/test-host-security-native.sh"):
+    def test_host_security_triggers_native_checks(self):
+        for path in (
+            "internal/hostsecurity/firewall.go",
+            "internal/model/host_security.go",
+            "scripts/security/setup.sh",
+            "scripts/test-host-security-native.sh",
+        ):
             with self.subTest(path=path):
                 self.assertScopes([path], "backend", "security")
+
+    def test_general_backend_does_not_trigger_security(self):
+        for path in (
+            "internal/model/model.go",
+            "internal/config/config.go",
+            "internal/security/auth.go",
+            "internal/agent/manager.go",
+            "internal/store/store.go",
+            "internal/web/server.go",
+            "cmd/wukong-panel/main.go",
+        ):
+            with self.subTest(path=path):
+                self.assertScopes([path], "backend")
 
     def test_installer_source_and_fixtures(self):
         for path in ("install.sh", "bootstrap.sh", "probe-install.sh", "uninstall.sh", "compat/deploy-hy2.sh", "scripts/test-install-hardening.sh", "scripts/test-singbox-lifecycle.sh"):
@@ -101,10 +119,10 @@ class ScopeTests(unittest.TestCase):
             dict.fromkeys(SCOPES, False),
         )
 
-        # Modifying logic or other lines in release.go MUST trigger backend and security
+        # Modifying logic or other lines in release.go MUST trigger backend (but not security matrix)
         logic_change = after + "// extra comment\n"
         self.assertFalse(version_only("internal/web/release.go", before, logic_change))
-        self.assertScopes(["internal/web/release.go"], "backend", "security")
+        self.assertScopes(["internal/web/release.go"], "backend")
 
         # Multiple matches or missing matches should return False
         multi_match = before + '\tcleanVer = "1.7.5"\n'

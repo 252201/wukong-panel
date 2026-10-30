@@ -11,9 +11,30 @@ import subprocess
 SCOPES = ("frontend", "backend", "installers", "security")
 VERSION_LINE = re.compile(r"^(VERSION[ \t]+\?=[ \t]+)\d+\.\d+\.\d+([ \t]*)$", re.M)
 RELEASE_GO_VERSION_LINE = re.compile(r'([ \t]*cleanVer[ \t]*=[ \t]*")\d+\.\d+\.\d+(")', re.M)
-SECURITY_PREFIXES = (
-    "internal/hostsecurity/", "internal/agent/", "internal/model/",
-    "internal/config/", "internal/store/", "internal/security/", "internal/web/", "cmd/wukong-panel/",
+HOST_SECURITY_PREFIXES = (
+    "internal/hostsecurity/",
+    "scripts/security/",
+)
+HOST_SECURITY_EXACT = (
+    "internal/model/host_security.go",
+    "scripts/test-host-security-native.sh",
+)
+BACKEND_PREFIXES = (
+    "cmd/wukong-panel/",
+    "cmd/wukong-probe/",
+    "internal/agent/",
+    "internal/componentupdate/",
+    "internal/config/",
+    "internal/hostlocation/",
+    "internal/iplocation/",
+    "internal/model/",
+    "internal/monitor/",
+    "internal/netcheck/",
+    "internal/probe/",
+    "internal/security/",
+    "internal/singboxconfig/",
+    "internal/store/",
+    "internal/web/",
 )
 
 
@@ -57,24 +78,12 @@ def classify(paths, read_blob=lambda revision, path: None):
             selected["frontend"] = True
         elif path.startswith((".github/", "scripts/ci_")) or path in ("Makefile", "go.mod", "go.sum", "scripts/build-release.sh"):
             return dict.fromkeys(SCOPES, True)
-        elif path.startswith("scripts/security/") or path == "scripts/test-host-security-native.sh":
+        elif path.startswith(HOST_SECURITY_PREFIXES) or path in HOST_SECURITY_EXACT:
             selected["backend"] = selected["security"] = True
         elif path in ("install.sh", "uninstall.sh", "bootstrap.sh", "probe-install.sh") or path.startswith(("compat/", "scripts/test-install", "scripts/test-singbox")):
             selected["installers"] = True
-        elif path.startswith((
-            "internal/monitor/", "internal/probe/", "internal/netcheck/",
-            "internal/hostlocation/", "internal/singboxconfig/", "cmd/wukong-probe/",
-            "internal/componentupdate/", "internal/iplocation/",
-            "internal/agent/protocols", "internal/agent/singbox_update",
-            "internal/agent/cloudflared", "internal/agent/residential_exit",
-            "internal/agent/socks_exit", "internal/agent/fleet",
-            "internal/agent/panel_update", "internal/agent/anytls",
-            "internal/agent/reality", "internal/agent/transport",
-            "internal/agent/runtime_binary",
-        )):
+        elif path.startswith(BACKEND_PREFIXES):
             selected["backend"] = True
-        elif path.startswith(SECURITY_PREFIXES):
-            selected["backend"] = selected["security"] = True
         elif path in ("README.md", "LICENSE", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore") or path.startswith(("docs/", "assets/")) or path.endswith(".md"):
             continue
         else:
