@@ -39,34 +39,39 @@ func Parse(version string) Config {
 		command = os.Args[1]
 		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 	}
+	isCtl := len(originalArgs) > 0 && filepath.Base(originalArgs[0]) == "wukongctl"
+	if isCtl && (len(originalArgs) <= 1 || originalArgs[1] == "--help" || originalArgs[1] == "-h" || originalArgs[1] == "help") {
+		command = "help"
+	}
 	dataDir := env("WUKONG_DATA_DIR", "/var/lib/wukong-panel")
 	cfg := Config{Command: command}
 	if len(originalArgs) > 2 {
 		cfg.Args = originalArgs[2:]
 	}
-	if command == "node" || command == "singbox" || command == "fleet" {
+	if command == "node" || command == "singbox" || command == "fleet" || command == "update" || command == "help" {
 		os.Args = []string{os.Args[0]}
 	}
-	flag.StringVar(&cfg.Listen, "listen", env("WUKONG_LISTEN", "127.0.0.1:8788"), "web listen address")
-	flag.StringVar(&cfg.AgentSocket, "agent-socket", env("WUKONG_AGENT_SOCKET", "/run/wukong-panel/agent.sock"), "agent unix socket")
-	flag.StringVar(&cfg.AgentToken, "agent-token", env("WUKONG_AGENT_TOKEN", ""), "agent authentication token")
-	flag.StringVar(&cfg.AgentTokenFile, "agent-token-file", env("WUKONG_AGENT_TOKEN_FILE", ""), "agent token file")
-	flag.StringVar(&cfg.DataDir, "data-dir", dataDir, "data directory")
-	flag.StringVar(&cfg.SecretDir, "secret-dir", env("WUKONG_SECRET_DIR", ""), "root-only secret directory")
-	flag.StringVar(&cfg.ConfigDir, "config-dir", env("WUKONG_SINGBOX_CONFIG_DIR", "/etc/s-box"), "sing-box config directory")
-	flag.StringVar(&cfg.SingBoxBin, "sing-box", env("WUKONG_SINGBOX_BIN", "/etc/s-box/sing-box"), "sing-box binary")
-	flag.StringVar(&cfg.CloudflaredBin, "cloudflared", env("WUKONG_CLOUDFLARED_BIN", "/usr/local/bin/cloudflared"), "cloudflared binary")
-	flag.StringVar(&cfg.TLSCertFile, "tls-cert", env("WUKONG_TLS_CERT", "/etc/wukong-panel/tls/fullchain.cer"), "trusted panel certificate available to managed nodes")
-	flag.StringVar(&cfg.TLSKeyFile, "tls-key", env("WUKONG_TLS_KEY", "/etc/wukong-panel/tls/private.key"), "private key for the trusted panel certificate")
-	flag.StringVar(&cfg.PanelDomain, "panel-domain", env("WUKONG_PANEL_DOMAIN", ""), "public panel domain used as the default node endpoint")
-	flag.StringVar(&cfg.BasePath, "base-path", env("WUKONG_BASE_PATH", "/wukong/"), "public base path")
-	flag.BoolVar(&cfg.SecureCookie, "secure-cookie", envBool("WUKONG_SECURE_COOKIE", true), "set secure cookies")
-	flag.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
-	flag.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
-	flag.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
-	flag.StringVar(&cfg.NetworkProbeTargets, "network-probe-targets", env("WUKONG_NETWORK_PROBE_TARGETS", "1.1.1.1,8.8.8.8"), "comma-separated IPv4 addresses for local ICMP network checks")
-	flag.StringVar(&cfg.NetworkProbeDomesticTargets, "network-probe-domestic-targets", env("WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS", "194.138.202.35|223.5.5.5,138.113.151.1"), "comma-separated IPv4 addresses for domestic ICMP checks")
-	flag.Parse()
+	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags.StringVar(&cfg.Listen, "listen", env("WUKONG_LISTEN", "127.0.0.1:8788"), "web listen address")
+	flags.StringVar(&cfg.AgentSocket, "agent-socket", env("WUKONG_AGENT_SOCKET", "/run/wukong-panel/agent.sock"), "agent unix socket")
+	flags.StringVar(&cfg.AgentToken, "agent-token", env("WUKONG_AGENT_TOKEN", ""), "agent authentication token")
+	flags.StringVar(&cfg.AgentTokenFile, "agent-token-file", env("WUKONG_AGENT_TOKEN_FILE", ""), "agent token file")
+	flags.StringVar(&cfg.DataDir, "data-dir", dataDir, "data directory")
+	flags.StringVar(&cfg.SecretDir, "secret-dir", env("WUKONG_SECRET_DIR", ""), "root-only secret directory")
+	flags.StringVar(&cfg.ConfigDir, "config-dir", env("WUKONG_SINGBOX_CONFIG_DIR", "/etc/s-box"), "sing-box config directory")
+	flags.StringVar(&cfg.SingBoxBin, "sing-box", env("WUKONG_SINGBOX_BIN", "/etc/s-box/sing-box"), "sing-box binary")
+	flags.StringVar(&cfg.CloudflaredBin, "cloudflared", env("WUKONG_CLOUDFLARED_BIN", "/usr/local/bin/cloudflared"), "cloudflared binary")
+	flags.StringVar(&cfg.TLSCertFile, "tls-cert", env("WUKONG_TLS_CERT", "/etc/wukong-panel/tls/fullchain.cer"), "trusted panel certificate available to managed nodes")
+	flags.StringVar(&cfg.TLSKeyFile, "tls-key", env("WUKONG_TLS_KEY", "/etc/wukong-panel/tls/private.key"), "private key for the trusted panel certificate")
+	flags.StringVar(&cfg.PanelDomain, "panel-domain", env("WUKONG_PANEL_DOMAIN", ""), "public panel domain used as the default node endpoint")
+	flags.StringVar(&cfg.BasePath, "base-path", env("WUKONG_BASE_PATH", "/wukong/"), "public base path")
+	flags.BoolVar(&cfg.SecureCookie, "secure-cookie", envBool("WUKONG_SECURE_COOKIE", true), "set secure cookies")
+	flags.BoolVar(&cfg.Demo, "demo", envBool("WUKONG_DEMO", false), "seed demo data")
+	flags.StringVar(&cfg.FleetConfigFile, "fleet-config-file", env("WUKONG_FLEET_CONFIG_FILE", "/etc/wukong-panel/fleet.json"), "fleet satellite configuration file")
+	flags.StringVar(&cfg.FleetTokenFile, "fleet-token-file", env("WUKONG_FLEET_TOKEN_FILE", "/etc/wukong-panel/fleet.token"), "fleet satellite token file")
+	flags.StringVar(&cfg.NetworkProbeTargets, "network-probe-targets", env("WUKONG_NETWORK_PROBE_TARGETS", "1.1.1.1,8.8.8.8"), "comma-separated IPv4 addresses for local ICMP network checks")
+	flags.StringVar(&cfg.NetworkProbeDomesticTargets, "network-probe-domestic-targets", env("WUKONG_NETWORK_PROBE_DOMESTIC_TARGETS", "194.138.202.35|223.5.5.5,138.113.151.1"), "comma-separated IPv4 addresses for domestic ICMP checks")
+	_ = flags.Parse(os.Args[1:])
 	if cfg.AgentTokenFile == "" {
 		cfg.AgentTokenFile = filepath.Join(cfg.DataDir, "agent.token")
 	}

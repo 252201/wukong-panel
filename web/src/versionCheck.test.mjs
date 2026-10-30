@@ -9,6 +9,8 @@ import {
   getProbeUpdateCommand,
   getPanelUpdateCommand,
   getSingBoxUpdateCommand,
+  getShortPanelUpdateCommand,
+  getShortSingBoxUpdateCommand,
   fetchLatestRelease
 } from './versionCheck.ts';
 
@@ -88,6 +90,8 @@ test('official update commands return correct curl scripts', () => {
   const probeCmd = getProbeUpdateCommand();
   const panelCmd = getPanelUpdateCommand();
   const singBoxCmd = getSingBoxUpdateCommand();
+  const shortPanelCmd = getShortPanelUpdateCommand();
+  const shortSingBoxCmd = getShortSingBoxUpdateCommand();
 
   assert.match(probeCmd, /probe-install\.sh/);
   assert.match(probeCmd, /--update/);
@@ -95,6 +99,8 @@ test('official update commands return correct curl scripts', () => {
   assert.match(panelCmd, /--update/);
   assert.match(singBoxCmd, /install\.sh/);
   assert.match(singBoxCmd, /--update-sing-box/);
+  assert.equal(shortPanelCmd, 'sudo wukongctl update');
+  assert.equal(shortSingBoxCmd, 'sudo wukongctl update sing-box');
 });
 
 test('sing-box version comparison detects new sing-box releases', () => {

@@ -129,6 +129,14 @@ func main() {
 		fmt.Printf("wukong-panel %s\n", version)
 		return
 	}
+	if cfg.Command == "help" {
+		printWukongctlHelp()
+		return
+	}
+	if cfg.Command == "update" {
+		runUpdateCLI(context.Background(), cfg, cfg.Args)
+		return
+	}
 	if cfg.Command == "security-recovery" || cfg.Command == "security-firewall" {
 		if os.Geteuid() != 0 {
 			log.Fatal("security-recovery requires root")
