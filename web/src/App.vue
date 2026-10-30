@@ -399,6 +399,15 @@ const protocolCatalog = {
   trojan: { badge: 'TROJAN', label: 'Trojan TLS', transport: 'TCP', domainLabel: 'TLS 域名', note: '基于标准 TLS 的 TCP 兼容节点。' },
   anytls: { badge: 'ANYTLS', label: 'AnyTLS', transport: 'TCP', domainLabel: 'TLS 域名', note: '基于标准 TLS 的复用与填充协议，适合 UDP 受限网络。' },
 } as const
+const protocolList = [
+  { key: 'hysteria2', badge: 'HY2', label: 'Hysteria2', transport: 'UDP', highlight: 'QUIC 极速抗丢包' },
+  { key: 'vless', badge: 'VLESS', label: 'VLESS + REALITY', transport: 'TCP', highlight: '真实 TLS 免证书' },
+  { key: 'vless-ws-tunnel', badge: 'VLESS · CF', label: 'CF Tunnel', transport: 'WS · CF', highlight: '免公网端口·穿透' },
+  { key: 'shadowsocks', badge: 'SS2022', label: 'Shadowsocks 2022', transport: 'TCP+UDP', highlight: '轻量极简双栈' },
+  { key: 'tuic', badge: 'TUIC', label: 'TUIC v5', transport: 'UDP', highlight: '低延迟 BBR 拥塞' },
+  { key: 'trojan', badge: 'TROJAN', label: 'Trojan TLS', transport: 'TCP', highlight: '标准 TLS 兼容' },
+  { key: 'anytls', badge: 'ANYTLS', label: 'AnyTLS', transport: 'TCP', highlight: '流量填充与复用' },
+] as const
 const protocolInfo = (protocol: string) => protocolCatalog[protocol as keyof typeof protocolCatalog] || protocolCatalog.hysteria2
 const selectedProtocolInfo = computed(() => protocolInfo(createForm.protocol))
 const isTunnelProtocol = computed(() => createForm.protocol === 'vless-ws-tunnel')
@@ -2024,6 +2033,49 @@ function addDevice() {
 function removeDevice(index: number) {
   if (deviceNodes.length > 2) deviceNodes.splice(index, 1)
 }
+function switchDeployKind(kind: 'create' | 'device-create') {
+  if (isEditing.value) return
+  modal.value = kind
+  if (kind === 'device-create' && deviceNodes.length === 0) {
+    resetDeviceDrafts()
+  }
+}
+const conflictingNodeName = computed(() => {
+  const port = createForm.listenPort
+  if (!port || port <= 0 || port > 65535) return ''
+  const match = nodes.value.find(n => n.listenPort === port && (!isEditing.value || n.id !== selectedNode.value?.id))
+  return match ? match.name : ''
+})
+function pickRandomAvailablePort() {
+  const occupied = new Set(nodes.value.map(n => n.listenPort).filter(p => p > 0))
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const port = Math.floor(Math.random() * (62000 - 15000 + 1)) + 15000
+    if (!occupied.has(port)) {
+      createForm.listenPort = port
+      return
+    }
+  }
+  createForm.listenPort = 52333
+}
+function autoAssignSequentialPorts() {
+  const occupied = new Set(nodes.value.map(n => n.listenPort).filter(p => p > 0))
+  let base = 52100
+  for (const dev of deviceNodes) {
+    while (occupied.has(base)) base++
+    dev.listenPort = base
+    occupied.add(base)
+    base++
+  }
+}
+function batchRenameDevices(prefix = '设备') {
+  deviceNodes.forEach((dev, idx) => {
+    dev.name = `${prefix} ${String(idx + 1).padStart(2, '0')}`
+  })
+}
+const hasDevicePortDuplicate = computed(() => {
+  const ports = deviceNodes.map(d => d.listenPort).filter(p => p > 0)
+  return new Set(ports).size !== ports.length
+})
 function applyBindChoice(family: 'ipv4' | 'ipv6') {
   const field = family === 'ipv4' ? 'ipv4Bind' : 'ipv6Bind'
   createForm[field] = bindChoice[family] === '__manual__' ? '' : bindChoice[family]
@@ -3257,92 +3309,503 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
   <div v-if="modal" class="modal-backdrop" @click.self="modal === 'fleet-host-action' ? closeFleetHostAction() : modal = null">
     <form v-if="modal === 'create' || modal === 'device-create' || modal === 'edit'" class="modal-card node-form" @click="realityPickerOpen = false" @submit.prevent="createNode">
-      <button type="button" class="modal-close" @click="modal = null">×</button>
-      <p class="eyebrow">{{ deviceMode ? 'DEPLOY DEVICE FLEET' : isEditing ? 'EDIT MANAGED NODE' : 'DEPLOY PROXY NODE' }}</p><h2>{{ deviceMode ? '部署设备专用节点' : isEditing ? `重新编辑 ${selectedNode?.name}` : '部署一座新节点' }}</h2>
-      <p v-if="isEditing" class="form-hint edit-safety-hint">保存前会建立配置快照并校验；重启失败自动恢复原配置。协议与凭据不会在编辑中改变。</p>
-      <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
-      <div class="form-grid">
-        <div v-if="deviceMode" class="span-2 device-mode-summary"><span>器</span><div><b>设备节点编队</b><small>{{ deviceNodes.length }} 台设备 · 独立端口与凭据 · 一个 sing-box 进程</small></div></div>
-        <label class="span-2">出口位置<select v-model="createForm.egress"><option value="direct">A 机本地直出</option><option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机落地 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option><option value="socks" :disabled="!deploymentDefaults.socksExitReady">自定义 SOCKS{{ deploymentDefaults.socksExitReady ? '' : '（请先配置）' }}</option></select><small v-if="createForm.egress === 'residential'">WireGuard 断线时拒绝联网，不回退到 A 机</small><small v-else-if="createForm.egress === 'socks'">全部流量只经 SOCKS 出站；代理不可用时连接失败，不回退直连</small></label>
-        <label v-if="!deviceMode">节点名称<input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required></label>
-        <label class="protocol-choice">节点协议<select v-model="createForm.protocol" :disabled="isEditing"><option value="hysteria2">Hysteria2 · UDP / QUIC</option><option value="vless">VLESS + REALITY · TCP</option><option value="vless-ws-tunnel">VLESS + WebSocket + Cloudflare Tunnel</option><option value="shadowsocks">Shadowsocks 2022 · TCP + UDP</option><option value="tuic">TUIC v5 · UDP / QUIC</option><option value="trojan">Trojan TLS · TCP</option><option value="anytls">AnyTLS · TCP / TLS</option></select><small>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</small></label>
-        <label>出站策略<input v-if="createForm.egress === 'socks'" value="由 SOCKS 代理接管" disabled><select v-else v-model="createForm.mode" :disabled="createForm.egress === 'residential'"><option value="prefer_v6">IPv6 优先 + IPv4 兜底</option><option value="v4only">纯 IPv4</option><option value="v6only">纯 IPv6</option></select></label>
-        <label v-if="!deviceMode">{{ isTunnelProtocol ? '本地 Origin 端口（TCP）' : `监听端口（${selectedProtocolInfo.transport}）` }}<input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"><small v-if="isTunnelProtocol">仅监听 127.0.0.1；客户端始终连接 Cloudflare 443</small></label>
-        <label v-if="!isTunnelProtocol || !deviceMode">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}<input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required><small v-if="isTunnelProtocol">填写 Tunnel Published application 使用的公开主机名</small><small v-else-if="deploymentDefaults.panelDomain">已采用面板域名，可按节点需要修改</small></label>
-        <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="domain-input-group">
-          <span v-if="createForm.protocol !== 'vless'">{{ selectedProtocolInfo.domainLabel }}</span>
-          <div v-else class="field-title-row">
-            <span>{{ selectedProtocolInfo.domainLabel }}</span>
-            <div class="reality-picker-wrap" @keydown.esc.stop="realityPickerOpen = false">
-              <button
-                type="button"
-                class="reality-quick-select"
-                :class="{ open: realityPickerOpen }"
-                :aria-expanded="realityPickerOpen"
-                title="快速选用推荐伪装域名"
-                @click.prevent.stop="realityPickerOpen = !realityPickerOpen"
-              >
-                <span>快捷选用推荐域名</span>
-                <i class="reality-caret" aria-hidden="true">▾</i>
-              </button>
-              <div v-if="realityPickerOpen" class="reality-quick-menu" role="listbox" aria-label="快捷选用推荐域名" @click.stop>
-                <div class="reality-menu-head">快捷选用推荐域名</div>
-                <div v-for="cat in realityPresets" :key="cat.category" class="reality-menu-group">
-                  <div class="reality-menu-category">{{ cat.category }}</div>
-                  <button
-                    v-for="item in cat.items"
-                    :key="item.domain"
-                    type="button"
-                    role="option"
-                    class="reality-menu-option"
-                    :class="{ active: activeRealityPreset?.domain === item.domain }"
-                    :aria-selected="activeRealityPreset?.domain === item.domain"
-                    @click.prevent.stop="chooseRealityPreset(item.domain)"
-                  >
-                    <span class="reality-opt-title">
-                      <i class="reality-opt-check" aria-hidden="true">{{ activeRealityPreset?.domain === item.domain ? '✓' : '' }}</i>
-                      <span>{{ item.title }}</span>
-                    </span>
-                    <code class="reality-opt-domain">{{ item.domain }}</code>
-                  </button>
-                </div>
-              </div>
+      <header class="node-form-top">
+        <div class="node-form-title-area">
+          <span class="modal-seal" :class="{ jade: deviceMode, gold: !deviceMode && !isEditing, amber: isEditing }">{{ deviceMode ? '器' : isEditing ? '更' : '署' }}</span>
+          <div class="node-form-headings">
+            <p class="eyebrow">{{ deviceMode ? 'DEPLOY DEVICE FLEET' : isEditing ? 'EDIT MANAGED NODE' : 'DEPLOY PROXY NODE' }}</p>
+            <h2>{{ deviceMode ? '部署设备专用节点' : isEditing ? `重新编辑 ${selectedNode?.name}` : '部署一座新节点' }}</h2>
+            <p v-if="isEditing" class="form-hint edit-safety-hint">保存前会建立配置快照并校验；重启失败自动恢复原配置。协议与凭据不会在编辑中改变。</p>
+            <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
+          </div>
+        </div>
+
+        <div v-if="!isEditing" class="deploy-mode-tabs" role="tablist">
+          <button
+            type="button"
+            class="deploy-mode-tab"
+            :class="{ active: !deviceMode }"
+            role="tab"
+            :aria-selected="!deviceMode"
+            @click="switchDeployKind('create')"
+          >
+            <span class="tab-icon">＋</span>
+            <div class="tab-text">
+              <b>标准代理节点</b>
+              <span class="tab-tag gold">七协议</span>
+            </div>
+          </button>
+          <button
+            type="button"
+            class="deploy-mode-tab"
+            :class="{ active: deviceMode }"
+            role="tab"
+            :aria-selected="deviceMode"
+            @click="switchDeployKind('device-create')"
+          >
+            <span class="tab-icon jade">器</span>
+            <div class="tab-text">
+              <b>设备专用编队</b>
+              <span class="tab-tag jade">设备编队</span>
+            </div>
+          </button>
+        </div>
+        <button type="button" class="modal-close" @click="modal = null">×</button>
+      </header>
+
+      <!-- Seven Protocols Matrix Deck -->
+      <div class="protocol-selection-area">
+        <div class="protocol-matrix">
+          <button
+            v-for="item in protocolList"
+            :key="item.key"
+            type="button"
+            class="protocol-matrix-card"
+            :class="{
+              active: createForm.protocol === item.key,
+              locked: isEditing && createForm.protocol === item.key,
+              disabled: isEditing && createForm.protocol !== item.key
+            }"
+            :disabled="isEditing"
+            @click="createForm.protocol = item.key"
+          >
+            <div class="card-tag-row">
+              <span class="matrix-badge" :class="item.key">{{ item.badge }}</span>
+              <span class="matrix-transport">{{ item.transport }}</span>
+            </div>
+            <b class="matrix-title">{{ item.label }}</b>
+            <small class="matrix-highlight">{{ item.highlight }}</small>
+          </button>
+        </div>
+        <div class="protocol-note-strip">
+          <span class="strip-icon">💡</span>
+          <div class="strip-text">
+            <strong>{{ selectedProtocolInfo.label }}（{{ selectedProtocolInfo.transport }}）</strong>：
+            <span>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mode A: Standard Node Dual-Column Form Grid -->
+      <div v-if="!deviceMode" class="node-form-dual-grid">
+        <!-- Left Column: Inbound & Service Exposure -->
+        <section class="form-section-card inbound-section">
+          <div class="section-card-head">
+            <span class="section-idx">01</span>
+            <div class="section-head-title">
+              <b>入站服务与网络暴露</b>
+              <small>配置监听端口、外部连接地址及 TLS 伪装域名</small>
             </div>
           </div>
-          <input
-            v-model="createForm.domain"
-            :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'"
-            autocomplete="off"
-            spellcheck="false"
-          >
-          <small v-if="createForm.protocol === 'vless'" class="reality-desc">
-            <template v-if="activeRealityPreset">
-              <span class="reality-badge">{{ activeRealityPreset.category }}</span>
-              {{ activeRealityPreset.desc }}
+
+          <div class="section-card-body">
+            <label class="field-item">
+              <span class="field-label-text">节点名称 <em class="req-star">*</em></span>
+              <input v-model="createForm.name" placeholder="例如：花果山 · iPhone" required>
+            </label>
+
+            <div class="field-grid-2">
+              <label class="field-item">
+                <div class="field-label-row">
+                  <span class="field-label-text">{{ isTunnelProtocol ? '本地 Origin 端口 (TCP)' : `监听端口 (${selectedProtocolInfo.transport})` }}</span>
+                  <button v-if="!isTunnelProtocol" type="button" class="mini-dice-btn" title="随机生成 15000~62000 可用端口" @click="pickRandomAvailablePort">🎲 随机端口</button>
+                </div>
+                <input v-model.number="createForm.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动分配">
+                <small v-if="isTunnelProtocol">仅监听 127.0.0.1 本地；客户端连接 Cloudflare 443</small>
+                <small v-else-if="conflictingNodeName" class="port-conflict-hint">⚠️ 端口 {{ createForm.listenPort }} 已被节点「{{ conflictingNodeName }}」占用</small>
+                <small v-else>填 0 由系统自动分配高位空闲端口</small>
+              </label>
+
+              <label class="field-item">
+                <span class="field-label-text">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }} <em class="req-star">*</em></span>
+                <input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required>
+                <small v-if="isTunnelProtocol">填写 Published application 对应的公开主机名</small>
+                <small v-else-if="deploymentDefaults.panelDomain">默认已采用面板域名，可按需修改</small>
+              </label>
+            </div>
+
+            <!-- Domain / REALITY / TLS -->
+            <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="field-item domain-input-group">
+              <span v-if="createForm.protocol !== 'vless'" class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
+              <div v-else class="field-title-row">
+                <span class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
+                <div class="reality-picker-wrap" @keydown.esc.stop="realityPickerOpen = false">
+                  <button
+                    type="button"
+                    class="reality-quick-select"
+                    :class="{ open: realityPickerOpen }"
+                    :aria-expanded="realityPickerOpen"
+                    title="快速选用推荐伪装域名"
+                    @click.prevent.stop="realityPickerOpen = !realityPickerOpen"
+                  >
+                    <span>快捷选用推荐域名</span>
+                    <i class="reality-caret" aria-hidden="true">▾</i>
+                  </button>
+                  <div v-if="realityPickerOpen" class="reality-quick-menu" role="listbox" aria-label="快捷选用推荐域名" @click.stop>
+                    <div class="reality-menu-head">快捷选用推荐域名</div>
+                    <div v-for="cat in realityPresets" :key="cat.category" class="reality-menu-group">
+                      <div class="reality-menu-category">{{ cat.category }}</div>
+                      <button
+                        v-for="item in cat.items"
+                        :key="item.domain"
+                        type="button"
+                        role="option"
+                        class="reality-menu-option"
+                        :class="{ active: activeRealityPreset?.domain === item.domain }"
+                        :aria-selected="activeRealityPreset?.domain === item.domain"
+                        @click.prevent.stop="chooseRealityPreset(item.domain)"
+                      >
+                        <span class="reality-opt-title">
+                          <i class="reality-opt-check" aria-hidden="true">{{ activeRealityPreset?.domain === item.domain ? '✓' : '' }}</i>
+                          <span>{{ item.title }}</span>
+                        </span>
+                        <code class="reality-opt-domain">{{ item.domain }}</code>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <input
+                v-model="createForm.domain"
+                :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'"
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <small v-if="createForm.protocol === 'vless'" class="reality-desc">
+                <template v-if="activeRealityPreset">
+                  <span class="reality-badge">{{ activeRealityPreset.category }}</span>
+                  {{ activeRealityPreset.desc }}
+                </template>
+                <template v-else-if="createForm.domain">
+                  <span class="reality-badge custom">自定义</span>
+                  客户端与 VPS 均可达的 TLS 1.3 站点（已填入自定义域名）
+                </template>
+                <template v-else>
+                  默认使用 AWS 静态资源 TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点
+                </template>
+              </small>
+              <small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small>
+            </label>
+
+            <!-- Tunnel specific fields -->
+            <template v-if="isTunnelProtocol">
+              <label class="field-item">
+                <span class="field-label-text">WebSocket 路径</span>
+                <input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off">
+                <small>自定义时必须以 / 开头</small>
+              </label>
+              <label class="field-item preferred-endpoint-field">
+                <span class="field-label-row">
+                  <span class="field-label-text">优选连接域名 / IP</span>
+                  <em>OPTIONAL</em>
+                </span>
+                <input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false">
+                <small>替换客户端 server；SNI 与 Tunnel 仍使用节点域名。留空保持标准 Anycast。</small>
+              </label>
+              <label v-if="!isEditing" class="field-item tunnel-token-field">
+                <span class="field-label-text">Tunnel Token <em class="req-star">*</em></span>
+                <input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required>
+                <small>仅接受运行 Token；不会要求或保存 Cloudflare API Key</small>
+              </label>
+              <div v-if="!isEditing" class="tunnel-guide">
+                <span>隧</span>
+                <div>
+                  <b>Cloudflare 侧配置步骤</b>
+                  <ol>
+                    <li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li>
+                    <li>节点部署后，在 Published application 把 Service URL 设置为卡片显示的 <code>http://127.0.0.1:端口</code>。</li>
+                  </ol>
+                  <p>VPS 无需开放 Origin 端口；由 cloudflared 连接器建立出站安全隧道。</p>
+                </div>
+              </div>
+              <div v-if="isEditing" class="edit-impact-note">
+                <b>Cloudflare 路由需要同步</b>
+                <p>若修改公开主机名或 Origin 端口，请同步更新 Zero Trust 的 Published application。</p>
+              </div>
             </template>
-            <template v-else-if="createForm.domain">
-              <span class="reality-badge custom">自定义</span>
-              客户端与 VPS 均可达的 TLS 1.3 站点（已填入自定义域名）
-            </template>
-            <template v-else>
-              默认使用 AWS 静态资源 TLS 站点；也可改为客户端与 VPS 均可达的 TLS 1.3 站点
-            </template>
-          </small>
-          <small v-else-if="deploymentDefaults.panelDomain">与面板证书域名保持一致</small>
-        </label>
-        <label v-if="isTunnelProtocol && !deviceMode">WebSocket 路径<input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off"><small>自定义时必须以 / 开头</small></label>
-        <label v-if="isTunnelProtocol && !deviceMode" class="span-2 preferred-endpoint-field"><span>优选连接域名 / IP <em>OPTIONAL</em></span><input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false"><small>只替换客户端 server；TLS SNI、WebSocket Host 与 Tunnel 路由仍使用上方 Cloudflare 节点域名。留空则保持标准 Anycast 接入。</small></label>
-        <label v-if="isTunnelProtocol && !isEditing" class="span-2 tunnel-token-field">{{ deviceMode ? '共享 Tunnel Token' : 'Tunnel Token' }}<input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required><small>{{ deviceMode ? '整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口' : '仅接受此 Tunnel 的运行 Token；不会要求或保存 Cloudflare API Key' }}</small></label>
-        <div v-if="isTunnelProtocol && !isEditing" class="span-2 tunnel-guide"><span>隧</span><div><b>{{ deviceMode ? '一个 Tunnel，多条设备路由' : 'Cloudflare 侧需要做两步' }}</b><ol><li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li><li v-if="deviceMode">为下方每台设备添加一条 Published application，分别把独立主机名路由到部署后卡片显示的 <code>http://127.0.0.1:端口</code>。</li><li v-else>节点部署后，在 Published application 把 Service URL 设置为节点卡片显示的 <code>http://127.0.0.1:端口</code>。</li></ol><p>VPS 无需开放 Origin 端口；设备组共享一个 sing-box 进程和一个 cloudflared 服务。</p></div></div>
-        <div v-if="isTunnelProtocol && isEditing" class="span-2 edit-impact-note"><b>Cloudflare 路由需要同步</b><p>若修改公开主机名或 Origin 端口，请同时更新 Zero Trust 的 Published application；现有 Tunnel Token 与连接器保持不变。</p></div>
-        <section v-if="deviceMode" class="span-2 device-fleet"><div class="device-fleet-head"><div><span>DEVICE FLEET</span><b>设备清单</b><small>2–20 台；端口填 0 自动分配</small></div><button type="button" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button></div><article v-for="(device, index) in deviceNodes" :key="device.key" class="device-draft"><header><span>{{ String(index + 1).padStart(2, '0') }}</span><b>{{ device.name || `设备 ${index + 1}` }}</b><button type="button" :disabled="deviceNodes.length <= 2" title="移除设备" @click="removeDevice(index)">×</button></header><div class="device-draft-grid"><label>设备名称<input v-model="device.name" maxlength="80" placeholder="例如：iPhone" required></label><label>{{ isTunnelProtocol ? '本地 Origin 端口' : '监听端口' }}<input v-model.number="device.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动"></label><label v-if="isTunnelProtocol">Cloudflare 公开主机名<input v-model="device.server" placeholder="iphone.example.com" required><small>Published application 使用此独立主机名</small></label><label v-if="isTunnelProtocol"><span class="device-field-title">优选连接域名 / IP <em>可选</em></span><input v-model="device.preferredServer" placeholder="cf-best.example.com"></label><label v-if="isTunnelProtocol" class="span-2"><span class="device-field-title">WebSocket 路径 <em>可选</em></span><input v-model="device.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128"></label></div></article></section>
-        <label :class="{ 'disabled-field': createForm.mode === 'v6only' || createForm.egress !== 'direct' }">IPv4 出站绑定<input v-if="createForm.egress === 'residential'" value="落地出口使用策略路由" disabled><input v-else-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机地址绑定" disabled><input v-else-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled><template v-else><select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10"></template><small v-if="createForm.mode === 'v6only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv4.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4；NAT 公网出口可能不同</small></label>
-        <label :class="{ 'disabled-field': createForm.mode === 'v4only' || createForm.egress !== 'direct' }">IPv6 出站绑定<input v-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机地址绑定" disabled><input v-else-if="createForm.mode === 'v4only' || createForm.egress === 'residential'" value="当前出口不使用 IPv6" disabled><template v-else><select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')"><option value="">自动路由（不固定地址）</option><option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option><option value="__manual__">手动填写…</option></select><input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10"></template><small v-if="createForm.mode === 'v4only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small><small v-else-if="deploymentDefaults.ipv6.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small></label>
-        <label v-if="createForm.egress === 'direct'" class="span-2">强制 IPv6 域名<input v-model="createForm.v6OnlyDomains"></label>
+          </div>
+        </section>
+
+        <!-- Right Column: 02 出口路由与网络策略 -->
+        <section class="form-section-card egress-section">
+          <div class="section-card-head">
+            <span class="section-idx">02</span>
+            <div class="section-head-title">
+              <b>出口网络与路由策略</b>
+              <small>定义节点流量真实落地点与双栈出站偏好</small>
+            </div>
+          </div>
+
+          <div class="section-card-body">
+            <div class="field-grid-2">
+              <label class="field-item">
+                <span class="field-label-text">出口位置</span>
+                <select v-model="createForm.egress">
+                  <option value="direct">A 机本地直出</option>
+                  <option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机落地 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option>
+                  <option value="socks" :disabled="!deploymentDefaults.socksExitReady">自定义 SOCKS{{ deploymentDefaults.socksExitReady ? '' : '（请先配置）' }}</option>
+                </select>
+                <small v-if="createForm.egress === 'residential'">WireGuard 断线时拒绝联网，不回退到 A 机</small>
+                <small v-else-if="createForm.egress === 'socks'">全部流量只经 SOCKS 出站；代理不可用时连接失败</small>
+                <small v-else>使用本机当前网络接口直连出站</small>
+              </label>
+
+              <label class="field-item">
+                <span class="field-label-text">出站策略</span>
+                <input v-if="createForm.egress === 'socks'" value="由 SOCKS 代理接管" disabled>
+                <select v-else v-model="createForm.mode" :disabled="createForm.egress === 'residential'">
+                  <option value="prefer_v6">IPv6 优先 + IPv4 兜底</option>
+                  <option value="v4only">纯 IPv4</option>
+                  <option value="v6only">纯 IPv6</option>
+                </select>
+                <small v-if="createForm.egress === 'residential'">落地出口固定使用策略路由</small>
+                <small v-else>目标同时拥有双栈时的出站偏好</small>
+              </label>
+            </div>
+
+            <!-- Advanced Network Settings Box -->
+            <div class="advanced-network-box">
+              <div class="adv-box-header">
+                <b>高级出站网络绑定</b>
+                <small>多网卡 / 专属公网 IP 绑定与动态 IP 跟随</small>
+              </div>
+
+              <div class="field-grid-2">
+                <label class="field-item" :class="{ 'disabled-field': createForm.mode === 'v6only' || createForm.egress !== 'direct' }">
+                  <span class="field-label-text">IPv4 出站绑定</span>
+                  <input v-if="createForm.egress === 'residential'" value="落地出口使用策略路由" disabled>
+                  <input v-else-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机绑定" disabled>
+                  <input v-else-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled>
+                  <template v-else>
+                    <select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')">
+                      <option value="">自动路由（不固定地址）</option>
+                      <option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option>
+                      <option value="__manual__">手动填写…</option>
+                    </select>
+                    <input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10">
+                  </template>
+                  <small v-if="createForm.mode === 'v6only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small>
+                  <small v-else-if="deploymentDefaults.ipv4.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv4.length }} 个本机可绑定 IPv4</small>
+                </label>
+
+                <label class="field-item" :class="{ 'disabled-field': createForm.mode === 'v4only' || createForm.egress !== 'direct' }">
+                  <span class="field-label-text">IPv6 出站绑定</span>
+                  <input v-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机绑定" disabled>
+                  <input v-else-if="createForm.mode === 'v4only' || createForm.egress === 'residential'" value="当前出口不使用 IPv6" disabled>
+                  <template v-else>
+                    <select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')">
+                      <option value="">自动路由（不固定地址）</option>
+                      <option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option>
+                      <option value="__manual__">手动填写…</option>
+                    </select>
+                    <input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10">
+                  </template>
+                  <small v-if="createForm.mode === 'v4only' && createForm.egress === 'direct'">已清空，不会写入节点配置</small>
+                  <small v-else-if="deploymentDefaults.ipv6.length && createForm.egress === 'direct'">已识别 {{ deploymentDefaults.ipv6.length }} 个本机可绑定 IPv6 地址</small>
+                </label>
+              </div>
+
+              <label v-if="createForm.egress === 'direct'" class="field-item">
+                <span class="field-label-text">强制 IPv6 域名名单</span>
+                <input v-model="createForm.v6OnlyDomains" placeholder="例如：chatgpt.com,claude.ai,anthropic.com">
+                <small>列表中的域名将强制使用 IPv6 建立直连连接（以英文逗号分隔）</small>
+              </label>
+
+              <label v-if="createForm.egress === 'direct'" class="toggle-row inline">
+                <span>
+                  <b>自动跟随 IP 变化</b>
+                  <small>动态公网地址改变时自动重新校验配置并安全重启受影响节点</small>
+                </span>
+                <span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span>
+              </label>
+            </div>
+
+            <div v-if="isEditing && selectedNode?.sharedGroup" class="edit-impact-note shared">
+              <b>共享进程影响范围</b>
+              <p>节点名称、端口与入站参数只修改当前设备；出站策略、IPv4/IPv6 绑定和强制 IPv6 域名会同步应用到整个设备编队。</p>
+            </div>
+          </div>
+        </section>
       </div>
-      <div v-if="isEditing && selectedNode?.sharedGroup" class="edit-impact-note shared"><b>共享进程影响范围</b><p>节点名称、端口与入站参数只修改当前设备；出站策略、IPv4/IPv6 绑定和强制 IPv6 域名会同步应用到整个设备编队。</p></div>
-      <label v-if="createForm.egress === 'direct'" class="toggle-row inline"><span><b>自动跟随 IP 变化</b><small>动态地址改变时校验配置并重启受影响节点</small></span><span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span></label>
-      <div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || defaultsLoading">{{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}</button></div>
+
+      <!-- Mode B: Device Fleet Mode Grid -->
+      <div v-else class="fleet-deploy-grid">
+        <!-- Shared Settings Row -->
+        <section class="form-section-card fleet-shared-card">
+          <div class="section-card-head">
+            <span class="section-idx">器</span>
+            <div class="section-head-title">
+              <b>编队共享网络与出口设置</b>
+              <small>整组设备共享一个 sing-box 进程与出站配置，降低系统资源开销</small>
+            </div>
+          </div>
+          <div class="section-card-body">
+            <div class="field-grid-4">
+              <label class="field-item">
+                <span class="field-label-text">出口位置</span>
+                <select v-model="createForm.egress">
+                  <option value="direct">A 机本地直出</option>
+                  <option value="residential" :disabled="!deploymentDefaults.residentialExitReady">B 机落地 IP{{ deploymentDefaults.residentialExitReady ? '' : '（请先配置）' }}</option>
+                  <option value="socks" :disabled="!deploymentDefaults.socksExitReady">自定义 SOCKS{{ deploymentDefaults.socksExitReady ? '' : '（请先配置）' }}</option>
+                </select>
+              </label>
+              <label class="field-item">
+                <span class="field-label-text">出站策略</span>
+                <input v-if="createForm.egress === 'socks'" value="由 SOCKS 代理接管" disabled>
+                <select v-else v-model="createForm.mode" :disabled="createForm.egress === 'residential'">
+                  <option value="prefer_v6">IPv6 优先 + IPv4 兜底</option>
+                  <option value="v4only">纯 IPv4</option>
+                  <option value="v6only">纯 IPv6</option>
+                </select>
+              </label>
+              <label v-if="!isTunnelProtocol" class="field-item">
+                <span class="field-label-text">公网域名 / IP <em class="req-star">*</em></span>
+                <input v-model="createForm.server" placeholder="node.example.com" required>
+              </label>
+              <label v-if="createForm.protocol !== 'shadowsocks' && !isTunnelProtocol" class="field-item">
+                <span class="field-label-text">{{ selectedProtocolInfo.domainLabel }}</span>
+                <input v-model="createForm.domain" :placeholder="createForm.protocol === 'vless' ? 's0.awsstatic.com' : 'node.example.com'">
+              </label>
+            </div>
+
+            <template v-if="isTunnelProtocol">
+              <div class="field-grid-2 tunnel-fleet-grid">
+                <label class="field-item tunnel-token-field">
+                  <span class="field-label-text">共享 Tunnel Token <em class="req-star">*</em></span>
+                  <input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required>
+                  <small>整组设备共用一个 cloudflared 连接器；每台设备使用独立主机名和 Origin 端口</small>
+                </label>
+                <div class="tunnel-guide">
+                  <span>隧</span>
+                  <div>
+                    <b>一个 Tunnel，多条设备路由</b>
+                    <ol>
+                      <li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li>
+                      <li>为下方每台设备添加一条 Published application，把独立主机名路由到对应 <code>http://127.0.0.1:端口</code>。</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </section>
+
+        <!-- Fleet Devices Section -->
+        <section class="form-section-card fleet-devices-card">
+          <div class="section-card-head fleet-device-head">
+            <div class="fleet-head-left">
+              <span class="section-idx">阵</span>
+              <div class="section-head-title">
+                <b>设备清单</b>
+                <small class="fleet-counter-pill">当前 {{ deviceNodes.length }} / 20 台 · 最少 2 台 · 独立入站隔离</small>
+              </div>
+            </div>
+            <div class="fleet-head-actions">
+              <button type="button" class="mini-tool-btn" title="为设备批量命名为：设备 01、设备 02…" @click="batchRenameDevices()">🪄 批量命名</button>
+              <button type="button" class="mini-tool-btn" title="按连续递增方式分配端口" @click="autoAssignSequentialPorts()">⚡ 连续端口</button>
+              <button type="button" class="add-device-btn" :disabled="deviceNodes.length >= 20" @click="addDevice">＋ 添加设备</button>
+            </div>
+          </div>
+
+          <div class="device-fleet-grid">
+            <article v-for="(device, index) in deviceNodes" :key="device.key" class="device-draft-card">
+              <header class="device-card-header">
+                <span class="device-idx-badge">{{ String(index + 1).padStart(2, '0') }}</span>
+                <b class="device-card-name">{{ device.name || `设备 ${index + 1}` }}</b>
+                <button type="button" class="device-remove-btn" :disabled="deviceNodes.length <= 2" title="移除设备" @click="removeDevice(index)">×</button>
+              </header>
+              <div class="device-card-grid">
+                <label class="field-item">
+                  <span class="field-label-text">设备名称 <em class="req-star">*</em></span>
+                  <input v-model="device.name" maxlength="80" placeholder="例如：iPhone" required>
+                </label>
+                <label class="field-item">
+                  <span class="field-label-text">{{ isTunnelProtocol ? '本地 Origin 端口' : '监听端口' }}</span>
+                  <input v-model.number="device.listenPort" type="number" min="0" max="65535" placeholder="0 = 自动分配">
+                </label>
+                <label v-if="isTunnelProtocol" class="field-item">
+                  <span class="field-label-text">公开主机名 <em class="req-star">*</em></span>
+                  <input v-model="device.server" placeholder="iphone.example.com" required>
+                </label>
+                <label v-if="isTunnelProtocol" class="field-item">
+                  <span class="field-label-text">优选连接域名 / IP <em>可选</em></span>
+                  <input v-model="device.preferredServer" placeholder="cf-best.example.com">
+                </label>
+                <label v-if="isTunnelProtocol" class="field-item span-full">
+                  <span class="field-label-text">WebSocket 路径 <em>可选</em></span>
+                  <input v-model="device.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128">
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Fleet Shared Advanced Network -->
+        <section class="form-section-card fleet-adv-card">
+          <div class="section-card-head">
+            <span class="section-idx">绑</span>
+            <div class="section-head-title">
+              <b>编队出站多网卡与动态容灾设置</b>
+              <small>应用于整个编队进程的出站 IP 绑定与动态 IP 跟随</small>
+            </div>
+          </div>
+          <div class="section-card-body">
+            <div class="field-grid-2">
+              <label class="field-item" :class="{ 'disabled-field': createForm.mode === 'v6only' || createForm.egress !== 'direct' }">
+                <span class="field-label-text">IPv4 出站绑定</span>
+                <input v-if="createForm.egress === 'residential'" value="落地出口使用策略路由" disabled>
+                <input v-else-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机绑定" disabled>
+                <input v-else-if="createForm.mode === 'v6only'" value="纯 IPv6 模式不使用 IPv4" disabled>
+                <template v-else>
+                  <select v-if="deploymentDefaults.ipv4.length" v-model="bindChoice.ipv4" @change="applyBindChoice('ipv4')">
+                    <option value="">自动路由（不固定地址）</option>
+                    <option v-for="item in deploymentDefaults.ipv4" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option>
+                    <option value="__manual__">手动填写…</option>
+                  </select>
+                  <input v-if="!deploymentDefaults.ipv4.length || bindChoice.ipv4 === '__manual__'" v-model="createForm.ipv4Bind" placeholder="自动或 192.0.2.10">
+                </template>
+              </label>
+              <label class="field-item" :class="{ 'disabled-field': createForm.mode === 'v4only' || createForm.egress !== 'direct' }">
+                <span class="field-label-text">IPv6 出站绑定</span>
+                <input v-if="createForm.egress === 'socks'" value="SOCKS 出站不使用本机绑定" disabled>
+                <input v-else-if="createForm.mode === 'v4only' || createForm.egress === 'residential'" value="当前出口不使用 IPv6" disabled>
+                <template v-else>
+                  <select v-if="deploymentDefaults.ipv6.length" v-model="bindChoice.ipv6" @change="applyBindChoice('ipv6')">
+                    <option value="">自动路由（不固定地址）</option>
+                    <option v-for="item in deploymentDefaults.ipv6" :key="item.address" :value="item.address">{{ item.address }} · {{ item.interface }}</option>
+                    <option value="__manual__">手动填写…</option>
+                  </select>
+                  <input v-if="!deploymentDefaults.ipv6.length || bindChoice.ipv6 === '__manual__'" v-model="createForm.ipv6Bind" placeholder="2001:db8::10">
+                </template>
+              </label>
+            </div>
+            <label v-if="createForm.egress === 'direct'" class="toggle-row inline">
+              <span>
+                <b>自动跟随 IP 变化</b>
+                <small>动态公网地址变更时自动重新校验配置并安全重启整组编队</small>
+              </span>
+              <span class="switch"><input v-model="createForm.autoBind" type="checkbox"><i></i></span>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <!-- Footer Action Bar -->
+      <footer class="node-form-foot">
+        <div class="node-form-status-bar">
+          <span class="status-chip proto-chip">{{ selectedProtocolInfo.badge }}</span>
+          <span class="status-chip mode-chip">{{ modeLabel(createForm.mode) }}</span>
+          <span class="status-chip egress-chip">{{ createForm.egress === 'direct' ? 'A 机直出' : createForm.egress === 'residential' ? 'B 机落地' : 'SOCKS' }}</span>
+          <span v-if="conflictingNodeName" class="status-chip danger-chip">⚠️ 端口 {{ createForm.listenPort }} 冲突</span>
+          <span v-else-if="deviceMode && hasDevicePortDuplicate" class="status-chip danger-chip">⚠️ 编队设备间端口冲突</span>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" @click="modal = null">取消</button>
+          <button class="primary" :disabled="busy || defaultsLoading || !!conflictingNodeName || (deviceMode && hasDevicePortDuplicate)">
+            {{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}
+          </button>
+        </div>
+      </footer>
     </form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。彻底删除会先建立校验快照。</p><div class="candidate-list"><div v-for="item in candidates" :key="item.fingerprint" class="candidate-row" :class="{ deleting: candidateDeleteTarget?.fingerprint === item.fingerprint }"><label class="candidate-select"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><button type="button" class="candidate-purge" title="从服务器彻底删除此候选节点" @click="stageCandidateDelete(item)">彻底删除</button></div><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><section v-if="candidateDeleteTarget" class="candidate-delete-confirm" role="alert"><header><span>险</span><div><b>彻底删除 {{ candidateDeleteTarget.name }}？</b><small>{{ candidateDeleteTarget.configPath }}</small></div></header><p v-if="candidateDeleteTarget.sharedGroup">系统会先建立 SHA-256 快照，只从共享配置移除端口 {{ candidateDeleteTarget.listenPort }} 的 inbound；其他节点与共享服务会保留。配置校验或重启失败将自动恢复。</p><p v-else>系统会先建立 SHA-256 快照，再停止并删除 {{ candidateDeleteTarget.serviceName === 'unknown' ? '对应配置文件' : '对应服务与配置文件' }}。此操作不可从面板撤销。</p><label>输入完整节点名称确认<input v-model="candidateDeleteConfirm" autocomplete="off" :placeholder="candidateDeleteTarget.name"></label><div><button type="button" class="secondary" @click="cancelCandidateDelete">保留节点</button><button type="button" class="danger-button" :disabled="busy || candidateDeleteConfirm !== candidateDeleteTarget.name" @click="deleteCandidate">{{ busy ? '正在创建任务…' : '确认彻底删除' }}</button></div></section><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
