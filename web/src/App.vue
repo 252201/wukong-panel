@@ -3491,19 +3491,24 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
             <!-- Tunnel specific fields -->
             <template v-if="isTunnelProtocol">
-              <label class="field-item">
-                <span class="field-label-text">WebSocket 路径</span>
-                <input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off">
-                <small>自定义时必须以 / 开头</small>
-              </label>
-              <label class="field-item preferred-endpoint-field">
-                <div class="field-label-row">
-                  <span class="field-label-text">优选连接域名 / IP</span>
-                  <em>OPTIONAL</em>
-                </div>
-                <input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false">
-                <small>替换客户端 server；SNI 与 Tunnel 仍使用节点域名。留空保持标准 Anycast。</small>
-              </label>
+              <div class="field-grid-2">
+                <label class="field-item">
+                  <div class="field-label-row">
+                    <span class="field-label-text">WebSocket 路径</span>
+                  </div>
+                  <input v-model="createForm.webSocketPath" placeholder="留空自动生成随机路径" maxlength="128" autocomplete="off">
+                  <small>自定义时必须以 / 开头</small>
+                </label>
+
+                <label class="field-item">
+                  <div class="field-label-row">
+                    <span class="field-label-text">优选连接域名 / IP</span>
+                  </div>
+                  <input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false">
+                  <small>替换客户端 server；SNI 与 Tunnel 仍使用节点域名。留空保持标准 Anycast。</small>
+                </label>
+              </div>
+
               <label v-if="!isEditing" class="field-item tunnel-token-field">
                 <span class="field-label-text">Tunnel Token <em class="req-star">*</em></span>
                 <input v-model="createForm.tunnelToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴 Cloudflare Tunnel 的运行 Token" required>
@@ -3515,7 +3520,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <b>Cloudflare 侧配置步骤</b>
                   <ol>
                     <li>在 Zero Trust 创建 remotely-managed Tunnel，并复制运行 Token。</li>
-                    <li>节点部署后，在 Published application 把 Service URL 设置为卡片显示的 <code>http://127.0.0.1:端口</code>。</li>
+                    <li>在 Published application 把 Service URL 设为 <code>http://127.0.0.1:端口</code>。</li>
                   </ol>
                   <p>VPS 无需开放 Origin 端口；由 cloudflared 连接器建立出站安全隧道。</p>
                 </div>
