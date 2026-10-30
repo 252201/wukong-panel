@@ -395,3 +395,32 @@ func TestStateCommitFailureRollsBackBinaryAndServices(t *testing.T) {
 		t.Fatalf("recovery journal not cleared: %v", e)
 	}
 }
+
+func TestUpdateReportsGranularProgress(t *testing.T) {
+	c, _, _ := fixture(t)
+	var progressRecords []int
+	var messageRecords []string
+	ctx := WithProgress(context.Background(), func(pct int, msg string) {
+		progressRecords = append(progressRecords, pct)
+		messageRecords = append(messageRecords, msg)
+	})
+	if err := c.Update(ctx, "2026.8.2", "2026.9.3"); err != nil {
+		t.Fatal(err)
+	}
+	if len(progressRecords) == 0 {
+		t.Fatal("expected progress reporting during update")
+	}
+	hasInit := false
+	hasPost := false
+	for _, p := range progressRecords {
+		if p == 10 {
+			hasInit = true
+		}
+		if p >= 80 {
+			hasPost = true
+		}
+	}
+	if !hasInit || !hasPost {
+		t.Fatalf("missing expected progress milestones: %v, messages: %v", progressRecords, messageRecords)
+	}
+}

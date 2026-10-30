@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/252201/wukong-panel/internal/componentupdate"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/store"
 )
@@ -61,6 +62,9 @@ func (s *Server) componentUpdate(w http.ResponseWriter, r *http.Request, session
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			_ = s.store.UpdateJob(job.ID, "running", 10, "正在校验、备份并更新 "+name, "")
+			ctx = componentupdate.WithProgress(ctx, func(progress int, message string) {
+				_ = s.store.UpdateJob(job.ID, "running", progress, message, "")
+			})
 			_, e := run(ctx, req)
 			if e != nil {
 				_ = s.store.UpdateJob(job.ID, "failed", 100, name+" 更新失败", e.Error())
