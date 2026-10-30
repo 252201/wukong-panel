@@ -3417,7 +3417,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               </label>
 
               <label class="field-item">
-                <span class="field-label-text">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }} <em class="req-star">*</em></span>
+                <div class="field-label-row">
+                  <span class="field-label-text">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }} <em class="req-star">*</em></span>
+                </div>
                 <input v-model="createForm.server" :placeholder="isTunnelProtocol ? 'edge.example.com' : 'node.example.com'" required>
                 <small v-if="isTunnelProtocol">填写 Published application 对应的公开主机名</small>
                 <small v-else-if="deploymentDefaults.panelDomain">默认已采用面板域名，可按需修改</small>
@@ -3495,10 +3497,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <small>自定义时必须以 / 开头</small>
               </label>
               <label class="field-item preferred-endpoint-field">
-                <span class="field-label-row">
+                <div class="field-label-row">
                   <span class="field-label-text">优选连接域名 / IP</span>
                   <em>OPTIONAL</em>
-                </span>
+                </div>
                 <input v-model="createForm.preferredServer" placeholder="例如：cf-best.example.com 或 104.16.0.1" autocomplete="off" spellcheck="false">
                 <small>替换客户端 server；SNI 与 Tunnel 仍使用节点域名。留空保持标准 Anycast。</small>
               </label>
