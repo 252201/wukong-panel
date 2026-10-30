@@ -31,6 +31,7 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(vueSource.includes('@click="pickRandomAvailablePort"'), 'Must bind click to pickRandomAvailablePort')
   assert.ok(vueSource.includes('class="port-conflict-hint"'), 'Must render port-conflict-hint when port is occupied')
   assert.ok(vueSource.includes('const conflictingNodeName = computed('), 'Must compute conflictingNodeName')
+  assert.ok(vueSource.includes("span class=\"field-label-text\">{{ isTunnelProtocol ? 'Cloudflare 节点域名' : '公网域名 / IP' }}"), 'Must render server label inside field-label-row')
 
   // Device fleet tools and responsive grid
   assert.ok(vueSource.includes('class="fleet-deploy-grid"'), 'Must render fleet-deploy-grid in deviceMode')
@@ -71,6 +72,9 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.form-section-card'), 'Must style section card')
   assert.ok(cssSource.includes('.mini-dice-btn'), 'Must style dice button')
   assert.ok(cssSource.includes('.port-conflict-hint'), 'Must style port conflict warning')
+  assert.ok(cssSource.includes('.field-item {\n  display: grid;\n  align-content: start;'), 'Must align field-item content to start to prevent input misalignment')
+  assert.ok(cssSource.includes('.field-grid-2 {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  align-items: start;'), 'Must align field-grid-2 items to start')
+  assert.ok(cssSource.includes('.field-label-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  min-height: 22px;'), 'Must standardize field-label-row min-height')
 
   // Device fleet grid and tools
   assert.ok(cssSource.includes('.device-fleet-grid'), 'Must style device fleet grid')

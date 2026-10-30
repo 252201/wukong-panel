@@ -993,6 +993,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 /* Field Groups and Rows */
 .field-item {
   display: grid;
+  align-content: start;
   gap: 6px;
   color: var(--text-label);
   font-size: 12.5px;
@@ -1002,11 +1003,13 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .field-grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 14px;
 }
 .field-grid-4 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
   gap: 14px;
 }
 .field-grid-4 > .span-2 {
@@ -1016,6 +1019,12 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 22px;
+}
+.field-item > .field-label-text {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
 }
 .field-label-text {
   font-size: 12px;
@@ -1034,6 +1043,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: rgba(212,173,87,.06);
   color: var(--gold);
   font-size: 10.5px;
+  line-height: 18px;
+  height: 22px;
+  box-sizing: border-box;
   cursor: pointer;
   transition: all .16s ease;
 }
@@ -1178,6 +1190,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .device-card-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 10px;
   margin-top: 10px;
 }
