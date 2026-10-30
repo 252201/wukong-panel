@@ -598,6 +598,7 @@ function bucketSegment(value: number, item: TrafficBucket) { const total = item.
 function timelineLabel(item: TrafficBucket) { return timelineRange.value === 'today' ? `${item.label}:00` : item.label }
 function updateDeviceLimit() { deviceLimit.value = window.innerWidth < 720 ? 2 : window.innerWidth < 1100 ? 3 : 4 }
 function navigateTo(nextPage: Page) {
+  deployMenuOpen.value = false
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   page.value = nextPage
 }
@@ -664,6 +665,7 @@ function applyFleetDraft(status: FleetStatus) {
 }
 
 async function switchFleetHost(hostId: string) {
+  deployMenuOpen.value = false
   if (fleetHosts.value.some(host => host.id === hostId && isProbeHost(host))) return
   selectedHostId.value = hostId
   setFleetHost(hostId)
@@ -2109,6 +2111,32 @@ async function openNodeForm(kind: 'create' | 'device-create') {
 }
 function openCreate() { return openNodeForm('create') }
 function openDeviceCreate() { return openNodeForm('device-create') }
+const deployMenuOpen = ref(false)
+function toggleDeployMenu() {
+  if (mutationsDisabled.value) return
+  deployMenuOpen.value = !deployMenuOpen.value
+}
+function selectDeployOption(type: 'standard' | 'device') {
+  deployMenuOpen.value = false
+  if (type === 'standard') {
+    openCreate()
+  } else {
+    openDeviceCreate()
+  }
+}
+function onDocumentClick(e: MouseEvent) {
+  if (deployMenuOpen.value) {
+    const target = e.target as HTMLElement | null
+    if (!target?.closest('.deploy-dropdown-wrap')) {
+      deployMenuOpen.value = false
+    }
+  }
+}
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && deployMenuOpen.value) {
+    deployMenuOpen.value = false
+  }
+}
 async function openEdit(node: NodeItem) {
 	if (!ensureHostWritable()) return
   if (node.ownership !== 'managed') return
@@ -2437,8 +2465,8 @@ let releaseCheckTick = 0
 let stopObservingTheme = () => {}
 let stopLocalizing = () => {}
 const onWindowFocus = () => { if (authenticated.value && !mustChange.value) checkLatestRelease().catch(() => {}) }
-onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); activeEffectiveTheme.value = effectiveTheme(themePreference.value); stopObservingTheme = observeSystemTheme(() => themePreference.value, next => { activeEffectiveTheme.value = next }); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); await bootstrap(); void fetchFirewallStatus(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
-onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); if (singBoxPollTimer) clearTimeout(singBoxPollTimer); window.removeEventListener('resize', updateDeviceLimit); window.removeEventListener('focus', onWindowFocus) })
+onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); activeEffectiveTheme.value = effectiveTheme(themePreference.value); stopObservingTheme = observeSystemTheme(() => themePreference.value, next => { activeEffectiveTheme.value = next }); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); window.addEventListener('click', onDocumentClick); window.addEventListener('keydown', onDocumentKeydown); await bootstrap(); void fetchFirewallStatus(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
+onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); if (singBoxPollTimer) clearTimeout(singBoxPollTimer); window.removeEventListener('resize', updateDeviceLimit); window.removeEventListener('focus', onWindowFocus); window.removeEventListener('click', onDocumentClick); window.removeEventListener('keydown', onDocumentKeydown) })
 </script>
 
 <template>
@@ -2473,7 +2501,72 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     <section class="workspace">
       <header class="topbar">
         <div><p class="breadcrumb">天宫 / {{ navItems.find(item => item.id === page)?.label }}</p><h1>{{ navItems.find(item => item.id === page)?.label }}</h1></div>
-        <div class="top-actions"><label v-if="fleetStatus?.enabled" class="host-switcher"><select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)"><option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.name }}</option></select></label><span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span><button type="button" class="secondary ip-rep-topbar-btn" title="检测 IP 信誉分与威胁情报" @click="openReputationModal(currentFleetHost || undefined)">🛡️ IP 信誉</button><button v-if="page !== 'fleet'" class="secondary" :disabled="mutationsDisabled" @click="openImport">⌁ {{ t('import') }}</button><button v-if="page !== 'fleet'" class="device-entry" :disabled="mutationsDisabled" @click="openDeviceCreate"><span>器</span><b>设备专用节点</b></button><button v-if="page !== 'fleet'" class="primary" :disabled="mutationsDisabled" @click="openCreate">＋ {{ t('deploy') }}</button><button type="button" class="topbar-theme-toggle" :title="topbarThemeTitle" :aria-label="topbarThemeTitle" @click="toggleThemePreference"><i class="theme-swatch" :class="`theme-swatch-${activeEffectiveTheme}`" aria-hidden="true"><b></b><em></em></i></button></div>
+        <div class="top-actions">
+          <label v-if="fleetStatus?.enabled" class="host-switcher">
+            <select aria-label="当前主机" :value="selectedHostId" @change="switchFleetHost(($event.target as HTMLSelectElement).value)">
+              <option v-for="host in fleetHosts.filter(item => !isProbeHost(item))" :key="host.id" :value="host.id">{{ host.name }}</option>
+            </select>
+          </label>
+          <span class="clock">{{ new Date().toLocaleDateString(language, { month: 'short', day: 'numeric' }) }}</span>
+          <button type="button" class="secondary ip-rep-topbar-btn" title="检测 IP 信誉分与威胁情报" @click="openReputationModal(currentFleetHost || undefined)">🛡️ IP 信誉</button>
+          <button v-if="page !== 'fleet'" class="secondary import-topbar-btn" :disabled="mutationsDisabled" :title="language === 'en-US' ? 'Import existing nodes' : '接管已有节点'" @click="openImport">↳ {{ t('import') }}</button>
+          <div v-if="page !== 'fleet'" class="deploy-dropdown-wrap">
+            <button
+              type="button"
+              class="primary deploy-btn-main"
+              :class="{ open: deployMenuOpen }"
+              :disabled="mutationsDisabled"
+              :aria-expanded="deployMenuOpen"
+              aria-haspopup="menu"
+              :title="language === 'en-US' ? 'Deploy proxy node or device fleet' : '部署新节点或设备专用编队'"
+              @click.stop="toggleDeployMenu"
+            >
+              <span>＋ {{ t('deploy') }}</span>
+              <i class="deploy-caret" :class="{ open: deployMenuOpen }" aria-hidden="true">▾</i>
+            </button>
+            <transition name="dropdown">
+              <div
+                v-if="deployMenuOpen"
+                class="deploy-dropdown-menu"
+                role="menu"
+                aria-orientation="vertical"
+                @click.stop
+              >
+                <button
+                  type="button"
+                  class="deploy-menu-item"
+                  role="menuitem"
+                  @click="selectDeployOption('standard')"
+                >
+                  <span class="menu-item-icon standard">＋</span>
+                  <div class="menu-item-text">
+                    <div class="menu-item-title-row">
+                      <b>{{ language === 'en-US' ? 'Standard Proxy Node' : '标准代理节点' }}</b>
+                      <span class="menu-item-tag gold">{{ language === 'en-US' ? '7 Protocols' : '七协议' }}</span>
+                    </div>
+                    <small>{{ language === 'en-US' ? 'Hysteria2 / VLESS / TUIC / SS · Standalone or shared core' : 'Hysteria2 / VLESS / TUIC / SS 等原生托管 · 自动生成安全凭据' }}</small>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  class="deploy-menu-item"
+                  role="menuitem"
+                  @click="selectDeployOption('device')"
+                >
+                  <span class="menu-item-icon device">器</span>
+                  <div class="menu-item-text">
+                    <div class="menu-item-title-row">
+                      <b>{{ language === 'en-US' ? 'Device Dedicated Fleet' : '设备专用编队' }}</b>
+                      <span class="menu-item-tag jade">{{ language === 'en-US' ? 'Fleet Group' : '设备编队' }}</span>
+                    </div>
+                    <small>{{ language === 'en-US' ? 'Independent inbound per device · Shared sing-box process & tunnel' : '多设备独立入站隔离 · 共享 sing-box 进程与隧道 · 聚合监控' }}</small>
+                  </div>
+                </button>
+              </div>
+            </transition>
+          </div>
+          <button type="button" class="topbar-theme-toggle" :title="topbarThemeTitle" :aria-label="topbarThemeTitle" @click="toggleThemePreference"><i class="theme-swatch" :class="`theme-swatch-${activeEffectiveTheme}`" aria-hidden="true"><b></b><em></em></i></button>
+        </div>
       </header>
 
       <div v-if="mutationsDisabled && page !== 'fleet'" class="fleet-readonly-banner"><b>{{ currentFleetHost?.compatible ? '远端主机离线' : '协议版本不兼容' }}</b><span>当前展示最后同步快照，所有修改操作已禁用。{{ currentFleetHost?.lastSeenAt ? `最后心跳 ${new Date(currentFleetHost.lastSeenAt).toLocaleString(language)}` : '' }}</span></div>
