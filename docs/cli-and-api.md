@@ -6,6 +6,24 @@
 
 ## 命令行工具 (CLI)
 
+### 组件更新与日常维护
+```bash
+# 查看命令行工具帮助菜单
+wukongctl --help
+
+# 升级面板主程序（通过本地 Unix Socket 或管理器一键更新）
+sudo wukongctl update
+
+# 升级 sing-box 代理内核
+sudo wukongctl update sing-box
+
+# 升级 Cloudflare Tunnel 连接器
+sudo wukongctl update cloudflared
+
+# 重置管理员密码并撤销所有现有会话
+sudo wukongctl reset-password
+```
+
 ### 系统自检与节点扫描
 ```bash
 # 检查当前环境运行依赖、端口与服务状态
