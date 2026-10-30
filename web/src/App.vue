@@ -3506,7 +3506,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <button type="button" class="secondary" @click="modal = null">关闭</button>
       </div>
     </div>
-    <div v-else-if="modal === 'host-update' && hostUpdateTarget" class="modal-card compact host-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+    <div v-else-if="modal === 'host-update' && hostUpdateTarget" class="modal-card host-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <span class="modal-seal jade">升</span>
       <p class="eyebrow">VERSION UPGRADE</p>
@@ -3514,8 +3514,14 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <p>{{ isProbeHost(hostUpdateTarget) ? '探针运行在远端 VPS 上，升级将自动替换二进制并保留全部连接凭据与节点配置。' : '面板运行在控制中心，升级将自动备份当前数据与配置，无缝升级二进制与前端资源。' }}</p>
 
       <div class="fleet-host-action-target">
-        <small>目标主机</small><b>{{ hostUpdateTarget.name }}</b>
-        <span>{{ hostUpdateTarget.hostname || hostUpdateTarget.id }} · {{ isProbeHost(hostUpdateTarget) ? '轻量探针' : '面板主控' }}</span>
+        <div class="target-host-main">
+          <small>目标主机</small>
+          <img v-if="hostUpdateTarget.snapshot?.location?.countryCode" class="fleet-host-flag" :src="countryFlagURL(hostUpdateTarget.snapshot.location.countryCode)" alt="" aria-hidden="true">
+          <b>{{ hostUpdateTarget.name }}</b>
+        </div>
+        <div class="target-host-sub">
+          <span>{{ hostUpdateTarget.hostname || hostUpdateTarget.id }} · {{ isProbeHost(hostUpdateTarget) ? '轻量探针' : '面板主控' }}</span>
+        </div>
       </div>
 
       <div v-if="hostUpdateJob?.status === 'success' && !hostReconnecting" class="version-diff-card version-diff-card-success">
@@ -3619,7 +3625,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
       </div>
     </div>
-    <div v-else-if="modal === 'singbox-update' && singBoxUpdateTarget" class="modal-card compact host-update-modal singbox-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+    <div v-else-if="modal === 'singbox-update' && singBoxUpdateTarget" class="modal-card host-update-modal singbox-update-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <span class="modal-seal jade">核</span>
       <p class="eyebrow">RUNTIME UPGRADE</p>
@@ -3627,8 +3633,14 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <p>更新将自动校验并安全迁移托管节点配置、备份当前程序并平滑重启运行中的节点；更新后执行本地代理探测，失败将自动回滚。</p>
 
       <div class="fleet-host-action-target">
-        <small>目标主机</small><b>{{ singBoxUpdateTarget.name }}</b>
-        <span>{{ singBoxUpdateTarget.hostname || singBoxUpdateTarget.id }} · sing-box 内核</span>
+        <div class="target-host-main">
+          <small>目标主机</small>
+          <img v-if="singBoxUpdateTarget.snapshot?.location?.countryCode" class="fleet-host-flag" :src="countryFlagURL(singBoxUpdateTarget.snapshot.location.countryCode)" alt="" aria-hidden="true">
+          <b>{{ singBoxUpdateTarget.name }}</b>
+        </div>
+        <div class="target-host-sub">
+          <span>{{ singBoxUpdateTarget.hostname || singBoxUpdateTarget.id }} · sing-box 内核</span>
+        </div>
       </div>
 
       <div v-if="singBoxUpdateJob?.status === 'success'" class="version-diff-card version-diff-card-success">
