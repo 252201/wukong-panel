@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,5 +133,48 @@ func TestReconcileSingBoxUpdatePeriodicCheck(t *testing.T) {
 	freshState, _ := os.ReadFile(filepath.Join(updateDir, "state.json"))
 	if bytes.Contains(freshState, []byte(`"checkedAt":"`+time.Now().Add(-25*time.Hour).Format(time.RFC3339))) {
 		t.Fatal("reconcileSingBoxUpdate did not attempt check when state was stale")
+	}
+}
+
+func TestSingBoxUpdatePrepareParallelConfigs(t *testing.T) {
+	m, db := newDemoManager(t)
+	os.MkdirAll(m.cfg.ConfigDir, 0700)
+	binary := filepath.Join(t.TempDir(), "candidate")
+	os.WriteFile(binary, []byte("#!/bin/sh\nif [ \"$1\" = check ]; then ! grep -q '\"sniff\":' \"$3\"; else exit 1; fi\n"), 0755)
+
+	numConfigs := 5
+	for i := 0; i < numConfigs; i++ {
+		name := fmt.Sprintf("node-%d.json", i)
+		p := filepath.Join(m.cfg.ConfigDir, name)
+		content := fmt.Sprintf(`{"inbounds":[{"type":"socks","listen":"127.0.0.1","listen_port":%d,"sniff":true}],"outbounds":[{"type":"direct"}]}`, 19000+i)
+		os.WriteFile(p, []byte(content), 0600)
+		n := model.Node{
+			ID:             fmt.Sprintf("node-%d", i),
+			Ownership:      "managed",
+			ConfigPath:     p,
+			ServiceName:    fmt.Sprintf("sing-box-wukong-node-%d", i),
+			ServiceManager: "systemd",
+			Protocol:       "socks5",
+		}
+		if err := db.UpsertNode(t.Context(), n, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := m.prepareSingBoxUpdate(t.Context(), binary, "1.14.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != numConfigs {
+		t.Fatalf("expected %d files, got %d", numConfigs, len(files))
+	}
+	for i, f := range files {
+		expectedPath := filepath.Join(m.cfg.ConfigDir, fmt.Sprintf("node-%d.json", i))
+		if f.Path != expectedPath {
+			t.Fatalf("expected order preserved at %d: %s vs %s", i, f.Path, expectedPath)
+		}
+		if bytes.Contains(f.New, []byte(`"sniff":`)) {
+			t.Fatalf("config %s was not migrated properly", f.Path)
+		}
 	}
 }

@@ -1236,7 +1236,7 @@ async function pollSingBoxJob(host: FleetHost, jobId: string) {
     singBoxUpdateError.value = err instanceof Error ? err.message : '查询更新进度失败'
   }
   if (modal.value === 'singbox-update') {
-    singBoxPollTimer = setTimeout(() => pollSingBoxJob(host, jobId), 1500)
+    singBoxPollTimer = setTimeout(() => pollSingBoxJob(host, jobId), 1000)
   }
 }
 

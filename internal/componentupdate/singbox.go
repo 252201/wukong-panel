@@ -67,7 +67,8 @@ func (c *Controller) unpack(archive, version string) (result string, err error) 
 				os.Remove(stage)
 			}
 		}()
-		n, e := io.Copy(out, reader)
+		h := sha256.New()
+		n, e := io.Copy(io.MultiWriter(out, h), reader)
 		if e == nil && n != header.Size {
 			e = errors.New("incomplete sing-box binary")
 		}
@@ -84,6 +85,7 @@ func (c *Controller) unpack(archive, version string) (result string, err error) 
 		if closeErr != nil {
 			return result, closeErr
 		}
+		c.unpackedSHA = hex.EncodeToString(h.Sum(nil))
 	}
 	if !found {
 		return "", errors.New("sing-box archive binary is missing")

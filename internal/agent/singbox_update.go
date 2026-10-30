@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/252201/wukong-panel/internal/componentupdate"
@@ -78,18 +79,37 @@ func (m *Manager) singBoxUpdater() *componentupdate.Controller {
 		if e != nil {
 			return e
 		}
+		type activeNode struct {
+			id         string
+			configPath string
+			protocol   string
+			port       int
+		}
+		var active []activeNode
 		for _, n := range nodes {
 			if n.Ownership != "managed" || m.serviceStatus(ctx, n.ServiceManager, n.ServiceName) != "active" {
 				continue
 			}
-			probeCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
-			_, e = singboxconfig.ProbeConfigInbound(probeCtx, c.Binary, n.ConfigPath, normalizeProtocol(n.Protocol), n.ListenPort)
-			cancel()
-			if e != nil {
-				return fmt.Errorf("node %s failed the local proxy round trip", n.ID)
-			}
+			active = append(active, activeNode{
+				id:         n.ID,
+				configPath: n.ConfigPath,
+				protocol:   normalizeProtocol(n.Protocol),
+				port:       n.ListenPort,
+			})
 		}
-		return nil
+		if len(active) == 0 {
+			return nil
+		}
+		return componentupdate.RunParallel(ctx, 4, len(active), func(ctx context.Context, idx int) error {
+			n := active[idx]
+			probeCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+			defer cancel()
+			_, err := singboxconfig.ProbeConfigInbound(probeCtx, c.Binary, n.configPath, n.protocol, n.port)
+			if err != nil {
+				return fmt.Errorf("node %s failed the local proxy round trip", n.id)
+			}
+			return nil
+		})
 	}
 	return c
 }
@@ -177,46 +197,54 @@ func (m *Manager) prepareSingBoxUpdate(ctx context.Context, binary, target strin
 		return nil, e
 	}
 	defer os.RemoveAll(temp)
-	result := []componentupdate.ConfigFile{}
-	total := 0
-	for _, p := range paths {
+	result := make([]componentupdate.ConfigFile, len(paths))
+	var totalAtomic int64
+	err := componentupdate.RunParallel(ctx, 4, len(paths), func(ctx context.Context, idx int) error {
+		p := paths[idx]
 		f, e := os.Open(p)
 		if e != nil {
-			return nil, e
+			return e
 		}
 		data, e := io.ReadAll(io.LimitReader(f, (1<<20)+1))
 		f.Close()
 		if e != nil {
-			return nil, e
+			return e
 		}
-		total += len(data)
-		if len(data) > 1<<20 || total > 16<<20 {
-			return nil, errors.New("managed configuration snapshot is too large")
+		if len(data) > 1<<20 {
+			return errors.New("managed configuration snapshot is too large")
+		}
+		curTotal := atomic.AddInt64(&totalAtomic, int64(len(data)))
+		if curTotal > 16<<20 {
+			return errors.New("managed configuration snapshot is too large")
 		}
 		migrated, plan, e := singboxconfig.Migrate(data, target, p)
 		if e != nil || len(plan.Errors) > 0 {
-			return nil, fmt.Errorf("configuration %s requires manual migration", filepath.Base(p))
+			return fmt.Errorf("configuration %s requires manual migration", filepath.Base(p))
 		}
 		for _, name := range plan.Interfaces {
 			if _, e := net.InterfaceByName(name); e != nil {
-				return nil, fmt.Errorf("configuration references unavailable interface %s", name)
+				return fmt.Errorf("configuration references unavailable interface %s", name)
 			}
 		}
-		staged := filepath.Join(temp, filepath.Base(p))
+		staged := filepath.Join(temp, fmt.Sprintf("%d-%s", idx, filepath.Base(p)))
 		if e = os.WriteFile(staged, migrated, 0600); e != nil {
-			return nil, e
+			return e
 		}
 		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		e = exec.CommandContext(checkCtx, binary, "check", "-c", staged).Run()
 		cancel()
 		if e != nil {
-			return nil, fmt.Errorf("candidate rejects configuration %s", filepath.Base(p))
+			return fmt.Errorf("candidate rejects configuration %s", filepath.Base(p))
 		}
 		info, e := os.Lstat(p)
 		if e != nil {
-			return nil, e
+			return e
 		}
-		result = append(result, componentupdate.ConfigFile{Path: p, Old: data, New: migrated, Mode: uint32(info.Mode().Perm())})
+		result[idx] = componentupdate.ConfigFile{Path: p, Old: data, New: migrated, Mode: uint32(info.Mode().Perm())}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -422,5 +423,57 @@ func TestUpdateReportsGranularProgress(t *testing.T) {
 	}
 	if !hasInit || !hasPost {
 		t.Fatalf("missing expected progress milestones: %v, messages: %v", progressRecords, messageRecords)
+	}
+}
+
+func TestRunParallelConcurrencyAndErrors(t *testing.T) {
+	if err := RunParallel(context.Background(), 4, 0, func(ctx context.Context, idx int) error {
+		t.Fatal("should not run")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var active int64
+	var maxActive int64
+	limit := 3
+	count := 10
+	err := RunParallel(context.Background(), limit, count, func(ctx context.Context, idx int) error {
+		cur := atomic.AddInt64(&active, 1)
+		for {
+			oldMax := atomic.LoadInt64(&maxActive)
+			if cur <= oldMax || atomic.CompareAndSwapInt64(&maxActive, oldMax, cur) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		atomic.AddInt64(&active, -1)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxActive > int64(limit) {
+		t.Fatalf("max concurrency %d exceeded limit %d", maxActive, limit)
+	}
+
+	expectedErr := errors.New("boom")
+	err = RunParallel(context.Background(), 2, 8, func(ctx context.Context, idx int) error {
+		if idx == 1 {
+			return expectedErr
+		}
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := RunParallel(ctx, 4, 5, func(ctx context.Context, idx int) error {
+		return nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }

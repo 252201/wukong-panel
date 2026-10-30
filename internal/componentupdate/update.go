@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/252201/wukong-panel/internal/model"
@@ -70,6 +71,68 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// RunParallel executes fn concurrently for idx in 0..count-1 with a maximum concurrency limit.
+// If count <= 0, it returns nil immediately.
+// If any task returns an error or ctx is cancelled, execution halts and the first error is returned.
+func RunParallel(ctx context.Context, limit int, count int, fn func(ctx context.Context, idx int) error) error {
+	if count <= 0 {
+		return nil
+	}
+	if limit <= 0 || limit > count {
+		limit = count
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	var once sync.Once
+	var firstErr error
+
+	setErr := func(err error) {
+		if err != nil {
+			once.Do(func() {
+				firstErr = err
+				cancel()
+			})
+		}
+	}
+
+	for i := 0; i < count; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			setErr(ctx.Err())
+			break
+		}
+		if firstErr != nil {
+			break
+		}
+		wg.Add(1)
+		idx := i
+		go func() {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			if ctx.Err() != nil {
+				return
+			}
+			if err := fn(ctx, idx); err != nil {
+				setErr(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
+}
+
 type Service struct {
 	Name    string `json:"name"`
 	Manager string `json:"manager"`
@@ -89,6 +152,7 @@ type Controller struct {
 	versionPattern, servicePattern *regexp.Regexp
 	assetName                      func(string, string) string
 	archive                        bool
+	unpackedSHA                    string
 }
 type asset struct {
 	Version, URL, SHA256 string
@@ -466,8 +530,10 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if closeErr != nil {
 		return closeErr
 	}
+	c.unpackedSHA = ""
 	c.reportProgress(ctx, 80, fmt.Sprintf("正在校验下载文件并备份现行 %s…", c.name))
 	if c.archive {
+		c.reportProgress(ctx, 82, fmt.Sprintf("正在解压 %s 安装包…", c.name))
 		archivePath := stage
 		stage, err = c.unpack(archivePath, a.Version)
 		os.Remove(archivePath)
@@ -484,6 +550,7 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	}
 	var files []ConfigFile
 	if c.Prepare != nil {
+		c.reportProgress(ctx, 85, fmt.Sprintf("正在校验与迁移现行配置…"))
 		files, err = c.Prepare(ctx, stage, target)
 		if err != nil {
 			return err
@@ -513,9 +580,13 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	}
 	var newSHA string
 	if c.archive {
-		newSHA, e = fileSHA(stage)
-		if e != nil {
-			return e
+		if c.unpackedSHA != "" {
+			newSHA = c.unpackedSHA
+		} else {
+			newSHA, e = fileSHA(stage)
+			if e != nil {
+				return e
+			}
 		}
 	} else {
 		newSHA = a.SHA256
@@ -534,29 +605,33 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 			err = errors.Join(err, c.restore(recoveryCtx, j))
 		}
 	}()
-	if c.Stop != nil {
-		for _, service := range services {
-			if err = c.Stop(ctx, service); err != nil {
-				return err
-			}
+	if c.Stop != nil && len(services) > 0 {
+		c.reportProgress(ctx, 88, fmt.Sprintf("正在安全暂停 %s 关联服务…", c.name))
+		if err = RunParallel(ctx, 4, len(services), func(ctx context.Context, i int) error {
+			return c.Stop(ctx, services[i])
+		}); err != nil {
+			return err
 		}
 	}
 	if err = c.writeFiles(files, false); err != nil {
 		return err
 	}
-	c.reportProgress(ctx, 90, fmt.Sprintf("正在替换可执行文件并平滑重启 %s 关联服务…", c.name))
+	c.reportProgress(ctx, 92, fmt.Sprintf("正在替换可执行文件并平滑重启 %s 关联服务…", c.name))
 	if err = os.Rename(stage, c.Binary); err != nil {
 		return err
 	}
 	if err = syncDir(filepath.Dir(c.Binary)); err != nil {
 		return err
 	}
-	for _, service := range services {
-		if err = c.Restart(ctx, service); err != nil {
+	if len(services) > 0 {
+		if err = RunParallel(ctx, 4, len(services), func(ctx context.Context, i int) error {
+			return c.Restart(ctx, services[i])
+		}); err != nil {
 			return err
 		}
 	}
 	if c.Verify != nil {
+		c.reportProgress(ctx, 96, fmt.Sprintf("正在并发验证 %s 节点代理与回环…", c.name))
 		if err = c.Verify(ctx); err != nil {
 			return err
 		}
@@ -617,11 +692,11 @@ func (c *Controller) restore(ctx context.Context, j journal) error {
 	if e = c.validateFiles(j.Files, true); e != nil {
 		return e
 	}
-	if c.Stop != nil {
-		for _, service := range j.Services {
-			if e = c.Stop(ctx, service); e != nil {
-				return e
-			}
+	if c.Stop != nil && len(j.Services) > 0 {
+		if e = RunParallel(ctx, 4, len(j.Services), func(ctx context.Context, i int) error {
+			return c.Stop(ctx, j.Services[i])
+		}); e != nil {
+			return e
 		}
 	}
 	if e = copyAtomic(c.Binary+".wukong-rollback", c.Binary, 0755); e != nil {
@@ -630,8 +705,10 @@ func (c *Controller) restore(ctx context.Context, j journal) error {
 	if e = c.writeFiles(j.Files, true); e != nil {
 		return e
 	}
-	for _, s := range j.Services {
-		if e = c.Restart(ctx, s); e != nil {
+	if len(j.Services) > 0 {
+		if e = RunParallel(ctx, 4, len(j.Services), func(ctx context.Context, i int) error {
+			return c.Restart(ctx, j.Services[i])
+		}); e != nil {
 			return e
 		}
 	}
