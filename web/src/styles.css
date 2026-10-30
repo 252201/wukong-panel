@@ -1771,8 +1771,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 /* Host update modal */
 .host-update-modal {
-  width: min(980px, 94vw) !important;
-  max-width: 1000px !important;
+  width: min(920px, 94vw) !important;
+  max-width: 940px !important;
   padding: 32px 36px;
 }
 .host-update-modal .modal-seal {

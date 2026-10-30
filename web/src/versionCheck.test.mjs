@@ -372,8 +372,8 @@ test('host-update and singbox-update modals use wide layout with enhanced target
   assert.ok(appVue.includes('<div class="target-host-sub">'));
 
   // 3. styles.css sets wide dimensions for host-update-modal
-  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*min\(980px,\s*94vw\)/);
-  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*max-width:\s*1000px/);
+  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*min\(920px,\s*94vw\)/);
+  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*max-width:\s*940px/);
 
   // 4. styles.css has flex alignment for target host banner
   assert.match(stylesCss, /\.host-update-modal \.fleet-host-action-target\s*\{[^}]*display:\s*flex/);
