@@ -379,8 +379,8 @@ test('host-update and singbox-update modals use wide layout with enhanced target
   assert.match(stylesCss, /\.host-update-modal \.fleet-host-action-target\s*\{[^}]*display:\s*flex/);
   assert.match(stylesCss, /\.host-update-modal \.target-host-main\s*\{[^}]*display:\s*flex/);
 
-  // 5. Changelog notes body has increased comfortable max-height
-  assert.match(stylesCss, /\.update-notes-body\s*\{[^}]*max-height:\s*220px/);
+  // 5. Changelog notes body has comfortable max-height
+  assert.match(stylesCss, /\.update-notes-body\s*\{[^}]*max-height:\s*200px/);
 
   // 6. Responsive styles for mobile
   assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*100%/);
