@@ -1053,6 +1053,46 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   color: #f59e0b !important;
   font-weight: 600;
 }
+.field-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+.field-foot-row > small {
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+.port-auto-allow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-label);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 18px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 1px 2px;
+  transition: color .16s ease;
+}
+.port-auto-allow-label:hover {
+  color: var(--gold);
+}
+.port-auto-allow-label input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--gold);
+  border-radius: 2px;
+}
 
 /* Advanced Network Settings Box */
 .advanced-network-box {

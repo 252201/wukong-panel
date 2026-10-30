@@ -960,3 +960,11 @@ func TestSelfSignedNodeConfigIsDetectedForShareLink(t *testing.T) {
 		t.Fatal("self-signed node certificate was not detected")
 	}
 }
+
+func TestAutoAllowFirewallPort(t *testing.T) {
+	manager, _ := newDemoManager(t)
+	// In demo mode, invalid ports, or tunnel protocol, autoAllowFirewallPort safely no-ops without panic
+	manager.autoAllowFirewallPort(t.Context(), 0, protocolHysteria2)
+	manager.autoAllowFirewallPort(t.Context(), 8443, protocolVLESSWSTunnel)
+	manager.autoAllowFirewallPort(t.Context(), 8443, protocolHysteria2)
+}
