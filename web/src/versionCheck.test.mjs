@@ -357,5 +357,35 @@ test('sing-box migration preflight is embedded into singbox-update modal and rem
   );
 });
 
+test('host-update and singbox-update modals use wide layout with enhanced target host header', () => {
+  const appVue = readFileSync(new URL('./App.vue', import.meta.url), 'utf-8');
+  const stylesCss = readFileSync(new URL('./styles.css', import.meta.url), 'utf-8');
+
+  // 1. Modals should not have compact class
+  assert.match(appVue, /modal === 'host-update' && hostUpdateTarget" class="modal-card host-update-modal"/);
+  assert.doesNotMatch(appVue, /modal === 'host-update' && hostUpdateTarget" class="modal-card compact host-update-modal"/);
+  assert.match(appVue, /modal === 'singbox-update' && singBoxUpdateTarget" class="modal-card host-update-modal singbox-update-modal"/);
+  assert.doesNotMatch(appVue, /modal === 'singbox-update' && singBoxUpdateTarget" class="modal-card compact host-update-modal/);
+
+  // 2. Target host header has structured main and sub elements with flag support
+  assert.ok(appVue.includes('<div class="target-host-main">'));
+  assert.ok(appVue.includes('<div class="target-host-sub">'));
+
+  // 3. styles.css sets wide dimensions for host-update-modal
+  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*min\(980px,\s*94vw\)/);
+  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*max-width:\s*1000px/);
+
+  // 4. styles.css has flex alignment for target host banner
+  assert.match(stylesCss, /\.host-update-modal \.fleet-host-action-target\s*\{[^}]*display:\s*flex/);
+  assert.match(stylesCss, /\.host-update-modal \.target-host-main\s*\{[^}]*display:\s*flex/);
+
+  // 5. Changelog notes body has increased comfortable max-height
+  assert.match(stylesCss, /\.update-notes-body\s*\{[^}]*max-height:\s*220px/);
+
+  // 6. Responsive styles for mobile
+  assert.match(stylesCss, /\.host-update-modal\s*\{[^}]*width:\s*100%/);
+});
+
+
 
 

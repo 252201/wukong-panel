@@ -1771,20 +1771,62 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 /* Host update modal */
 .host-update-modal {
-  width: min(600px, 94vw);
+  width: min(980px, 94vw) !important;
+  max-width: 1000px !important;
+  padding: 32px 36px;
 }
 .host-update-modal .modal-seal {
   margin-bottom: 14px;
+}
+.host-update-modal .fleet-host-action-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  margin: 16px 0 14px;
+  border-radius: 4px;
+  background: linear-gradient(105deg, rgba(212, 173, 87, 0.08), rgba(82, 182, 144, 0.04));
+  border: 1px solid rgba(212, 173, 87, 0.25);
+}
+.host-update-modal .fleet-host-flag {
+  width: 18px;
+  height: 12px;
+  object-fit: cover;
+  border-radius: 1px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(var(--wash-rgb), 0.16);
+  margin-right: 4px;
+}
+.host-update-modal .target-host-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.host-update-modal .target-host-main small {
+  color: var(--muted);
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.host-update-modal .target-host-main b {
+  color: var(--paper);
+  font-size: 15px;
+}
+.host-update-modal .target-host-sub span {
+  color: var(--muted-2);
+  font: 500 11px "IBM Plex Mono", monospace;
 }
 .version-diff-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  margin: 18px 0;
-  padding: 16px 20px;
-  border: 1px solid rgba(211, 169, 77, 0.2);
-  background: rgba(var(--shadow-rgb), 0.16);
+  gap: 24px;
+  margin: 16px 0;
+  padding: 18px 24px;
+  border: 1px solid rgba(211, 169, 77, 0.22);
+  background: rgba(var(--shadow-rgb), 0.18);
   border-radius: 4px;
 }
 .version-diff-box {
@@ -1799,7 +1841,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   color: var(--muted);
 }
 .version-diff-box .diff-val {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--mono, monospace);
   color: var(--paper);
@@ -1898,12 +1940,12 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 .update-command-box {
   display: flex;
-  align-items: stretch;
-  gap: 8px;
-  padding: 10px 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
   background: var(--surface-code);
-  border: 1px solid rgba(211, 169, 77, 0.2);
-  border-radius: 3px;
+  border: 1px solid rgba(211, 169, 77, 0.22);
+  border-radius: 4px;
   overflow: hidden;
 }
 .update-command-box code {
@@ -1922,27 +1964,28 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 
 .host-update-notes-section {
-  margin-top: 14px;
-  border-top: 1px solid rgba(211, 169, 77, 0.15);
-  padding-top: 12px;
+  margin-top: 16px;
+  border-top: 1px solid rgba(211, 169, 77, 0.18);
+  padding-top: 14px;
 }
 .host-update-notes-section h4 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 12px;
+  letter-spacing: 0.04em;
   color: var(--muted);
 }
 .update-notes-body {
-  max-height: 160px;
+  max-height: 220px;
   overflow-y: auto;
-  padding: 10px 12px;
-  background: rgba(var(--wash-rgb), 0.02);
-  border: 1px solid rgba(var(--wash-rgb), 0.08);
-  border-radius: 3px;
+  padding: 14px 18px;
+  background: rgba(var(--wash-rgb), 0.025);
+  border: 1px solid rgba(var(--wash-rgb), 0.09);
+  border-radius: 4px;
 }
 .update-notes-body pre {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--paper);
@@ -2833,8 +2876,48 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 
 @media (max-width: 640px) {
-  .fleet-order-modal {
+  .fleet-order-modal,
+  .host-update-modal {
     padding: 24px 16px !important;
+  }
+  .host-update-modal {
+    width: 100% !important;
+  }
+  .host-update-modal .fleet-host-action-target {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .host-update-modal .singbox-update-action-box {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .host-update-modal .singbox-start-btn {
+    width: 100%;
+  }
+  .host-update-modal .update-command-box {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .host-update-modal .update-command-box button {
+    align-self: flex-end;
+  }
+  .host-update-modal .host-update-modal-actions {
+    flex-direction: column-reverse;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .host-update-modal .host-update-modal-actions .actions-right {
+    flex-direction: column;
+    width: 100%;
+  }
+  .host-update-modal .host-update-modal-actions .actions-right button {
+    width: 100%;
+  }
+  .host-update-modal .release-external-link {
+    text-align: center;
   }
   .order-item-actions .move-label {
     display: none;
@@ -2851,7 +2934,11 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   }
 }
 
-/* Light mode overrides for fleet order */
+/* Light mode overrides for fleet order and update */
+:root[data-effective-theme="light"] .host-update-modal .fleet-host-action-target {
+  background: #fdfaf2;
+  border-color: rgba(217, 119, 6, 0.3);
+}
 :root[data-effective-theme="light"] .fleet-order-pinned-box {
   background: #f8fafc;
   border-color: #e2e8f0;
