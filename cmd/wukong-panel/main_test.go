@@ -49,7 +49,7 @@ func TestWukongctlCommandParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Args = append([]string(nil), tt.args...)
-			cfg := config.Parse("2.2.10")
+			cfg := config.Parse("2.2.9")
 			if cfg.Command != tt.expectedCmd {
 				t.Fatalf("expected Command %q, got %q", tt.expectedCmd, cfg.Command)
 			}
