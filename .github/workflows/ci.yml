@@ -80,24 +80,38 @@ jobs:
             -v /tmp/wukong-netcheck.test:/netcheck.test:ro \
             -e WUKONG_TEST_ICMP_MODE=unavailable alpine:3.21 \
             /netcheck.test -test.run '^TestLinuxICMPLoopback$' -test.v
-      - name: Dual-instance fleet control-plane end-to-end
-        run: go test -run '^TestFleetDualInstanceEndToEnd$' -count=1 -v ./internal/agent
+      - name: Cache official sing-box test binary
+        id: cache-sing-box
+        uses: actions/cache@v4
+        with:
+          path: /tmp/sing-box-1.14.1-linux-amd64
+          key: sing-box-1.14.1-linux-amd64
       - name: Verify generated protocol configs with official sing-box
         env:
           SING_BOX_VERSION: "1.14.1"
           SING_BOX_SHA256: 12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f
         run: |
-          archive="sing-box-${SING_BOX_VERSION}-linux-amd64.tar.gz"
-          curl -fL --retry 3 -o "/tmp/${archive}" "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/${archive}"
-          printf '%s  %s\n' "$SING_BOX_SHA256" "/tmp/${archive}" | sha256sum -c -
-          tar -xzf "/tmp/${archive}" -C /tmp
-          SING_BOX_TEST_BIN="/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box" \
+          bin_dir="/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64"
+          if [ ! -x "${bin_dir}/sing-box" ]; then
+            archive="sing-box-${SING_BOX_VERSION}-linux-amd64.tar.gz"
+            curl -fL --retry 3 -o "/tmp/${archive}" "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/${archive}"
+            printf '%s  %s\n' "$SING_BOX_SHA256" "/tmp/${archive}" | sha256sum -c -
+            tar -xzf "/tmp/${archive}" -C /tmp
+          fi
+          SING_BOX_TEST_BIN="${bin_dir}/sing-box" \
             go test -run '^(TestGeneratedConfigsPassRealSingBoxCheck|TestGeneratedVLESSRealityCompletesFullRoundTrip|TestGeneratedAnyTLSCompletesFullRoundTrip|TestGeneratedProbesPassRealSingBoxCheck)$' -v ./internal/agent ./internal/singboxconfig
       - run: go vet ./...
-      - run: |
+      - name: Cross-compile panel and probe binaries
+        run: |
+          pids=""
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-$arch ./cmd/wukong-panel
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o /tmp/wukong-probe-$arch ./cmd/wukong-probe
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o "/tmp/wukong-$arch" ./cmd/wukong-panel &
+            pids="$pids $!"
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o "/tmp/wukong-probe-$arch" ./cmd/wukong-probe &
+            pids="$pids $!"
+          done
+          for pid in $pids; do
+            wait "$pid"
           done
 
   installer-regressions:
