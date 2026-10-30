@@ -198,7 +198,7 @@ async function pollJob(id: string) {
       return
     }
   } catch (e) { if (!alive) return; error.value = message(e) }
-  if (alive) timer = setTimeout(() => pollJob(id), 2000)
+  if (alive) timer = setTimeout(() => pollJob(id), 1000)
 }
 async function upgrade() {
   if (!writable.value || !state.value?.updateAvailable) return
@@ -229,7 +229,18 @@ onBeforeUnmount(() => { alive = false; if (timer) clearTimeout(timer) })
       <p v-if="!isTunnel" class="help-text runtime-update-note">{{ t('更新前校验并迁移托管配置；更新后执行本机代理探测，失败自动恢复。每 24 小时自动检查一次更新。', 'Validates and migrates managed configurations, then probes the local proxy; failures restore the previous files. Checks for updates automatically every 24 hours.') }}</p>
       <p v-if="state?.reason" class="help-text">{{ reasonText }}</p>
       <p v-if="state?.checkedAt && !state.checkedAt.startsWith('0001')" class="help-text">{{ t('最后检查', 'Last checked') }} {{ new Date(state.checkedAt).toLocaleString(language) }} · {{ t('每 24 小时自动检查', 'Checked every 24 hours') }}</p>
-      <p v-if="job" role="status">{{ job.message }} · {{ job.progress }}%</p>
+      <div v-if="job && (jobRunning || job.status === 'success' || job.status === 'failed')" class="component-job-progress" role="status">
+        <div class="progress-header">
+          <span class="progress-status">
+            <i :class="jobRunning ? 'status-icon spinning' : (job.status === 'success' ? 'status-icon success' : 'status-icon failed')"></i>
+            <b>{{ job.message || (jobRunning ? t('正在执行更新…', 'Updating…') : t('更新完成', 'Update complete')) }}</b>
+          </span>
+          <span class="progress-pct">{{ job.progress ?? 0 }}%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" :style="{ width: `${job.progress ?? 0}%` }" :class="{ success: job.status === 'success', failed: job.status === 'failed' }"></div>
+        </div>
+      </div>
       <p v-if="errorText" class="connector-error" role="alert">{{ errorText }}</p>
     </template>
   </section>
@@ -237,4 +248,14 @@ onBeforeUnmount(() => { alive = false; if (timer) clearTimeout(timer) })
 
 <style scoped>
 .component-update-panel{min-width:0;margin:0;padding:24px}.connector-versions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:20px 0}.connector-versions>div{display:flex;flex-direction:column;gap:6px;min-width:110px}.connector-versions small{color:var(--muted)}.connector-versions strong{font-size:18px;font-family:"IBM Plex Mono",monospace}.update-badge{color:var(--gold);font-size:12px}.connector-confirm{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:10px}.connector-confirm>div{display:flex;gap:10px;margin-top:12px}.connector-error{color:var(--danger-text);overflow-wrap:anywhere}.toggle-row small{display:block;margin-top:5px;line-height:1.6}.help-text{overflow-wrap:anywhere}@media(max-width:600px){.component-update-panel{padding:18px}.connector-versions{gap:12px}.connector-versions>div{min-width:110px}.toggle-row{gap:14px}}
+.component-job-progress{margin:16px 0 10px;padding:12px 16px;background:rgba(var(--wash-rgb),0.03);border:1px solid rgba(var(--wash-rgb),0.1);border-radius:8px;display:flex;flex-direction:column;gap:8px}
+.component-job-progress .progress-header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.component-job-progress .progress-status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--paper)}
+.component-job-progress .progress-pct{font-family:var(--mono,monospace);font-size:13px;font-weight:700;color:var(--gold)}
+.component-job-progress .progress-bar-track{width:100%;height:6px;background:rgba(var(--wash-rgb),0.1);border-radius:9999px;overflow:hidden}
+.component-job-progress .progress-bar-fill{height:100%;background:linear-gradient(90deg,#d97706,#fbbf24);transition:width 0.3s ease;border-radius:9999px}
+.component-job-progress .progress-bar-fill.success{background:var(--jade)}
+.component-job-progress .progress-bar-fill.failed{background:var(--danger-text,#ef4444)}
+:root[data-effective-theme="light"] .component-job-progress{background:#fdfbf7;border-color:rgba(217,119,6,0.2)}
+:root[data-effective-theme="light"] .component-job-progress .progress-status{color:#1e293b}
 </style>

@@ -165,7 +165,7 @@ func (m *Manager) restartUpdatedService(ctx context.Context, s componentupdate.S
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Second):
+		case <-time.After(350 * time.Millisecond):
 		}
 		if m.serviceStatus(ctx, s.Manager, s.Name) != "active" {
 			return fmt.Errorf("runtime service %s is not active after restart", s.Name)

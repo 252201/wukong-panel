@@ -52,3 +52,11 @@ test('ComponentUpdatePanel automatically checks updates when last check exceeds 
  assert.equal(shouldCheck('', now), true)
  assert.equal(shouldCheck('0001-01-01T00:00:00Z', now), true)
 })
+
+test('ComponentUpdatePanel renders granular progress bar and responsive polling', () => {
+ const vueSource = readFileSync(new URL('./ComponentUpdatePanel.vue', import.meta.url), 'utf8')
+ assert.ok(vueSource.includes('class="component-job-progress"'), 'ComponentUpdatePanel must contain component-job-progress container')
+ assert.ok(vueSource.includes('class="progress-bar-track"'), 'ComponentUpdatePanel must render progress-bar-track')
+ assert.ok(vueSource.includes('class="progress-bar-fill"'), 'ComponentUpdatePanel must render progress-bar-fill')
+ assert.ok(vueSource.includes('setTimeout(() => pollJob(id), 1000)'), 'ComponentUpdatePanel must poll job every 1000ms for fast feedback')
+})

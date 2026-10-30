@@ -26,6 +26,50 @@ const maxBinary = 128 << 20
 
 var calendarVersionPattern = regexp.MustCompile(`^\d{4}\.\d{1,2}\.\d{1,3}$`)
 
+type progressContextKey struct{}
+
+// ProgressReporter receives progress percent (0-100) and status message.
+type ProgressReporter func(percent int, message string)
+
+// WithProgress returns a new context configured with a progress reporter.
+func WithProgress(ctx context.Context, fn ProgressReporter) context.Context {
+	return context.WithValue(ctx, progressContextKey{}, fn)
+}
+
+func (c *Controller) reportProgress(ctx context.Context, percent int, message string) {
+	if fn, ok := ctx.Value(progressContextKey{}).(ProgressReporter); ok && fn != nil {
+		fn(percent, message)
+	}
+}
+
+type progressReader struct {
+	reader     io.Reader
+	total      int64
+	read       int64
+	lastReport time.Time
+	onProgress func(percent int, read, total int64)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.reader.Read(p)
+	if n > 0 {
+		pr.read += int64(n)
+		now := time.Now()
+		if pr.onProgress != nil && (now.Sub(pr.lastReport) >= 250*time.Millisecond || (pr.total > 0 && pr.read == pr.total) || err != nil) {
+			pr.lastReport = now
+			pct := 0
+			if pr.total > 0 {
+				pct = int(float64(pr.read) / float64(pr.total) * 100)
+				if pct > 100 {
+					pct = 100
+				}
+			}
+			pr.onProgress(pct, pr.read, pr.total)
+		}
+	}
+	return n, err
+}
+
 type Service struct {
 	Name    string `json:"name"`
 	Manager string `json:"manager"`
@@ -365,6 +409,7 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if a.Version != target || !c.newer(target, current) {
 		return errors.New("stable release changed or requested downgrade; check versions again")
 	}
+	c.reportProgress(ctx, 10, fmt.Sprintf("正在校验运行环境并准备更新 %s…", c.name))
 	services, err := c.Services(ctx)
 	if err != nil {
 		return err
@@ -385,7 +430,23 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 		return err
 	}
 	hash := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(resp.Body, maxBinary))
+	pReader := &progressReader{
+		reader: io.LimitReader(resp.Body, maxBinary),
+		total:  a.Size,
+		onProgress: func(pct int, read, total int64) {
+			jobPct := 15 + int(float64(pct)*0.6)
+			mbRead := float64(read) / (1024 * 1024)
+			mbTotal := float64(total) / (1024 * 1024)
+			var msg string
+			if total > 0 {
+				msg = fmt.Sprintf("正在下载 %s (%.1f MB / %.1f MB)…", c.name, mbRead, mbTotal)
+			} else {
+				msg = fmt.Sprintf("正在下载 %s (%.1f MB)…", c.name, mbRead)
+			}
+			c.reportProgress(ctx, jobPct, msg)
+		},
+	}
+	n, copyErr := io.Copy(io.MultiWriter(tmp, hash), pReader)
 	resp.Body.Close()
 	if copyErr != nil {
 		tmp.Close()
@@ -405,6 +466,7 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if closeErr != nil {
 		return closeErr
 	}
+	c.reportProgress(ctx, 80, fmt.Sprintf("正在校验下载文件并备份现行 %s…", c.name))
 	if c.archive {
 		archivePath := stage
 		stage, err = c.unpack(archivePath, a.Version)
@@ -442,15 +504,21 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if string(before) != string(after) {
 		return errors.New("connector services changed during download")
 	}
-	if err = copyAtomic(c.Binary, c.Binary+".wukong-rollback", 0755); err != nil {
+	backupSHA, err := copyAtomicWithSHA(c.Binary, c.Binary+".wukong-rollback", 0755)
+	if err != nil {
 		return err
 	}
-	if backupSHA, e := fileSHA(c.Binary + ".wukong-rollback"); e != nil || backupSHA != oldSHA {
+	if backupSHA != oldSHA {
 		return errors.New("cannot verify runtime rollback binary")
 	}
-	newSHA, e := fileSHA(stage)
-	if e != nil {
-		return e
+	var newSHA string
+	if c.archive {
+		newSHA, e = fileSHA(stage)
+		if e != nil {
+			return e
+		}
+	} else {
+		newSHA = a.SHA256
 	}
 	j := journal{OldSHA: oldSHA, NewSHA: newSHA, Services: services, Files: files}
 	if err = c.save("pending.json", j); err != nil {
@@ -476,6 +544,7 @@ func (c *Controller) update(ctx context.Context, current, target string) (err er
 	if err = c.writeFiles(files, false); err != nil {
 		return err
 	}
+	c.reportProgress(ctx, 90, fmt.Sprintf("正在替换可执行文件并平滑重启 %s 关联服务…", c.name))
 	if err = os.Rename(stage, c.Binary); err != nil {
 		return err
 	}
@@ -620,18 +689,19 @@ func fileSHA(path string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-func copyAtomic(source, target string, mode os.FileMode) error {
+func copyAtomicWithSHA(source, target string, mode os.FileMode) (string, error) {
 	input, e := os.Open(source)
 	if e != nil {
-		return e
+		return "", e
 	}
 	defer input.Close()
 	f, e := os.CreateTemp(filepath.Dir(target), ".wukong-"+filepath.Base(target)+"-copy-*")
 	if e != nil {
-		return e
+		return "", e
 	}
 	defer os.Remove(f.Name())
-	if _, e = io.Copy(f, input); e == nil {
+	h := sha256.New()
+	if _, e = io.Copy(io.MultiWriter(f, h), input); e == nil {
 		e = f.Chmod(mode)
 	}
 	if e == nil {
@@ -639,15 +709,20 @@ func copyAtomic(source, target string, mode os.FileMode) error {
 	}
 	ce := f.Close()
 	if e != nil {
-		return e
+		return "", e
 	}
 	if ce != nil {
-		return ce
+		return "", ce
 	}
 	if e = os.Rename(f.Name(), target); e != nil {
-		return e
+		return "", e
 	}
-	return syncDir(filepath.Dir(target))
+	return hex.EncodeToString(h.Sum(nil)), syncDir(filepath.Dir(target))
+}
+
+func copyAtomic(source, target string, mode os.FileMode) error {
+	_, err := copyAtomicWithSHA(source, target, mode)
+	return err
 }
 func syncDir(dir string) error {
 	f, e := os.Open(dir)
