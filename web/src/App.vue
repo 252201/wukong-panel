@@ -493,6 +493,20 @@ function nodeRate(nodeId: string): number {
   const dev = overview.value?.devices?.find(d => d.nodeId === nodeId)
   return dev?.rateBps || 0
 }
+function nodeTrafficTooltip(node: NodeItem): string {
+  const current = bytes(node.trafficBytes || 0)
+  const total = bytes(node.totalTrafficBytes || 0)
+  if (language.value === 'en-US') {
+    if (node.totalTrafficBytes && node.totalTrafficBytes !== node.trafficBytes) {
+      return `Current billing cycle: ${current} · 90-day total: ${total}`
+    }
+    return `Cumulative traffic: ${current}`
+  }
+  if (node.totalTrafficBytes && node.totalTrafficBytes !== node.trafficBytes) {
+    return `本账期累计: ${current} · 90天历史总计: ${total}`
+  }
+  return `当前节点累计传输流量: ${current}`
+}
 function openDiagnostic(node: NodeItem) {
   diagnosticNode.value = node
   modal.value = 'diagnostic'
@@ -2949,6 +2963,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </div>
             <div class="node-specs">
               <span><small>{{ language === 'en-US' ? 'Outbound' : '出站策略' }}</small><b>{{ outboundLabel(node) }}</b></span>
+              <span :title="nodeTrafficTooltip(node)"><small>{{ language === 'en-US' ? 'Cumulative' : '累计流量' }}</small><b>{{ bytes(node.trafficBytes || 0) }}</b></span>
               <span :title="language === 'en-US' ? `Service: ${node.serviceManager} · Core: sing-box ${overview?.singBoxVersion || node.configVersion || '—'}` : `服务管理: ${node.serviceManager} · 核心版本: sing-box ${overview?.singBoxVersion || node.configVersion || '—'}`"><small>{{ language === 'en-US' ? 'Ownership' : '管理归属' }}</small><b>{{ node.ownership === 'imported' ? (language === 'en-US' ? 'Imported' : '外部接管') : (language === 'en-US' ? 'Managed' : '原生托管') }}</b></span>
             </div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ {{ node.ownership === 'managed' ? (node.protocol === 'vless-ws-tunnel' ? '设备编队 · 独立入站，共享 sing-box 与 Tunnel 连接器' : '设备编队 · 独立入站，共享一个 sing-box 进程') : '与同配置内其他端点共享生命周期' }}</p>
@@ -4422,14 +4437,19 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <span>{{ nodeFirewallStatus(diagnosticNode).title }}</span>
         </div>
         <div class="diag-metric-card">
-          <small>实时窗口下行速率</small>
+          <small>{{ language === 'en-US' ? 'Real-Time Downlink Rate' : '实时窗口下行速率' }}</small>
           <strong>{{ rate(nodeRate(diagnosticNode.id)) }}</strong>
-          <span>当前采集窗口流量传输速度</span>
+          <span>{{ language === 'en-US' ? 'Traffic rate in latest sampling window' : '当前采集窗口流量传输速度' }}</span>
         </div>
         <div class="diag-metric-card">
-          <small>最后校验时间</small>
-          <b class="diag-timestamp">{{ diagnosticNode.probeCheckedAt ? formatFullDateTime(diagnosticNode.probeCheckedAt, language) : '尚未检测' }}</b>
-          <span>{{ diagnosticNode.probeCheckedAt ? formatRelativeTime(diagnosticNode.probeCheckedAt, undefined, language) : '点击下方按钮发起检测' }}</span>
+          <small>{{ language === 'en-US' ? 'Cumulative Traffic' : '节点累计传输流量' }}</small>
+          <strong>{{ bytes(diagnosticNode.trafficBytes || 0) }}</strong>
+          <span>{{ nodeTrafficTooltip(diagnosticNode) }}</span>
+        </div>
+        <div class="diag-metric-card diag-metric-card-wide">
+          <small>{{ language === 'en-US' ? 'Last Verification' : '最后校验时间' }}</small>
+          <b class="diag-timestamp">{{ diagnosticNode.probeCheckedAt ? formatFullDateTime(diagnosticNode.probeCheckedAt, language) : (language === 'en-US' ? 'Not yet probed' : '尚未检测') }}</b>
+          <span>{{ diagnosticNode.probeCheckedAt ? formatRelativeTime(diagnosticNode.probeCheckedAt, undefined, language) : (language === 'en-US' ? 'Click button below to probe' : '点击下方按钮发起检测') }}</span>
         </div>
       </div>
 

@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS endpoint_daily (
   day TEXT NOT NULL, node_id TEXT NOT NULL, node_name TEXT NOT NULL, bytes INTEGER NOT NULL,
   PRIMARY KEY(day,node_id)
 );
+CREATE INDEX IF NOT EXISTS idx_endpoint_daily_node ON endpoint_daily(node_id);
 CREATE TABLE IF NOT EXISTS endpoint_recent (
   node_id TEXT PRIMARY KEY, node_name TEXT NOT NULL, bytes INTEGER NOT NULL,
   duration_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -411,10 +412,39 @@ func (s *Store) ChangePassword(userID int64, password string) error {
 	return tx.Commit()
 }
 
+// BillingPeriod returns the start and end timestamps for the billing cycle encompassing now.
+func BillingPeriod(now time.Time, day int, tz string) (time.Time, time.Time) {
+	if day < 1 || day > 28 {
+		day = 1
+	}
+	location, err := time.LoadLocation(tz)
+	if err != nil {
+		location = time.Local
+	}
+	local := now.In(location)
+	year, month := local.Year(), local.Month()
+	if local.Day() < day {
+		month--
+		if month == 0 {
+			month = 12
+			year--
+		}
+	}
+	start := time.Date(year, month, day, 0, 0, 0, 0, location)
+	return start, start.AddDate(0, 1, 0).Add(-time.Second)
+}
+
 func (s *Store) Nodes(ctx context.Context) ([]model.Node, error) {
+	settings, _ := s.Settings()
+	start, end := BillingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
+	startDay := start.Format("2006-01-02")
+	endDay := end.Format("2006-01-02")
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,protocol,mode,egress,listen_port,server,domain,preferred_server,websocket_path,ipv4_bind,ipv6_bind,auto_bind,
 service_name,service_manager,config_path,config_version,ownership,shared_group,status,probe_status,probe_latency_ms,
-probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes ORDER BY created_at`)
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at,
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id AND day >= ? AND day <= ?), 0),
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id), 0)
+FROM nodes ORDER BY created_at`, startDay, endDay)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +454,7 @@ probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FR
 		var n model.Node
 		var auto int
 		var probeChecked, created, updated int64
-		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated); err != nil {
+		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated, &n.TrafficBytes, &n.TotalTrafficBytes); err != nil {
 			return nil, err
 		}
 		n.AutoBind = auto == 1
@@ -439,13 +469,20 @@ probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FR
 }
 
 func (s *Store) Node(ctx context.Context, id string, includeSecret bool) (model.Node, error) {
+	settings, _ := s.Settings()
+	start, end := BillingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
+	startDay := start.Format("2006-01-02")
+	endDay := end.Format("2006-01-02")
 	var n model.Node
 	var auto int
 	var probeChecked, created, updated int64
 	var cipher string
 	err := s.DB.QueryRowContext(ctx, `SELECT id,name,protocol,mode,egress,listen_port,server,domain,preferred_server,websocket_path,ipv4_bind,ipv6_bind,auto_bind,
 service_name,service_manager,config_path,config_version,ownership,shared_group,status,secret_cipher,probe_status,probe_latency_ms,
-probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes WHERE id=?`, id).Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &cipher, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated)
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at,
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id AND day >= ? AND day <= ?), 0),
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id), 0)
+FROM nodes WHERE id=?`, startDay, endDay, id).Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &cipher, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated, &n.TrafficBytes, &n.TotalTrafficBytes)
 	if err != nil {
 		return n, err
 	}
@@ -581,9 +618,16 @@ func (s *Store) NodesByGroup(ctx context.Context, group string) ([]model.Node, e
 	if strings.TrimSpace(group) == "" {
 		return nil, errors.New("node group is required")
 	}
+	settings, _ := s.Settings()
+	start, end := BillingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
+	startDay := start.Format("2006-01-02")
+	endDay := end.Format("2006-01-02")
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,protocol,mode,egress,listen_port,server,domain,preferred_server,websocket_path,ipv4_bind,ipv6_bind,auto_bind,
 service_name,service_manager,config_path,config_version,ownership,shared_group,status,probe_status,probe_latency_ms,
-probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FROM nodes WHERE shared_group=? ORDER BY created_at,id`, group)
+probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at,
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id AND day >= ? AND day <= ?), 0),
+COALESCE((SELECT SUM(bytes) FROM endpoint_daily WHERE node_id = nodes.id), 0)
+FROM nodes WHERE shared_group=? ORDER BY created_at,id`, startDay, endDay, group)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +637,7 @@ probe_exit_ip,probe_target,probe_error,probe_checked_at,created_at,updated_at FR
 		var n model.Node
 		var auto int
 		var probeChecked, created, updated int64
-		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated); err != nil {
+		if err := rows.Scan(&n.ID, &n.Name, &n.Protocol, &n.Mode, &n.Egress, &n.ListenPort, &n.Server, &n.Domain, &n.PreferredServer, &n.WebSocketPath, &n.IPv4Bind, &n.IPv6Bind, &auto, &n.ServiceName, &n.ServiceManager, &n.ConfigPath, &n.ConfigVersion, &n.Ownership, &n.SharedGroup, &n.Status, &n.ProbeStatus, &n.ProbeLatencyMS, &n.ProbeExitIP, &n.ProbeTarget, &n.ProbeError, &probeChecked, &created, &updated, &n.TrafficBytes, &n.TotalTrafficBytes); err != nil {
 			return nil, err
 		}
 		n.AutoBind = auto == 1

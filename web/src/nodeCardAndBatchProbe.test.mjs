@@ -24,10 +24,12 @@ test('App.vue implements robust probeAllActiveNodes with progress tracking and s
   assert.ok(vueSource.includes('个异常'), 'Must report anomaly count when any node fails')
 })
 
-test('App.vue streamlines node-specs from 4 redundant items down to 2 clean items', () => {
+test('App.vue streamlines node-specs into clean outbounds, cumulative traffic, and ownership', () => {
   const vueSource = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
   assert.ok(vueSource.includes('class="node-specs"'), 'Must contain node-specs')
   assert.ok(vueSource.includes('outboundLabel(node)'), 'Must display outbound strategy')
+  assert.ok(vueSource.includes('累计流量'), 'Must display cumulative traffic')
+  assert.ok(vueSource.includes('nodeTrafficTooltip'), 'Must provide cumulative traffic tooltip')
   assert.ok(vueSource.includes('管理归属'), 'Must display management ownership')
   // Check that redundant in-flow 4-item grid is removed
   assert.ok(!vueSource.includes('<small>运行版本</small>'), 'Redundant 运行版本 in-flow label must be eliminated')

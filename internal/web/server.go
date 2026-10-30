@@ -854,24 +854,7 @@ func clientIP(r *http.Request) string {
 }
 
 func billingPeriod(now time.Time, day int, tz string) (time.Time, time.Time) {
-	if day < 1 || day > 28 {
-		day = 1
-	}
-	location, err := time.LoadLocation(tz)
-	if err != nil {
-		location = time.Local
-	}
-	local := now.In(location)
-	year, month := local.Year(), local.Month()
-	if local.Day() < day {
-		month--
-		if month == 0 {
-			month = 12
-			year--
-		}
-	}
-	start := time.Date(year, month, day, 0, 0, 0, 0, location)
-	return start, start.AddDate(0, 1, 0).Add(-time.Second)
+	return store.BillingPeriod(now, day, tz)
 }
 func maskToken(token string) string {
 	if len(token) < 8 {

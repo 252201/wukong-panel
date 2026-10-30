@@ -27,6 +27,8 @@ export interface NodeItem {
   probeTarget?: string
   probeError?: string
   probeCheckedAt?: string
+  trafficBytes?: number
+  totalTrafficBytes?: number
 }
 
 export interface Metric {
