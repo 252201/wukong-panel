@@ -9,12 +9,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func runtimeArchive(t *testing.T, version, arch string, duplicate bool, kind byte) []byte {
@@ -204,5 +207,79 @@ func TestConfigRecoveryRejectsExternalChangesAndPathEscape(t *testing.T) {
 	os.WriteFile(path, []byte(`{"external":true}`), 0600)
 	if e := c.writeFiles(files, true); e == nil {
 		t.Fatal("external change overwritten")
+	}
+}
+
+func TestSingBoxMultiServiceParallelRestart(t *testing.T) {
+	c, _, _ := singBoxFixture(t, "amd64")
+	services := make([]Service, 6)
+	for i := range services {
+		services[i] = Service{Name: fmt.Sprintf("sing-box-wukong-svc-%d", i), Manager: "systemd"}
+	}
+	c.Services = func(context.Context) ([]Service, error) {
+		return services, nil
+	}
+
+	var activeRestarts int64
+	var maxActiveRestarts int64
+	var stoppedServices int64
+	c.Stop = func(ctx context.Context, s Service) error {
+		atomic.AddInt64(&stoppedServices, 1)
+		return nil
+	}
+	c.Restart = func(ctx context.Context, s Service) error {
+		cur := atomic.AddInt64(&activeRestarts, 1)
+		for {
+			old := atomic.LoadInt64(&maxActiveRestarts)
+			if cur <= old || atomic.CompareAndSwapInt64(&maxActiveRestarts, old, cur) {
+				break
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+		atomic.AddInt64(&activeRestarts, -1)
+		return nil
+	}
+
+	if err := c.Update(t.Context(), "1.14.1", "1.14.2"); err != nil {
+		t.Fatal(err)
+	}
+	if stoppedServices != int64(len(services)) {
+		t.Fatalf("expected %d stopped services, got %d", len(services), stoppedServices)
+	}
+	if maxActiveRestarts < 2 {
+		t.Fatalf("expected parallel restarts (at least concurrency 2), got %d", maxActiveRestarts)
+	}
+	if c.unpackedSHA == "" {
+		t.Fatal("expected unpackedSHA to be recorded during unpack")
+	}
+}
+
+func TestSingBoxReportsGranularProgress(t *testing.T) {
+	c, _, _ := singBoxFixture(t, "amd64")
+	var pcts []int
+	var msgs []string
+	ctx := WithProgress(context.Background(), func(pct int, msg string) {
+		pcts = append(pcts, pct)
+		msgs = append(msgs, msg)
+	})
+	if err := c.Update(ctx, "1.14.1", "1.14.2"); err != nil {
+		t.Fatal(err)
+	}
+	hasUnpack := false
+	hasMigrate := false
+	hasRestart := false
+	for _, p := range pcts {
+		if p == 82 {
+			hasUnpack = true
+		}
+		if p == 85 {
+			hasMigrate = true
+		}
+		if p == 92 {
+			hasRestart = true
+		}
+	}
+	if !hasUnpack || !hasMigrate || !hasRestart {
+		t.Fatalf("missing expected sing-box progress milestones: %v, msgs: %v", pcts, msgs)
 	}
 }

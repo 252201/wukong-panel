@@ -60,3 +60,8 @@ test('ComponentUpdatePanel renders granular progress bar and responsive polling'
  assert.ok(vueSource.includes('class="progress-bar-fill"'), 'ComponentUpdatePanel must render progress-bar-fill')
  assert.ok(vueSource.includes('setTimeout(() => pollJob(id), 1000)'), 'ComponentUpdatePanel must poll job every 1000ms for fast feedback')
 })
+
+test('App.vue sing-box update polling uses responsive 1000ms interval', () => {
+ const appSource = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
+ assert.ok(appSource.includes("singBoxPollTimer = setTimeout(() => pollSingBoxJob(host, jobId), 1000)"), 'App.vue pollSingBoxJob must poll every 1000ms')
+})
