@@ -1873,6 +1873,109 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border-radius: 4px;
   margin: 18px 0;
 }
+
+/* Merged version diff and online update card */
+.version-update-merged-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 16px 0;
+  padding: 14px 20px;
+  border: 1px solid rgba(211, 169, 77, 0.25);
+  background: linear-gradient(105deg, rgba(var(--shadow-rgb), 0.22), rgba(99, 102, 241, 0.06));
+  border-radius: 4px;
+}
+.merged-diff-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.merged-diff-group .version-diff-box {
+  align-items: flex-start;
+  gap: 2px;
+  flex: initial;
+}
+.merged-diff-group .diff-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.merged-diff-group .diff-val {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--mono, monospace);
+  color: var(--paper);
+}
+.merged-diff-group .diff-val.latest {
+  color: var(--jade);
+}
+.merged-diff-group .diff-val-wrap {
+  display: flex;
+  align-items: center;
+}
+.merged-diff-group .version-diff-arrow {
+  font-size: 15px;
+  color: var(--gold);
+  opacity: 0.8;
+  padding: 0 4px;
+}
+.merged-diff-group .diff-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(74, 172, 130, 0.15);
+  color: var(--jade);
+  border: 1px solid rgba(74, 172, 130, 0.35);
+  font-weight: 600;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.merged-divider {
+  width: 1px;
+  height: 38px;
+  background: rgba(var(--wash-rgb), 0.12);
+  flex-shrink: 0;
+}
+.merged-action-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+.merged-action-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.merged-action-desc h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.merged-action-desc small {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merged-action-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+}
 .version-success-banner {
   display: flex;
   align-items: center;
@@ -2331,6 +2434,13 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .singbox-update-action-box {
   background: #f5f6ff;
   border-color: rgba(99, 102, 241, 0.2);
+}
+:root[data-effective-theme="light"] .version-update-merged-card {
+  background: linear-gradient(105deg, #fdfbf7, #f5f6ff);
+  border-color: rgba(217, 119, 6, 0.25);
+}
+:root[data-effective-theme="light"] .merged-divider {
+  background: rgba(0, 0, 0, 0.1);
 }
 :root[data-effective-theme="light"] .singbox-update-progress-card {
   background: #f8fafc;
@@ -2892,6 +3002,30 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+  }
+  .host-update-modal .version-update-merged-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .host-update-modal .merged-divider {
+    width: 100%;
+    height: 1px;
+  }
+  .host-update-modal .merged-diff-group {
+    justify-content: space-around;
+  }
+  .host-update-modal .merged-action-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .host-update-modal .merged-action-desc small {
+    white-space: normal;
+  }
+  .host-update-modal .merged-action-btn {
+    width: 100%;
   }
   .host-update-modal .singbox-start-btn {
     width: 100%;

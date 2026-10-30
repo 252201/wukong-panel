@@ -3533,6 +3533,36 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
         </div>
       </div>
+      <!-- 在线一键升级就绪：合并版本对比与操作按钮为单行卡片 -->
+      <div v-else-if="!hostUpdating && !hostUpdateJob && !hostReconnecting && hostUpdateOnlineSupported(hostUpdateTarget)" class="version-update-merged-card">
+        <div class="merged-diff-group">
+          <div class="version-diff-box current">
+            <span class="diff-label">当前运行版本</span>
+            <span class="diff-val">{{ hostUpdateCurrentVersion(hostUpdateTarget) }}</span>
+          </div>
+          <div class="version-diff-arrow">➔</div>
+          <div class="version-diff-box latest">
+            <span class="diff-label">可升级至版本</span>
+            <div class="diff-val-wrap">
+              <span class="diff-val latest">v{{ latestReleaseVersion }}</span>
+              <span class="diff-tag">最新发布</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="merged-divider"></div>
+
+        <div class="merged-action-group">
+          <div class="merged-action-desc">
+            <h4>在线一键升级</h4>
+            <small>{{ isProbeHost(hostUpdateTarget) ? '由中央控制台向远端探针下发安全自更新指令' : '自动备份当前数据库与配置，无需登录终端无缝升级' }}</small>
+            <p v-if="hostUpdateError && !hostUpdating && !hostUpdateJob" class="singbox-update-err-msg" style="margin-top: 4px;">{{ hostUpdateError }}</p>
+          </div>
+          <button type="button" class="primary singbox-start-btn merged-action-btn" :disabled="hostUpdating || !hostUpdateTarget.online" @click="startHostUpgrade(hostUpdateTarget)">
+            🚀 立即升级{{ isProbeHost(hostUpdateTarget) ? '探针' : '面板' }}至 v{{ latestReleaseVersion }}
+          </button>
+        </div>
+      </div>
       <div v-else class="version-diff-card">
         <div class="version-diff-box current">
           <span class="diff-label">当前运行版本</span>
@@ -3546,9 +3576,9 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
       </div>
 
-      <!-- 在线一键升级进度或控制区 -->
-      <div v-if="hostUpdateOnlineSupported(hostUpdateTarget)" class="host-online-update-section">
-        <div v-if="hostUpdating || hostUpdateJob || hostReconnecting" class="singbox-update-progress-card" :class="{ 'update-success-card': hostUpdateJob?.status === 'success' && !hostReconnecting }">
+      <!-- 在线一键升级进行中进度条 -->
+      <div v-if="hostUpdateOnlineSupported(hostUpdateTarget) && (hostUpdating || hostUpdateJob || hostReconnecting)" class="host-online-update-section">
+        <div class="singbox-update-progress-card" :class="{ 'update-success-card': hostUpdateJob?.status === 'success' && !hostReconnecting }">
           <div class="progress-header">
             <span class="progress-status">
               <i :class="hostReconnecting ? 'status-icon spinning' : (hostUpdateJob?.status === 'success' ? 'status-icon success' : (hostUpdateJob?.status === 'failed' ? 'status-icon failed' : 'status-icon spinning'))"></i>
@@ -3566,16 +3596,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <div v-if="hostUpdateJob?.status === 'failed' || hostUpdateError" class="progress-retry-action">
             <button type="button" class="mini-btn" @click="startHostUpgrade(hostUpdateTarget)">重新尝试升级</button>
           </div>
-        </div>
-        <div v-else class="singbox-update-action-box">
-          <div class="action-desc">
-            <h4>在线一键升级</h4>
-            <small>{{ isProbeHost(hostUpdateTarget) ? '由中央控制台向远端探针下发安全自更新指令：' : '自动备份当前数据库与配置，无需登录终端无缝升级：' }}</small>
-          </div>
-          <p v-if="hostUpdateError && !hostUpdating && !hostUpdateJob" class="singbox-update-err-msg" style="margin-top: 8px;">{{ hostUpdateError }}</p>
-          <button type="button" class="primary singbox-start-btn" :disabled="hostUpdating || !hostUpdateTarget.online" @click="startHostUpgrade(hostUpdateTarget)">
-            🚀 立即升级{{ isProbeHost(hostUpdateTarget) ? '探针' : '面板' }}至 v{{ latestReleaseVersion }}
-          </button>
         </div>
       </div>
       <div v-else-if="isProbeHost(hostUpdateTarget)" class="host-update-warning-banner">
