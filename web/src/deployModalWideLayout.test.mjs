@@ -89,7 +89,8 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.field-item {\n  display: grid;\n  align-content: start;'), 'Must align field-item content to start to prevent input misalignment')
   assert.ok(cssSource.includes('.field-grid-2 {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  align-items: start;'), 'Must align field-grid-2 items to start')
   assert.ok(cssSource.includes('.field-label-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  min-height: 22px;'), 'Must standardize field-label-row min-height')
-  assert.ok(cssSource.includes('.field-foot-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  min-height: 22px;'), 'Must standardize field-foot-row for symmetry')
+  assert.ok(cssSource.includes('.field-foot-row {\n  display: flex !important;\n  align-items: center !important;\n  justify-content: space-between !important;\n  gap: 8px !important;\n  min-height: 22px !important;'), 'Must standardize field-foot-row for symmetry')
+  assert.ok(cssSource.includes('.modal-card label.port-auto-allow-label'), 'Must override .modal-card label for port-auto-allow-label')
   assert.ok(cssSource.includes('.port-auto-allow-label'), 'Must style port-auto-allow-label')
 
   // Device fleet grid and tools
