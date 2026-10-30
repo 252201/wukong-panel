@@ -2078,7 +2078,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   color: var(--muted);
 }
 .update-notes-body {
-  max-height: 220px;
+  max-height: 200px;
   overflow-y: auto;
   padding: 14px 18px;
   background: rgba(var(--wash-rgb), 0.025);
