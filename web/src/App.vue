@@ -30,6 +30,8 @@ import {
   getProbeUpdateCommand,
   getPanelUpdateCommand,
   getSingBoxUpdateCommand,
+  getShortPanelUpdateCommand,
+  getShortSingBoxUpdateCommand,
   type ReleaseInfo
 } from './versionCheck'
 
@@ -2956,8 +2958,8 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <div class="cli-ref-item">
                   <span>重置管理员密码</span>
                   <div class="cli-cmd-row">
-                    <code>install.sh --reset-password</code>
-                    <button type="button" class="mini-copy-btn" @click="copy('curl -fsSL https://github.com/252201/wukong-panel/releases/latest/download/install.sh | sudo sh -s -- --reset-password')">复制</button>
+                    <code>sudo wukongctl reset-password</code>
+                    <button type="button" class="mini-copy-btn" @click="copy('sudo wukongctl reset-password')">复制</button>
                   </div>
                 </div>
                 <div class="cli-ref-item">
@@ -3610,7 +3612,23 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <h4>{{ isProbeHost(hostUpdateTarget) ? '远端终端升级命令（备选）' : '服务器终端升级命令（备选）' }}</h4>
           <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
         </div>
-        <div class="update-command-box">
+        <div v-if="!isProbeHost(hostUpdateTarget)" class="update-command-list">
+          <div class="update-command-row">
+            <span class="cmd-tag">极简推荐</span>
+            <code>{{ getShortPanelUpdateCommand() }}</code>
+            <button type="button" class="mini-btn primary" @click="copy(getShortPanelUpdateCommand())">
+              📋 复制
+            </button>
+          </div>
+          <div class="update-command-row fallback">
+            <span class="cmd-tag">通用脚本</span>
+            <code>{{ hostUpdateCommand(hostUpdateTarget) }}</code>
+            <button type="button" class="mini-btn" @click="copyHostUpdateCommand(hostUpdateTarget)">
+              复制脚本
+            </button>
+          </div>
+        </div>
+        <div v-else class="update-command-box">
           <code>{{ hostUpdateCommand(hostUpdateTarget) }}</code>
           <button type="button" class="mini-btn primary" @click="copyHostUpdateCommand(hostUpdateTarget)">
             📋 复制命令
@@ -3769,14 +3787,24 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <!-- 终端升级命令备选区 -->
       <div v-if="singBoxUpdateJob?.status !== 'success'" class="host-update-command-section">
         <div class="update-command-header">
-          <h4>服务器终端一键升级命令</h4>
+          <h4>服务器终端升级命令（备选）</h4>
           <small>如需在终端手动执行，请登录目标机器以 <code>root</code> 执行：</small>
         </div>
-        <div class="update-command-box">
-          <code>{{ getSingBoxUpdateCommand() }}</code>
-          <button type="button" class="mini-btn primary" @click="copySingBoxUpdateCommand">
-            📋 复制命令
-          </button>
+        <div class="update-command-list">
+          <div class="update-command-row">
+            <span class="cmd-tag">极简推荐</span>
+            <code>{{ getShortSingBoxUpdateCommand() }}</code>
+            <button type="button" class="mini-btn primary" @click="copy(getShortSingBoxUpdateCommand())">
+              📋 复制
+            </button>
+          </div>
+          <div class="update-command-row fallback">
+            <span class="cmd-tag">通用脚本</span>
+            <code>{{ getSingBoxUpdateCommand() }}</code>
+            <button type="button" class="mini-btn" @click="copySingBoxUpdateCommand">
+              复制脚本
+            </button>
+          </div>
         </div>
       </div>
 
