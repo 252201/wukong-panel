@@ -35,6 +35,8 @@ type Node struct {
 	ProbeTarget     string    `json:"probeTarget,omitempty"`
 	ProbeError      string    `json:"probeError,omitempty"`
 	ProbeCheckedAt  time.Time `json:"probeCheckedAt,omitempty"`
+	TrafficBytes      int64     `json:"trafficBytes"`
+	TotalTrafficBytes int64     `json:"totalTrafficBytes,omitempty"`
 	Secret          string    `json:"-"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`

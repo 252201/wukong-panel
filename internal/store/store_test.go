@@ -493,3 +493,91 @@ func TestSaveSettingsExpiresAt(t *testing.T) {
 		t.Fatalf("expected empty expiresAt, got %q", cleared.ExpiresAt)
 	}
 }
+
+func TestNodesCumulativeTraffic(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "traffic_nodes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := t.Context()
+	nodeA := model.Node{
+		ID:             "node-a",
+		Name:           "Node Alpha",
+		Protocol:       "hysteria2",
+		Mode:           "prefer_v6",
+		ListenPort:     52001,
+		Server:         "a.example.com",
+		Domain:         "a.example.com",
+		ServiceName:    "sing-box-a",
+		ServiceManager: "systemd",
+		ConfigPath:     "/etc/s-box/a.json",
+		ConfigVersion:  "1.14.4",
+		Ownership:      "managed",
+		Status:         "active",
+	}
+	nodeB := model.Node{
+		ID:             "node-b",
+		Name:           "Node Beta",
+		Protocol:       "vless-ws-tunnel",
+		Mode:           "prefer_v6",
+		ListenPort:     52002,
+		Server:         "b.example.com",
+		Domain:         "b.example.com",
+		ServiceName:    "sing-box-b",
+		ServiceManager: "systemd",
+		ConfigPath:     "/etc/s-box/b.json",
+		ConfigVersion:  "1.14.4",
+		Ownership:      "managed",
+		Status:         "active",
+	}
+
+	if err := s.UpsertNode(ctx, nodeA, "cipher-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertNode(ctx, nodeB, "cipher-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Unix()
+	if err := s.ReplaceEndpointWindow(now, 10*time.Second, []EndpointWindowSample{
+		{NodeID: nodeA.ID, NodeName: nodeA.Name, Endpoint: "1.1.1.1:443", Bytes: 1250000},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := s.Nodes(ctx)
+	if err != nil {
+		t.Fatalf("Nodes() failed: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+
+	byID := make(map[string]model.Node)
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+
+	if byID[nodeA.ID].TrafficBytes != 1250000 {
+		t.Errorf("Node A TrafficBytes: expected 1250000, got %d", byID[nodeA.ID].TrafficBytes)
+	}
+	if byID[nodeA.ID].TotalTrafficBytes != 1250000 {
+		t.Errorf("Node A TotalTrafficBytes: expected 1250000, got %d", byID[nodeA.ID].TotalTrafficBytes)
+	}
+	if byID[nodeB.ID].TrafficBytes != 0 {
+		t.Errorf("Node B TrafficBytes: expected 0, got %d", byID[nodeB.ID].TrafficBytes)
+	}
+	if byID[nodeB.ID].TotalTrafficBytes != 0 {
+		t.Errorf("Node B TotalTrafficBytes: expected 0, got %d", byID[nodeB.ID].TotalTrafficBytes)
+	}
+
+	singleA, err := s.Node(ctx, nodeA.ID, false)
+	if err != nil {
+		t.Fatalf("Node(nodeA) failed: %v", err)
+	}
+	if singleA.TrafficBytes != 1250000 {
+		t.Errorf("single Node A TrafficBytes: expected 1250000, got %d", singleA.TrafficBytes)
+	}
+}

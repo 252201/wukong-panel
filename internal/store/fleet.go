@@ -106,6 +106,8 @@ func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat
 						existing.Nodes[index].ProbeExitIP = state.ProbeExitIP
 						existing.Nodes[index].ProbeError = state.ProbeError
 						existing.Nodes[index].ProbeCheckedAt = state.ProbeCheckedAt
+						existing.Nodes[index].TrafficBytes = state.TrafficBytes
+						existing.Nodes[index].TotalTrafficBytes = state.TotalTrafficBytes
 					}
 				}
 				heartbeat.Snapshot = existing
