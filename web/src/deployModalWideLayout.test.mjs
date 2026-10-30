@@ -48,6 +48,10 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(vueSource.includes('@click="autoAssignSequentialPorts()"'), 'Must support autoAssignSequentialPorts')
   assert.ok(vueSource.includes('const hasDevicePortDuplicate = computed('), 'Must compute hasDevicePortDuplicate')
 
+  // Advanced network settings
+  assert.ok(!vueSource.includes('自动跟随 IP 变化'), 'Must hide 自动跟随 IP 变化 toggle')
+  assert.ok(vueSource.includes('autoBind: false'), 'Must default autoBind to false')
+
   // Footer status bar
   assert.ok(vueSource.includes('class="node-form-foot"'), 'Must have node-form-foot footer')
   assert.ok(vueSource.includes('class="node-form-status-bar"'), 'Must have status chips bar in footer')
