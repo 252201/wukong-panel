@@ -26,6 +26,12 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(vueSource.includes('class="form-section-card egress-section"'), 'Must render egress section card')
   assert.ok(vueSource.includes('class="advanced-network-box"'), 'Must render advanced-network-box subcard')
 
+  // Tunnel specific fields layout and streamlined guide
+  assert.ok(vueSource.includes('v-model="createForm.webSocketPath"'), 'Must have webSocketPath input')
+  assert.ok(vueSource.includes('v-model="createForm.preferredServer"'), 'Must have preferredServer input')
+  assert.ok(!vueSource.includes('preferred-endpoint-field'), 'Must not use preferred-endpoint-field special box')
+  assert.ok(vueSource.includes('在 Published application 把 Service URL 设为 <code>http://127.0.0.1:端口</code>。'), 'Must streamline step 2 guide to a single line')
+
   // Port random generator and conflict pre-flight
   assert.ok(vueSource.includes('class="mini-dice-btn"'), 'Must provide mini-dice-btn for quick random port')
   assert.ok(vueSource.includes('@click="pickRandomAvailablePort"'), 'Must bind click to pickRandomAvailablePort')
@@ -72,6 +78,7 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.form-section-card'), 'Must style section card')
   assert.ok(cssSource.includes('.mini-dice-btn'), 'Must style dice button')
   assert.ok(cssSource.includes('.port-conflict-hint'), 'Must style port conflict warning')
+  assert.ok(!cssSource.includes('.preferred-endpoint-field {'), 'Must remove obsolete .preferred-endpoint-field styles')
   assert.ok(cssSource.includes('.field-item {\n  display: grid;\n  align-content: start;'), 'Must align field-item content to start to prevent input misalignment')
   assert.ok(cssSource.includes('.field-grid-2 {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  align-items: start;'), 'Must align field-grid-2 items to start')
   assert.ok(cssSource.includes('.field-label-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  min-height: 22px;'), 'Must standardize field-label-row min-height')
