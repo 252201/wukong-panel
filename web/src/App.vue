@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, componentUpdateAPI, getIPReputation, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, componentUpdateAPI, getIPReputation, hostSecurityAPI, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type FirewallState, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import { startComponentUpdateJob, refreshComponentUpdateJob, pendingComponentUpdateJob } from './componentUpdateJobs'
+import { formatRelativeTime, formatFullDateTime } from './timeFormat'
+import { securityRuleMatchesProtocol } from './securityRules'
 import ThemePicker from './ThemePicker.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import ComponentUpdatePanel from './ComponentUpdatePanel.vue'
@@ -127,7 +129,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -192,6 +194,15 @@ const probeJobs = reactive<Record<string, string>>({})
 const batchProbing = ref(false)
 const batchProbeProgress = reactive({ completed: 0, total: 0, success: 0, failed: 0 })
 const activeNodes = computed(() => nodes.value.filter(n => n.status === 'active'))
+const hostFirewall = ref<FirewallState | null>(null)
+const diagnosticNode = ref<NodeItem | null>(null)
+
+watch(nodes, (newNodes) => {
+  if (diagnosticNode.value) {
+    const updated = newNodes.find(n => n.id === diagnosticNode.value?.id)
+    if (updated) diagnosticNode.value = updated
+  }
+})
 
 const words = {
   'zh-CN': { fleet: '舰队', overview: '总览', nodes: '节点', traffic: '流量', system: '系统', security: '安全', jobs: '任务日志', settings: '设置', deploy: '部署节点', import: '接管节点', online: '在线', offline: '离线' },
@@ -470,13 +481,107 @@ function probeTime(value?: string) {
 function probeDetail(node: NodeItem) {
   const state = probeState(node)
   if (state === 'running') return node.protocol === 'vless-ws-tunnel' ? '正在验证 Cloudflare TLS、WebSocket、认证与代理出站' : '正在验证握手、认证与代理出站'
-  if (state === 'success') return `${node.probeLatencyMs || 0} ms${node.probeExitIp ? ` · ${node.probeExitIp}` : ''}${probeTime(node.probeCheckedAt) ? ` · ${probeTime(node.probeCheckedAt)}` : ''}`
-  if (state === 'failed') return node.probeError || '完整代理请求未通过'
+  const relTime = formatRelativeTime(node.probeCheckedAt, Date.now(), language.value)
+  if (state === 'success') return `${node.probeLatencyMs || 0} ms${node.probeExitIp ? ` · ${node.probeExitIp}` : ''}${relTime ? ` · ${relTime}` : ''}`
+  if (state === 'failed') return `${node.probeError || '完整代理请求未通过'}${relTime ? ` · ${relTime}` : ''}`
   return node.protocol === 'vless-ws-tunnel' ? 'CF TLS · WebSocket · 认证 · 出站' : '握手 · 认证 · 出站'
 }
 function nodePublicPort(node: NodeItem) { return node.protocol === 'vless-ws-tunnel' ? 443 : node.listenPort }
 function tunnelOrigin(node: NodeItem) { return `http://127.0.0.1:${node.listenPort}` }
 function nodeDialServer(node: NodeItem) { return node.protocol === 'vless-ws-tunnel' && node.preferredServer ? node.preferredServer : node.server || node.domain }
+function nodeRate(nodeId: string): number {
+  const dev = overview.value?.devices?.find(d => d.nodeId === nodeId)
+  return dev?.rateBps || 0
+}
+function openDiagnostic(node: NodeItem) {
+  diagnosticNode.value = node
+  modal.value = 'diagnostic'
+}
+async function fetchFirewallStatus() {
+  try {
+    const cached = securityStatusCache.read(selectedHostId.value, 'firewall')
+    if (cached) {
+      hostFirewall.value = cached
+      return
+    }
+    const client = hostSecurityAPI(selectedHostId.value)
+    const fw = await securityStatusCache.refresh(selectedHostId.value, 'firewall', '', () => client.firewall())
+    hostFirewall.value = fw
+  } catch {
+    // Graceful fallback if security/firewall endpoint is unavailable
+  }
+}
+function nodeFirewallStatus(node: NodeItem) {
+  const isEn = language.value === 'en-US'
+  if (node.protocol === 'vless-ws-tunnel') {
+    return {
+      status: 'tunnel',
+      label: isEn ? 'Tunnel Loopback' : '免开公网端口',
+      class: 'tunnel',
+      clickable: false,
+      title: isEn
+        ? 'Cloudflare Tunnel connects via outbound WebSocket, requiring no open public inbound ports.'
+        : 'Cloudflare Tunnel 走本地回环出站连接，无需在 VPS 主机或安全组开放公网入站端口。'
+    }
+  }
+
+  const fw = hostFirewall.value
+  if (!fw) {
+    return {
+      status: 'unknown',
+      label: isEn ? 'Firewall: —' : '防火墙检测',
+      class: 'unknown',
+      clickable: true,
+      title: isEn
+        ? 'Click to manage firewall rules in Security tab.'
+        : '点击前往安全板块查看主机防火墙规则与配置。'
+    }
+  }
+
+  if (!fw.active) {
+    return {
+      status: 'disabled',
+      label: isEn ? 'Firewall Off' : '防火墙未启用',
+      class: 'idle',
+      clickable: true,
+      title: isEn
+        ? 'Host firewall is inactive. Inbound ports are open directly (ensure cloud security group allows traffic).'
+        : '主机未启用系统防火墙，所有入站端口直通（仍需确保云厂商安全组放行）。'
+    }
+  }
+
+  const transport = protocolInfo(node.protocol).transport.toLowerCase()
+  const port = node.listenPort
+  const isAllowed = fw.rules && fw.rules.some(rule =>
+    rule.action === 'allow' &&
+    (rule.source === 'any' || !rule.source) &&
+    securityRuleMatchesProtocol(rule, transport) &&
+    rule.portFrom <= port &&
+    rule.portTo >= port
+  )
+
+  if (isAllowed) {
+    return {
+      status: 'allowed',
+      label: isEn ? 'Port Allowed' : '端口已放行',
+      class: 'allowed',
+      clickable: true,
+      title: isEn
+        ? `Host firewall allows inbound traffic to ${port}/${transport.toUpperCase()}.`
+        : `主机防火墙已放行 ${port}/${transport.toUpperCase()} 入站端口。`
+    }
+  }
+
+  return {
+    status: 'blocked',
+    label: isEn ? 'Port Not Allowed' : '端口待放行',
+    class: 'warning',
+    clickable: true,
+    title: isEn
+      ? `Host firewall has not allowed port ${port}/${transport.toUpperCase()}. External clients may be blocked. Click to manage.`
+      : `主机防火墙尚未放行 ${port}/${transport.toUpperCase()}，外部客户端可能无法连接。点击前往安全板块一键放行。`
+  }
+}
 function setTimelineRange(range: 'today' | 'billing') {
   timelineRange.value = range
   activeTimelineBucket.value = null
@@ -562,6 +667,8 @@ async function switchFleetHost(hostId: string) {
   if (fleetHosts.value.some(host => host.id === hostId && isProbeHost(host))) return
   selectedHostId.value = hostId
   setFleetHost(hostId)
+  hostFirewall.value = null
+  void fetchFirewallStatus()
   if (page.value === 'settings') settingsDraftDirty.value = false
   residentialFormHydrated.value = false
   socksFormHydrated.value = false
@@ -1829,6 +1936,7 @@ function toggleThemePreference() {
 async function refreshAll() {
   const [overviewData, nodeData, jobData, settingData, endpointData, timelineData, exitData, socksData] = await Promise.all([api.overview(), api.nodes(), api.jobs(), api.settings(), api.endpoints(), api.timeline(), api.residentialExit().catch(() => null), api.socksExit().catch(() => null)])
   overview.value = overviewData; nodes.value = nodeData; jobs.value = jobData; endpoints.value = endpointData; timeline.value = timelineData
+  void fetchFirewallStatus()
   if (!settingsDraftDirty.value) {
     syncingSettingsDraft = true
     try { settings.value = { ...settingData, expiresAt: settingData.expiresAt || '' }; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN' }
@@ -2329,7 +2437,7 @@ let releaseCheckTick = 0
 let stopObservingTheme = () => {}
 let stopLocalizing = () => {}
 const onWindowFocus = () => { if (authenticated.value && !mustChange.value) checkLatestRelease().catch(() => {}) }
-onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); activeEffectiveTheme.value = effectiveTheme(themePreference.value); stopObservingTheme = observeSystemTheme(() => themePreference.value, next => { activeEffectiveTheme.value = next }); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); await bootstrap(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
+onMounted(async () => { applyLocale(language.value, false); stopLocalizing = createDocumentLocalizer(() => language.value); applyThemePreference(themePreference.value, false); activeEffectiveTheme.value = effectiveTheme(themePreference.value); stopObservingTheme = observeSystemTheme(() => themePreference.value, next => { activeEffectiveTheme.value = next }); updateDeviceLimit(); window.addEventListener('resize', updateDeviceLimit); window.addEventListener('focus', onWindowFocus); await bootstrap(); void fetchFirewallStatus(); setTimelineRange('today'); timer = window.setInterval(() => { if (authenticated.value && !mustChange.value && !busy.value) { refreshFleetStatus().catch(() => {}); if (page.value !== 'fleet' && page.value !== 'security') refreshAll().catch(() => {}); releaseCheckTick++; if (releaseCheckTick % 30 === 0) checkLatestRelease().catch(() => {}) } }, 10_000) })
 onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInterval(timer); if (singBoxPollTimer) clearTimeout(singBoxPollTimer); window.removeEventListener('resize', updateDeviceLimit); window.removeEventListener('focus', onWindowFocus) })
 </script>
 
@@ -2705,9 +2813,36 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </div>
         <section class="node-grid">
           <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel', preferred: !!node.preferredServer }]">
-            <div class="node-top"><span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span><div class="node-state"><i></i>{{ node.status === 'active' ? '运行中' : node.status === 'inactive' ? '已停止' : '未知' }}</div></div>
+            <div class="node-top">
+              <div class="node-top-left">
+                <span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span>
+                <span
+                  v-if="node.status === 'active'"
+                  class="node-rate-badge"
+                  :class="{ active: nodeRate(node.id) > 0 }"
+                  :title="nodeRate(node.id) > 0 ? (language === 'en-US' ? `Real-time rate: ${rate(nodeRate(node.id))}` : `当前窗口下行速率: ${rate(nodeRate(node.id))}`) : (language === 'en-US' ? 'Idle: No active traffic' : '当前节点无实时流量')"
+                >
+                  <i class="rate-dot"></i>
+                  <span class="rate-val">{{ nodeRate(node.id) > 0 ? rate(nodeRate(node.id)) : '0 B/s' }}</span>
+                </span>
+              </div>
+              <div class="node-state"><i></i>{{ node.status === 'active' ? (language === 'en-US' ? 'Running' : '运行中') : node.status === 'inactive' ? (language === 'en-US' ? 'Stopped' : '已停止') : (language === 'en-US' ? 'Unknown' : '未知') }}</div>
+            </div>
             <div class="node-title-row"><h3>{{ node.name }}</h3><button v-if="node.ownership === 'managed'" type="button" title="重新编辑节点" :aria-label="`重新编辑节点 ${node.name}`" :disabled="mutationsDisabled" @click="openEdit(node)">编辑</button></div>
-            <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
+            <div class="endpoint-row">
+              <p class="endpoint">{{ nodeDialServer(node) || '未设置出口域名' }}<b>:{{ nodePublicPort(node) }}</b><small> / {{ protocolInfo(node.protocol).transport }}</small></p>
+              <span
+                class="node-fw-badge"
+                :class="nodeFirewallStatus(node).class"
+                :title="nodeFirewallStatus(node).title"
+                :role="nodeFirewallStatus(node).clickable ? 'button' : undefined"
+                :tabindex="nodeFirewallStatus(node).clickable ? 0 : undefined"
+                @click="nodeFirewallStatus(node).clickable ? navigateTo('security') : null"
+              >
+                <i class="fw-dot"></i>
+                <span>{{ nodeFirewallStatus(node).label }}</span>
+              </span>
+            </div>
             <div v-if="node.protocol === 'vless-ws-tunnel'" class="tunnel-route-box">
               <div v-if="node.preferredServer" class="tunnel-route-row">
                 <div class="route-item"><small>{{ language === 'en-US' ? 'Preferred' : '优选' }}</small><code :title="node.preferredServer">{{ node.preferredServer }}</code></div>
@@ -2724,7 +2859,24 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <span :title="language === 'en-US' ? `Service: ${node.serviceManager} · Core: sing-box ${overview?.singBoxVersion || node.configVersion || '—'}` : `服务管理: ${node.serviceManager} · 核心版本: sing-box ${overview?.singBoxVersion || node.configVersion || '—'}`"><small>{{ language === 'en-US' ? 'Ownership' : '管理归属' }}</small><b>{{ node.ownership === 'imported' ? (language === 'en-US' ? 'Imported' : '外部接管') : (language === 'en-US' ? 'Managed' : '原生托管') }}</b></span>
             </div>
             <p v-if="node.sharedGroup" class="shared-note">⌁ {{ node.ownership === 'managed' ? (node.protocol === 'vless-ws-tunnel' ? '设备编队 · 独立入站，共享 sing-box 与 Tunnel 连接器' : '设备编队 · 独立入站，共享一个 sing-box 进程') : '与同配置内其他端点共享生命周期' }}</p>
-            <div class="probe-strip" :class="probeState(node)" :title="probeDetail(node)" aria-live="polite"><i></i><span><b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b><small>{{ probeDetail(node) }}</small></span></div>
+            <div
+              class="probe-strip clickable"
+              :class="probeState(node)"
+              :title="`${probeDetail(node)}（点击查看详细闭环诊断）`"
+              role="button"
+              tabindex="0"
+              aria-label="查看闭环诊断详情"
+              @click="openDiagnostic(node)"
+              @keydown.enter.prevent="openDiagnostic(node)"
+              @keydown.space.prevent="openDiagnostic(node)"
+            >
+              <i></i>
+              <span>
+                <b>{{ probeState(node) === 'running' ? '闭环检测中' : probeState(node) === 'success' ? '闭环正常' : probeState(node) === 'failed' ? '检测失败' : '尚未检测' }}</b>
+                <small>{{ probeDetail(node) }}</small>
+              </span>
+              <em class="probe-diag-hint" aria-hidden="true">诊断 ↗</em>
+            </div>
             <div class="node-actions"><button :disabled="mutationsDisabled" @click="revealShare(node)">分享</button><button class="probe-button" :disabled="mutationsDisabled || node.status !== 'active' || probeState(node) === 'running' || batchProbing" :title="node.status !== 'active' ? '请先启动节点' : node.protocol === 'vless-ws-tunnel' ? '验证 Cloudflare TLS、WebSocket、认证和代理出站' : '验证握手、认证和代理出站'" @click="probeNode(node)">{{ probeState(node) === 'running' ? '检测中' : '检测' }}</button><button :disabled="mutationsDisabled" @click="nodeAction(node, 'check')">校验</button><button v-if="node.status === 'active'" :disabled="mutationsDisabled" @click="nodeAction(node, 'restart')">重启</button><button v-else :disabled="mutationsDisabled" @click="nodeAction(node, 'start')">启动</button><button class="danger" :disabled="mutationsDisabled" @click="nodeAction(node, 'delete')">删除</button></div>
           </article>
           <button class="add-node-card" :disabled="mutationsDisabled" @click="openCreate"><span>＋</span><b>部署新节点</b><small>七协议 · 自动生成安全凭据</small></button>
@@ -4083,6 +4235,147 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     </div>
     <form v-else-if="modal === 'residential-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeResidentialExit"><span class="modal-seal red">撤</span><p class="eyebrow">RESIDENTIAL EGRESS REMOVAL</p><h2>移除落地出口？</h2><p>这会停止 A 机的落地出口隧道，删除本机 WireGuard 配置、fail-closed 策略路由和保存的 A 机密钥。</p><div class="residential-remove-impact"><article><b>A 机</b><span>隧道、策略路由与本机密钥将移除</span></article><article><b>B 机</b><span>配置不会远程删除，之后需运行 <code>--remove-residential-peer</code></span></article></div><p v-if="residentialNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用落地出口：{{ residentialNodesInUse.map(node => node.name).join('、') }}。请先将它们切回 A 机本地直出。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="residentialRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="residentialBusy" @click="modal = null">保留落地出口</button><button class="danger-button" :disabled="residentialBusy || residentialRemoveConfirm !== 'REMOVE' || residentialNodesInUse.length > 0">{{ residentialBusy ? '正在移除…' : '确认移除' }}</button></div></form>
     <form v-else-if="modal === 'socks-remove'" class="modal-card compact danger-modal residential-remove-modal" @submit.prevent="removeSOCKSExit"><span class="modal-seal red">撤</span><p class="eyebrow">SOCKS EGRESS REMOVAL</p><h2>移除 SOCKS 出站？</h2><p>这会删除 Root Agent 加密保存的 SOCKS 服务器与认证信息，不会修改上游代理。</p><p v-if="socksNodesInUse.length" class="residential-remove-blocked"><b>暂时无法移除</b><span>以下节点仍在使用 SOCKS 出站：{{ socksNodesInUse.map(node => node.name).join('、') }}。请先将它们切回其他出口。</span></p><label>输入 <code>REMOVE</code> 确认<input v-model="socksRemoveConfirm" autocomplete="off" spellcheck="false" placeholder="REMOVE" autofocus required></label><div class="modal-actions"><button type="button" class="secondary" :disabled="socksBusy" @click="modal = null">保留 SOCKS 出站</button><button class="danger-button" :disabled="socksBusy || socksRemoveConfirm !== 'REMOVE' || socksNodesInUse.length > 0">{{ socksBusy ? '正在移除…' : '确认移除' }}</button></div></form>
+    <div v-else-if="modal === 'diagnostic' && diagnosticNode" class="modal-card wide diagnostic-modal" role="dialog" aria-modal="true" @keydown.esc.prevent="modal = null">
+      <button type="button" class="modal-close" aria-label="关闭" @click="modal = null">×</button>
+      <div class="diagnostic-modal-head">
+        <span class="modal-seal" :class="probeState(diagnosticNode) === 'success' ? 'jade' : probeState(diagnosticNode) === 'failed' ? 'red' : ''">
+          {{ probeState(diagnosticNode) === 'success' ? '通' : probeState(diagnosticNode) === 'failed' ? '断' : '测' }}
+        </span>
+        <div>
+          <p class="eyebrow">NODE PROXY LOOPBACK DIAGNOSTIC</p>
+          <h2>{{ diagnosticNode.name }} 代理闭环诊断</h2>
+          <div class="diagnostic-head-tags">
+            <span class="protocol-badge">{{ protocolInfo(diagnosticNode.protocol).badge }}</span>
+            <span class="diag-status-pill" :class="probeState(diagnosticNode)">
+              <i class="diag-dot"></i>
+              {{ probeState(diagnosticNode) === 'running' ? '闭环检测中' : probeState(diagnosticNode) === 'success' ? '闭环正常' : probeState(diagnosticNode) === 'failed' ? '检测异常' : '未检测' }}
+            </span>
+            <span v-if="diagnosticNode.probeCheckedAt" class="diag-time-pill" :title="formatFullDateTime(diagnosticNode.probeCheckedAt, language)">
+              {{ formatRelativeTime(diagnosticNode.probeCheckedAt, undefined, language) }}
+            </span>
+            <span class="node-rate-badge" :class="{ active: nodeRate(diagnosticNode.id) > 0 }">
+              <i class="rate-dot"></i>
+              <span>{{ rate(nodeRate(diagnosticNode.id)) }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagnostic-pipeline">
+        <div class="pipeline-step" :class="{ ok: probeState(diagnosticNode) === 'success', running: probeState(diagnosticNode) === 'running', failed: probeState(diagnosticNode) === 'failed' }">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <b>{{ diagnosticNode.protocol === 'vless-ws-tunnel' ? 'Edge TLS / WebSocket' : '传输握手 & 安全层' }}</b>
+            <small>{{ diagnosticNode.protocol === 'vless-ws-tunnel' ? 'Cloudflare CDN 边缘协商' : `${protocolInfo(diagnosticNode.protocol).transport} 协议握手` }}</small>
+          </div>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">➔</div>
+        <div class="pipeline-step" :class="{ ok: probeState(diagnosticNode) === 'success', running: probeState(diagnosticNode) === 'running', failed: probeState(diagnosticNode) === 'failed' }">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <b>入站凭据鉴权</b>
+            <small>UUID / 密码 / 核心认证</small>
+          </div>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">➔</div>
+        <div class="pipeline-step" :class="{ ok: probeState(diagnosticNode) === 'success', running: probeState(diagnosticNode) === 'running', failed: probeState(diagnosticNode) === 'failed' }">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <b>核心路由出站</b>
+            <small>{{ outboundLabel(diagnosticNode) }}</small>
+          </div>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">➔</div>
+        <div class="pipeline-step" :class="{ ok: probeState(diagnosticNode) === 'success', running: probeState(diagnosticNode) === 'running', failed: probeState(diagnosticNode) === 'failed' }">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <b>探测目标响应</b>
+            <small>{{ diagnosticNode.probeTarget || 'www.cloudflare.com' }}</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagnostic-metrics-grid">
+        <div class="diag-metric-card">
+          <small>往返闭环延迟</small>
+          <strong :class="{ 'latency-good': (diagnosticNode.probeLatencyMs || 0) > 0 && (diagnosticNode.probeLatencyMs || 0) < 300, 'latency-mid': (diagnosticNode.probeLatencyMs || 0) >= 300 }">
+            {{ diagnosticNode.probeLatencyMs ? `${diagnosticNode.probeLatencyMs} ms` : '—' }}
+          </strong>
+          <span>代理端点完整闭环耗时</span>
+        </div>
+        <div class="diag-metric-card">
+          <small>探测目标端点</small>
+          <code>{{ diagnosticNode.probeTarget || 'www.cloudflare.com' }}</code>
+          <span>HTTP/TLS 真实可达性验证</span>
+        </div>
+        <div class="diag-metric-card">
+          <small>落地公网出口 IP</small>
+          <div class="diag-ip-row">
+            <code>{{ diagnosticNode.probeExitIp || '未检测到' }}</code>
+            <button v-if="diagnosticNode.probeExitIp" type="button" class="mini-btn copy-btn" title="复制出口 IP" @click="copy(diagnosticNode.probeExitIp)">复制</button>
+            <button v-if="diagnosticNode.probeExitIp" type="button" class="mini-btn rep-btn" title="查询该 IP 威胁情报与信誉分" @click="openReputationModal(currentFleetHost || undefined, diagnosticNode.probeExitIp)">查信誉</button>
+          </div>
+          <span>经由 sing-box 路由实际出站 IP</span>
+        </div>
+        <div class="diag-metric-card">
+          <small>主机防火墙状态</small>
+          <div class="diag-fw-row">
+            <span class="node-fw-badge" :class="nodeFirewallStatus(diagnosticNode).class">
+              <i class="fw-dot"></i>
+              <span>{{ nodeFirewallStatus(diagnosticNode).label }}</span>
+            </span>
+            <small class="diag-fw-port">{{ diagnosticNode.protocol === 'vless-ws-tunnel' ? '本地回环' : `${diagnosticNode.listenPort}/${protocolInfo(diagnosticNode.protocol).transport}` }}</small>
+          </div>
+          <span>{{ nodeFirewallStatus(diagnosticNode).title }}</span>
+        </div>
+        <div class="diag-metric-card">
+          <small>实时窗口下行速率</small>
+          <strong>{{ rate(nodeRate(diagnosticNode.id)) }}</strong>
+          <span>当前采集窗口流量传输速度</span>
+        </div>
+        <div class="diag-metric-card">
+          <small>最后校验时间</small>
+          <b class="diag-timestamp">{{ diagnosticNode.probeCheckedAt ? formatFullDateTime(diagnosticNode.probeCheckedAt, language) : '尚未检测' }}</b>
+          <span>{{ diagnosticNode.probeCheckedAt ? formatRelativeTime(diagnosticNode.probeCheckedAt, undefined, language) : '点击下方按钮发起检测' }}</span>
+        </div>
+      </div>
+
+      <div v-if="diagnosticNode.probeError" class="diagnostic-error-box" role="alert">
+        <div class="error-head">
+          <span>⚠ 异常诊断报告</span>
+          <button type="button" class="mini-btn copy-btn" @click="copy(diagnosticNode.probeError)">复制错误</button>
+        </div>
+        <code>{{ diagnosticNode.probeError }}</code>
+        <div class="diagnostic-tips">
+          <p><b>排障建议：</b></p>
+          <ul>
+            <li v-if="diagnosticNode.probeError.includes('timeout') || diagnosticNode.probeError.includes('refused') || diagnosticNode.probeError.includes('reset')">
+              检测到网络超时或连接重置：请检查节点服务是否正在运行、主机防火墙（UFW/nftables）或云服务商控制台安全组是否已放行端口。
+            </li>
+            <li v-if="diagnosticNode.probeError.includes('tls') || diagnosticNode.probeError.includes('handshake') || diagnosticNode.probeError.includes('certificate')">
+              检测到 TLS 握手异常：请检查 REALITY 伪装域名证书、SNI 是否有效；或节点证书文件是否过期失效。
+            </li>
+            <li v-if="diagnosticNode.protocol === 'vless-ws-tunnel'">
+              Cloudflare Tunnel 节点：请检查 cloudflared 进程连接状态、隧道 Token 是否有效以及 Cloudflare 优选节点连通性。
+            </li>
+            <li>可点击下方“任务日志”查阅系统详细排错日志。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" @click="modal = null">关闭</button>
+        <button type="button" class="secondary" @click="modal = null; showJobLog()">查看任务日志</button>
+        <button
+          type="button"
+          class="primary"
+          :disabled="mutationsDisabled || diagnosticNode.status !== 'active' || probeState(diagnosticNode) === 'running'"
+          @click="probeNode(diagnosticNode)"
+        >
+          {{ probeState(diagnosticNode) === 'running' ? '正在检测中…' : '⚡ 立即重新检测' }}
+        </button>
+      </div>
+    </div>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></transition>
