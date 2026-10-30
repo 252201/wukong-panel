@@ -56,6 +56,7 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
 
   // Header and switcher tabs
   assert.ok(cssSource.includes('.node-form-top'), 'Must style .node-form-top')
+  assert.ok(cssSource.includes('.modal-card.node-form .modal-close'), 'Must style .modal-card.node-form .modal-close as header item without overlap')
   assert.ok(cssSource.includes('.deploy-mode-tabs'), 'Must style .deploy-mode-tabs')
   assert.ok(cssSource.includes('.deploy-mode-tab.active'), 'Must style active mode tab')
 
