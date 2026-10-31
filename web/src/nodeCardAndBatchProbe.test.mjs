@@ -62,4 +62,8 @@ test('styles.css includes light theme rules and responsive mobile layout', () =>
   assert.ok(cssSource.includes(':root[data-effective-theme="light"] .tunnel-copy-btn'), 'Must define light theme for tunnel-copy-btn')
   // Verify mobile responsive summary-pills is preserved
   assert.ok(cssSource.includes('.summary-pills { display: flex; flex-wrap: wrap; gap: 8px; }'), 'Mobile view must display summary-pills with wrap')
+  // Verify mobile responsive node-card padding and heights eliminate dead bottom space
+  assert.ok(cssSource.includes('.node-card, .node-card.tunnel {\n    min-height: 0;\n    padding: 20px 18px;\n  }'), 'Must adjust node-card padding on mobile to eliminate dead bottom space')
+  assert.ok(cssSource.includes('.node-card h3 {\n    margin: 20px 0 6px;\n  }'), 'Must adjust node-card title margin on mobile')
+  assert.ok(cssSource.includes('.add-node-card {\n    min-height: 140px;\n    padding: 20px;\n  }'), 'Must adjust add-node-card min-height on mobile')
 })
