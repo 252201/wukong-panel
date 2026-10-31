@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/252201/wukong-panel/internal/hostsecurity"
-	"github.com/252201/wukong-panel/internal/model"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"time"
+
+	"github.com/252201/wukong-panel/internal/hostsecurity"
+	"github.com/252201/wukong-panel/internal/model"
 )
 
 func (m *Manager) securityController() *hostsecurity.Controller {
@@ -51,53 +54,144 @@ func (m *Manager) SecurityConfirm(ctx context.Context, id string) (model.Securit
 func (m *Manager) SecurityTransaction(ctx context.Context, id string) (model.SecurityTransaction, error) {
 	return m.securityController().Transaction(id)
 }
+type portRuleSpec struct {
+	Port     int
+	Protocol string
+}
+
+func firewallRuleCoversPort(r model.SecurityRule, port int) (coversTCP bool, coversUDP bool) {
+	if r.Action != "allow" || (r.Source != "any" && r.Source != "") {
+		return false, false
+	}
+	if port < r.PortFrom || port > r.PortTo {
+		return false, false
+	}
+	proto := r.Protocol
+	if proto == "tcp" || proto == "tcp/udp" || proto == "tcp+udp" {
+		coversTCP = true
+	}
+	if proto == "udp" || proto == "tcp/udp" || proto == "tcp+udp" {
+		coversUDP = true
+	}
+	return coversTCP, coversUDP
+}
+
 func (m *Manager) autoAllowFirewallPort(ctx context.Context, port int, protocol string) {
-	if port <= 0 || port > 65535 || m.cfg.Demo || normalizeProtocol(protocol) == protocolVLESSWSTunnel {
+	m.autoAllowFirewallPorts(ctx, []portRuleSpec{{Port: port, Protocol: protocol}})
+}
+
+func (m *Manager) autoAllowFirewallPorts(ctx context.Context, specs []portRuleSpec) {
+	if m.cfg.Demo || len(specs) == 0 {
 		return
 	}
+	valid := make([]portRuleSpec, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Port > 0 && spec.Port <= 65535 && normalizeProtocol(spec.Protocol) != protocolVLESSWSTunnel {
+			valid = append(valid, spec)
+		}
+	}
+	if len(valid) == 0 {
+		return
+	}
+
 	c := m.securityController()
 	f, err := c.Firewall(ctx, "")
 	if err != nil || !f.Installed || !f.Active {
 		return
 	}
-	proto := "tcp"
-	if protocolUsesUDP(protocol) && !protocolUsesTCP(protocol) {
-		proto = "udp"
-	} else if protocolUsesUDP(protocol) && protocolUsesTCP(protocol) {
-		proto = "tcp/udp"
-	}
-	for _, r := range f.Rules {
-		if r.Action == "allow" && (r.Source == "any" || r.Source == "") &&
-			r.PortFrom <= port && r.PortTo >= port &&
-			(r.Protocol == proto || proto == "tcp/udp" && (r.Protocol == "tcp" || r.Protocol == "udp") || (r.Protocol == "tcp/udp" || r.Protocol == "tcp+udp") && (proto == "tcp" || proto == "udp")) {
-			return
+
+	neededByProto := make(map[string][]int)
+	for _, item := range valid {
+		needsTCP := protocolUsesTCP(item.Protocol) || (!protocolUsesUDP(item.Protocol) && !protocolUsesTCP(item.Protocol))
+		needsUDP := protocolUsesUDP(item.Protocol)
+
+		tcpCovered := false
+		udpCovered := false
+		for _, r := range f.Rules {
+			cTCP, cUDP := firewallRuleCoversPort(r, item.Port)
+			if cTCP {
+				tcpCovered = true
+			}
+			if cUDP {
+				udpCovered = true
+			}
+			if (!needsTCP || tcpCovered) && (!needsUDP || udpCovered) {
+				break
+			}
+		}
+
+		tcpNeeded := needsTCP && !tcpCovered
+		udpNeeded := needsUDP && !udpCovered
+
+		if tcpNeeded && udpNeeded {
+			neededByProto["tcp/udp"] = append(neededByProto["tcp/udp"], item.Port)
+		} else if tcpNeeded {
+			neededByProto["tcp"] = append(neededByProto["tcp"], item.Port)
+		} else if udpNeeded {
+			neededByProto["udp"] = append(neededByProto["udp"], item.Port)
 		}
 	}
-	req := model.SecurityRequest{
-		Operation: "add",
-		Zone:      f.Zone,
-		Rule: model.SecurityRule{
-			Action:   "allow",
-			Protocol: proto,
-			PortFrom: port,
-			PortTo:   port,
-			Source:   "any",
-		},
-	}
-	p, err := c.Preview(ctx, "firewall", req)
-	if err != nil {
-		return
-	}
-	req.Revision = p.Revision
-	result, err := c.Apply(ctx, "firewall", req)
-	if err != nil {
-		return
-	}
-	if result.Transaction != nil && result.Transaction.ID != "" {
-		_, _ = c.Confirm(ctx, result.Transaction.ID)
-	}
-	if m.store != nil {
-		_ = m.store.Audit("agent", "security.firewall", "system", fmt.Sprintf("auto-allow port=%d proto=%s", port, proto))
+
+	for proto, ports := range neededByProto {
+		if len(ports) == 0 {
+			continue
+		}
+		sort.Ints(ports)
+		type portRange struct {
+			from int
+			to   int
+		}
+		var ranges []portRange
+		for _, p := range ports {
+			if len(ranges) == 0 {
+				ranges = append(ranges, portRange{from: p, to: p})
+				continue
+			}
+			last := &ranges[len(ranges)-1]
+			if p <= last.to {
+				continue
+			}
+			if p == last.to+1 {
+				last.to = p
+			} else {
+				ranges = append(ranges, portRange{from: p, to: p})
+			}
+		}
+
+		for _, r := range ranges {
+			req := model.SecurityRequest{
+				Operation: "add",
+				Zone:      f.Zone,
+				Rule: model.SecurityRule{
+					Action:   "allow",
+					Protocol: proto,
+					PortFrom: r.from,
+					PortTo:   r.to,
+					Source:   "any",
+				},
+			}
+			p, err := c.Preview(ctx, "firewall", req)
+			if err != nil {
+				continue
+			}
+			req.Revision = p.Revision
+			result, err := c.Apply(ctx, "firewall", req)
+			if err != nil {
+				continue
+			}
+			if result.Transaction != nil && result.Transaction.ID != "" && result.Transaction.Status == "awaiting-confirmation" {
+				_, _ = c.Confirm(ctx, result.Transaction.ID)
+			}
+			if m.store != nil {
+				var portDesc string
+				if r.from == r.to {
+					portDesc = strconv.Itoa(r.from)
+				} else {
+					portDesc = fmt.Sprintf("%d-%d", r.from, r.to)
+				}
+				_ = m.store.Audit("agent", "security.firewall", "system", fmt.Sprintf("auto-allow port=%s proto=%s", portDesc, proto))
+			}
+		}
 	}
 }
 func (s *Server) hostSecurity(w http.ResponseWriter, r *http.Request) {

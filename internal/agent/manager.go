@@ -1056,6 +1056,61 @@ func sameBatchRuntimeSettings(a, b model.NodeCreateRequest) bool {
 	return true
 }
 
+type probeTask struct {
+	index int
+	proto string
+	port  int
+}
+
+func probeInboundsConcurrently(ctx context.Context, tasks []probeTask, probeFn func(ctx context.Context, proto string, port int) error) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	concurrency := 4
+	if len(tasks) < concurrency {
+		concurrency = len(tasks)
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var firstErr error
+
+probeLoop:
+	for _, t := range tasks {
+		select {
+		case <-probeCtx.Done():
+			break probeLoop
+		case sem <- struct{}{}:
+		}
+
+		wg.Add(1)
+		go func(task probeTask) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			if probeCtx.Err() != nil {
+				return
+			}
+			if err := probeFn(probeCtx, task.proto, task.port); err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("device %d local preflight failed: %w", task.index+1, err)
+					cancel()
+				}
+				errMu.Unlock()
+			}
+		}(t)
+	}
+	wg.Wait()
+	if firstErr == nil && probeCtx.Err() != nil && ctx.Err() != nil {
+		firstErr = ctx.Err()
+	}
+	return firstErr
+}
+
 type preparedDeviceNode struct {
 	node         model.Node
 	request      model.NodeCreateRequest
@@ -1132,6 +1187,7 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 		}
 	}
 	if !m.cfg.Demo {
+		model.ReportProgress(ctx, 20, "生成设备配置")
 		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
 			return nil, err
 		}
@@ -1158,17 +1214,26 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 			return nil, err
 		}
 		installedRuntime = true
+		model.ReportProgress(ctx, 50, "启动编队服务")
 		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
 			cleanup()
 			return nil, err
 		}
+		var tasks []probeTask
 		for index, item := range prepared {
-			if item.request.Protocol != protocolVLESS && item.request.Protocol != protocolVLESSWSTunnel && item.request.Protocol != protocolAnyTLS {
-				continue
+			if item.request.Protocol == protocolVLESS || item.request.Protocol == protocolVLESSWSTunnel || item.request.Protocol == protocolAnyTLS {
+				tasks = append(tasks, probeTask{index: index, proto: item.request.Protocol, port: item.node.ListenPort})
 			}
-			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, item.request.Protocol, item.node.ListenPort); probeErr != nil {
+		}
+		if len(tasks) > 0 {
+			model.ReportProgress(ctx, 75, "编队闭环探测")
+			probeErr := probeInboundsConcurrently(ctx, tasks, func(probeCtx context.Context, proto string, port int) error {
+				_, err := singboxconfig.ProbeConfigInbound(probeCtx, m.cfg.SingBoxBin, configPath, proto, port)
+				return err
+			})
+			if probeErr != nil {
 				cleanup()
-				return nil, fmt.Errorf("device %d local preflight failed: %w", index+1, probeErr)
+				return nil, probeErr
 			}
 		}
 		if requests[0].Protocol == protocolVLESSWSTunnel {
@@ -1185,6 +1250,7 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 		}
 	}
 	created := make([]model.Node, 0, len(prepared))
+	var firewallSpecs []portRuleSpec
 	for index, item := range prepared {
 		if err := m.store.UpsertNode(ctx, item.node, item.cipher); err != nil {
 			for _, node := range created {
@@ -1196,8 +1262,12 @@ func (m *Manager) createDeviceGroup(ctx context.Context, requests []model.NodeCr
 		created = append(created, item.node)
 		_ = m.store.Audit("admin", "create_node", item.node.ID, item.node.Name)
 		if item.request.AutoAllowPort {
-			m.autoAllowFirewallPort(ctx, item.node.ListenPort, item.node.Protocol)
+			firewallSpecs = append(firewallSpecs, portRuleSpec{Port: item.node.ListenPort, Protocol: item.node.Protocol})
 		}
+	}
+	if len(firewallSpecs) > 0 {
+		model.ReportProgress(ctx, 90, "放行编队防火墙")
+		m.autoAllowFirewallPorts(ctx, firewallSpecs)
 	}
 	return created, nil
 }
@@ -1288,6 +1358,7 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 		}
 	}
 	if !m.cfg.Demo {
+		model.ReportProgress(ctx, 20, "生成配置")
 		if err := os.MkdirAll(m.cfg.ConfigDir, 0o700); err != nil {
 			return model.Node{}, err
 		}
@@ -1305,8 +1376,12 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 		if err != nil {
 			return model.Node{}, err
 		}
+		model.ReportProgress(ctx, 50, "启动服务")
 		if err = m.installConfig(ctx, configPath, service, manager, payload); err != nil {
 			return model.Node{}, err
+		}
+		if request.Protocol == protocolVLESS || request.Protocol == protocolVLESSWSTunnel || request.Protocol == protocolAnyTLS {
+			model.ReportProgress(ctx, 75, "闭环探测")
 		}
 		if request.Protocol == protocolVLESS {
 			if _, probeErr := singboxconfig.ProbeConfigInbound(ctx, m.cfg.SingBoxBin, configPath, request.Protocol, port); probeErr != nil {
@@ -1366,6 +1441,7 @@ func (m *Manager) createPrepared(ctx context.Context, request model.NodeCreateRe
 	}
 	_ = m.store.Audit("admin", "create_node", node.ID, node.Name)
 	if request.AutoAllowPort {
+		model.ReportProgress(ctx, 90, "放行防火墙")
 		m.autoAllowFirewallPort(ctx, node.ListenPort, node.Protocol)
 	}
 	return node, nil

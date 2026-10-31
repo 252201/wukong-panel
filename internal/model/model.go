@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -493,4 +494,18 @@ type FleetStatus struct {
 	SelectedNodeIDs       map[string][]string `json:"selectedNodeIds,omitempty"`
 	GlobalSubscription    string              `json:"globalSubscription,omitempty"`
 	SubscriptionUpdated   time.Time           `json:"subscriptionUpdated,omitempty"`
+}
+
+type progressReporterKey struct{}
+
+type ProgressReporter func(progress int, message string)
+
+func ContextWithProgress(ctx context.Context, r ProgressReporter) context.Context {
+	return context.WithValue(ctx, progressReporterKey{}, r)
+}
+
+func ReportProgress(ctx context.Context, progress int, message string) {
+	if r, ok := ctx.Value(progressReporterKey{}).(ProgressReporter); ok && r != nil {
+		r(progress, message)
+	}
 }
