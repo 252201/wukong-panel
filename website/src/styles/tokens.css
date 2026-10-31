@@ -34,10 +34,10 @@
   --gold-dim: light-dark(rgba(158, 120, 47, 0.12), rgba(212, 173, 87, 0.1));
   --gold-glow: light-dark(rgba(158, 120, 47, 0.2), rgba(212, 173, 87, 0.25));
 
-  /* Cinnabar Seal & Great Sage Cinnabar Red (大圣朱砂赤) */
-  --cinnabar: light-dark(#d93829, #e05442);
+  /* Cinnabar Seal (朱砂印) */
+  --cinnabar: #c44635;
   --cinnabar-bright: #e05442;
-  --cinnabar-glow: light-dark(rgba(217, 56, 41, 0.3), rgba(224, 84, 66, 0.35));
+  --cinnabar-glow: rgba(196, 70, 53, 0.28);
 
   /* Telemetry Emerald (碧玉遥测) */
   --telemetry-green: light-dark(#059669, #10b981);
