@@ -129,7 +129,8 @@ samp,
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.15em;
-  color: var(--gold-primary);
+  color: var(--cinnabar);
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -140,6 +141,7 @@ samp,
   content: "";
   display: inline-block;
   width: 14px;
-  height: 1px;
-  background: var(--gold-primary);
+  height: 2px;
+  background: var(--cinnabar);
+  border-radius: 1px;
 }
