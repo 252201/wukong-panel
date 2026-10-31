@@ -64,14 +64,14 @@ export class Navbar {
 
         <div class="nav-actions">
           <!-- Audio Haptics Toggle -->
-          <button type="button" class="btn-icon-control btn-audio ${isAudioActive ? 'is-audio-active' : ''}" id="nav-audio-btn" aria-label="${isAudioActive ? (isZh ? '静音' : 'Mute Audio') : (isZh ? '开启音效' : 'Enable Audio')}">
+          <button type="button" class="btn-icon-control btn-audio ${isAudioActive ? 'is-audio-active' : ''}" id="nav-audio-btn" aria-label="${isAudioActive ? (isZh ? '关闭音效' : 'Mute Audio') : (isZh ? '开启音效' : 'Enable Audio')}">
             <span class="sound-wave" aria-hidden="true">
               <span class="sound-bar"></span>
               <span class="sound-bar"></span>
               <span class="sound-bar"></span>
               <span class="sound-bar"></span>
             </span>
-            <span class="nav-btn-label">${isAudioActive ? (isZh ? '音效开启' : 'Sound ON') : (isZh ? '静音' : 'Muted')}</span>
+            <span class="nav-btn-label">${isAudioActive ? (isZh ? '音效：开' : 'Sound: ON') : (isZh ? '音效：关' : 'Sound: OFF')}</span>
           </button>
 
           <!-- Modern Theme Toggle -->

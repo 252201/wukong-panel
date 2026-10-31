@@ -10,9 +10,22 @@ class AudioHapticsEngine {
   private onStateChangeCallbacks: Array<(muted: boolean) => void> = [];
 
   constructor() {
-    // Read persisted preference; default to muted to respect user & browser autoplay policies
-    const stored = localStorage.getItem('wukong-sound-enabled');
-    this.isMuted = stored !== 'true';
+    // Default to enabled (true) unless user explicitly muted ('false')
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('wukong-sound-enabled') : null;
+    this.isMuted = stored === 'false';
+
+    // Hook first user interaction to unlock/resume AudioContext seamlessly on any browser
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        if (!this.isMuted) {
+          this.initContext();
+        }
+        window.removeEventListener('pointerdown', unlockAudio);
+        window.removeEventListener('keydown', unlockAudio);
+      };
+      window.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+      window.addEventListener('keydown', unlockAudio, { once: true, passive: true });
+    }
   }
 
   private initContext() {
