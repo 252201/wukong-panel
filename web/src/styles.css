@@ -672,27 +672,22 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border: 1px solid rgba(212,173,87,.28);
   box-shadow: 0 40px 100px rgba(var(--shadow-rgb),.7), 0 0 0 1px rgba(212,173,87,.08);
 }
-.modal-card.node-form .modal-close {
-  position: static;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
+.node-form-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0 !important;
   flex-shrink: 0;
-  transition: all .16s ease;
 }
-.modal-card.node-form .modal-close:hover {
-  background: rgba(var(--wash-rgb), .08);
-  border-color: rgba(var(--wash-rgb), .12);
-  color: var(--paper);
+.node-form-top-actions button {
+  min-height: 34px;
+  padding: 0 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.node-form-top-actions button.primary {
+  min-width: 96px;
 }
 .node-form-top {
   display: flex;
@@ -1253,40 +1248,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   grid-column: 1 / -1;
 }
 
-/* Footer Action Bar */
-.node-form-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(212,173,87,.15);
-}
-.node-form-status-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.status-chip {
-  padding: 3px 8px;
-  border-radius: 3px;
-  font: 600 10px "IBM Plex Mono", monospace;
-  background: rgba(var(--wash-rgb), .05);
-  border: 1px solid rgba(var(--wash-rgb), .1);
-  color: var(--muted);
-}
-.status-chip.proto-chip {
-  background: rgba(212,173,87,.12);
-  border-color: rgba(212,173,87,.3);
-  color: var(--gold);
-}
-.status-chip.danger-chip {
-  background: rgba(196,70,53,.15);
-  border-color: rgba(196,70,53,.35);
-  color: #ef8b7d;
-}
 
 /* Light Theme Overrides */
 :root[data-effective-theme="light"] .modal-card.node-form {
@@ -1313,11 +1274,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .device-draft-card {
   background: #fcfdfc;
   border-color: rgba(82,182,144,.25);
-}
-:root[data-effective-theme="light"] .modal-card.node-form .modal-close:hover {
-  background: rgba(0, 0, 0, .06);
-  border-color: rgba(0, 0, 0, .1);
-  color: #15120b;
 }
 :root[data-effective-theme="light"] .protocol-note-strip {
   background: #fbfbf9;
@@ -1368,7 +1324,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-areas:
-      "title close"
+      "title actions"
       "tabs tabs";
     gap: 14px;
     align-items: center;
@@ -1376,8 +1332,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .node-form-title-area {
     grid-area: title;
   }
-  .modal-card.node-form .modal-close {
-    grid-area: close;
+  .node-form-top-actions {
+    grid-area: actions;
   }
   .deploy-mode-tabs {
     grid-area: tabs;
@@ -1419,15 +1375,22 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .field-grid-4 > .span-2 {
     grid-column: auto;
   }
-  .node-form-foot {
-    flex-direction: column-reverse;
-    align-items: stretch;
+}
+@media (max-width: 480px) {
+  .node-form-top {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "actions"
+      "tabs";
   }
-  .node-form-foot .modal-actions {
+  .node-form-top-actions {
     width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
   }
-  .node-form-foot .modal-actions button {
-    flex: 1;
+  .node-form-top-actions button {
+    width: 100%;
   }
 }
 .residential-panel { display: grid; gap: 20px; margin-top: 17px; padding: 22px; min-width: 0; max-width: 100%; }
