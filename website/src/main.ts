@@ -33,6 +33,7 @@ function initApp() {
     meta.setAttribute('content', urlTheme);
   }
   document.documentElement.style.colorScheme = resolvedTheme;
+  document.documentElement.setAttribute('data-theme', resolvedTheme);
 
   const initialState: NavState = {
     lang: 'zh',

@@ -12,6 +12,7 @@
         if (stored) {
           document.querySelector('meta[name="color-scheme"]').content = stored;
           document.documentElement.style.colorScheme = stored;
+          document.documentElement.setAttribute('data-theme', stored);
         }
       } catch (e) {}
     </script>

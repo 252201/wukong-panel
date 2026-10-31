@@ -233,8 +233,9 @@ body {
 }
 
 .btn-github {
-  background: var(--gold-primary);
-  color: #fff;
+  background-color: light-dark(#d93829, var(--gold-primary));
+  background-image: var(--github-btn-bg);
+  color: var(--github-btn-color);
   border: none;
   font-weight: 600;
   padding: 0.5rem 1.15rem;
@@ -244,15 +245,16 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  box-shadow: 0 4px 14px var(--gold-glow);
+  box-shadow: var(--github-btn-shadow);
   transition: all 0.25s ease;
 }
 
 .btn-github:hover {
-  background: var(--gold-bright);
-  color: #1a160d;
+  background-color: light-dark(#e44434, var(--gold-bright));
+  background-image: var(--github-btn-hover-bg);
+  color: var(--github-btn-hover-color);
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px var(--gold-glow);
+  box-shadow: var(--github-btn-hover-shadow);
 }
 
 /* 5. Hero Section */
@@ -321,11 +323,9 @@ body {
 }
 
 .btn-primary {
-  background: light-dark(
-    linear-gradient(135deg, #d93829 0%, #b82819 100%),
-    linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%)
-  );
-  color: light-dark(#ffffff, #1a160d);
+  background-color: light-dark(#d93829, var(--gold-primary));
+  background-image: var(--cta-btn-bg);
+  color: var(--cta-btn-color);
   font-weight: 700;
   padding: 0.85rem 1.85rem;
   border-radius: var(--radius-full);
@@ -336,23 +336,15 @@ body {
   gap: 0.6rem;
   border: none;
   cursor: pointer;
-  box-shadow: light-dark(
-    0 4px 20px rgba(217, 56, 41, 0.35),
-    0 4px 20px var(--gold-glow)
-  );
+  box-shadow: var(--cta-btn-shadow);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-primary:hover {
-  background: light-dark(
-    linear-gradient(135deg, #e44434 0%, #c52d1e 100%),
-    linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%)
-  );
+  background-color: light-dark(#e44434, var(--gold-bright));
+  background-image: var(--cta-btn-hover-bg);
   transform: translateY(-2px) scale(1.02);
-  box-shadow: light-dark(
-    0 8px 30px rgba(217, 56, 41, 0.45),
-    0 8px 30px var(--gold-glow)
-  );
+  box-shadow: var(--cta-btn-hover-shadow);
 }
 
 .btn-secondary {
@@ -595,17 +587,19 @@ body {
 }
 
 .protocol-chip.active {
-  background: var(--gold-primary);
-  color: #121008;
+  background-color: light-dark(#d93829, var(--gold-primary));
+  background-image: var(--chip-active-bg);
+  color: var(--chip-active-color);
   font-weight: 700;
-  border-color: var(--gold-bright);
-  box-shadow: 0 2px 10px var(--gold-glow);
+  border-color: var(--chip-active-border);
+  box-shadow: var(--chip-active-shadow);
 }
 
 .protocol-chip.active .badge-mono {
-  background: rgba(18, 16, 8, 0.15);
+  background: var(--chip-active-badge-bg, rgba(18, 16, 8, 0.15));
   color: #121008;
-  border-color: rgba(18, 16, 8, 0.25);
+  color: var(--chip-active-badge-color, #121008);
+  border-color: var(--chip-active-badge-border, rgba(18, 16, 8, 0.25));
   font-weight: 600;
 }
 
@@ -748,11 +742,9 @@ body {
 
 .btn-probe-trigger {
   flex: 1;
-  background: light-dark(
-    linear-gradient(135deg, #d93829 0%, #b82819 100%),
-    var(--gold-primary)
-  );
-  color: light-dark(#ffffff, #121008);
+  background-color: light-dark(#d93829, var(--gold-primary));
+  background-image: var(--cta-btn-bg);
+  color: var(--cta-btn-color);
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 0.75rem 1.25rem;
@@ -763,22 +755,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  box-shadow: light-dark(
-    0 4px 14px rgba(217, 56, 41, 0.3),
-    none
-  );
+  box-shadow: var(--cta-btn-shadow);
   transition: all 0.2s ease;
 }
 
 .btn-probe-trigger:hover {
-  background: light-dark(
-    linear-gradient(135deg, #e44434 0%, #c52d1e 100%),
-    var(--gold-bright)
-  );
-  box-shadow: light-dark(
-    0 6px 20px rgba(217, 56, 41, 0.4),
-    none
-  );
+  background-color: light-dark(#e44434, var(--gold-bright));
+  background-image: var(--cta-btn-hover-bg);
+  box-shadow: var(--cta-btn-hover-shadow);
   transform: translateY(-1px);
 }
 
