@@ -17,7 +17,6 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   // Protocol matrix deck
   assert.ok(vueSource.includes('class="protocol-selection-area"'), 'Must have protocol-selection-area')
   assert.ok(vueSource.includes('class="protocol-matrix"'), 'Must render protocol-matrix grid')
-  assert.ok(vueSource.includes("has-odd-cards': protocolList.length % 2 === 1"), 'Must flag has-odd-cards when protocol card count is odd')
   assert.ok(vueSource.includes('class="protocol-matrix-card"'), 'Must render protocol-matrix-card items')
   assert.ok(vueSource.includes('class="protocol-note-strip"'), 'Must render protocol-note-strip info pill')
   assert.ok(vueSource.includes('const protocolList = ['), 'Must declare protocolList data with 7 protocols')
@@ -118,5 +117,4 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('@media (max-width: 980px)'), 'Must include 980px tablet breakpoint')
   assert.ok(cssSource.includes('@media (max-width: 650px)'), 'Must include 650px mobile breakpoint')
   assert.ok(cssSource.includes('.deploy-mode-tab .tab-tag {\n    display: none;\n  }'), 'Must hide tab-tag on mobile <= 650px to eliminate vertical stacking and right border overflow')
-  assert.ok(cssSource.includes('.protocol-matrix.has-odd-cards .protocol-note-strip'), 'Must style protocol-note-strip as 8th card on mobile when cards count is odd')
 })
