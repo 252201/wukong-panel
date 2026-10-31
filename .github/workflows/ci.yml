@@ -54,7 +54,7 @@ jobs:
       - name: Verify website when present
         run: |
           if [ -d "website" ]; then
-            cd website && npm ci && npm test && npm run build
+            cd website && npm ci && npm run build && npm test
           fi
 
   backend:
