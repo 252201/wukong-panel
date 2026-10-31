@@ -83,6 +83,11 @@ test('Interactive Sandbox Protocols Matrix Completeness', async () => {
   // Must have QR code rendering logic and probe simulation
   assert.match(content, /QRCode\.toCanvas/, 'Must use QRCode.toCanvas');
   assert.match(content, /runSimulatedProbe/, 'Must implement simulated probe execution');
+
+  // Verify high contrast for active protocol chip badge text
+  const mainCssPath = path.join(websiteDir, 'src/styles/main.css');
+  const mainCss = fs.readFileSync(mainCssPath, 'utf8');
+  assert.match(mainCss, /\.protocol-chip\.active\s+\.badge-mono\s*\{[^}]*color:\s*#121008/s, 'Active protocol chip badge text must be dark #121008 for high contrast against gold background');
 });
 
 test('Web Audio API Haptics Engine Definition', () => {
