@@ -144,6 +144,7 @@ export class InteractiveSandbox {
     this.lang = lang;
     this.render();
     this.bindEvents();
+    this.scrollToActiveTab(false);
   }
 
   private resetProbeLogs() {
@@ -157,7 +158,6 @@ export class InteractiveSandbox {
 
   private render() {
     const isZh = this.lang === 'zh';
-    const spec = PROTOCOL_SPECS[this.activeProtocolIndex];
 
     this.element.innerHTML = `
       <div class="container">
@@ -186,149 +186,162 @@ export class InteractiveSandbox {
           </div>
 
           <!-- Main Sandbox Stage -->
-          <div class="sandbox-stage">
-            <!-- Left: Realistic Interactive Node Card -->
-            <div class="sandbox-node-card">
-              <div class="node-card-head">
-                <div class="node-title-group">
-                  <span class="cinnabar-seal">悟</span>
-                  <div>
-                    <div style="font-weight: 700; font-size: 1.15rem; color: var(--text-primary);">${spec.name}</div>
-                    <div class="font-mono text-caption" style="color: var(--text-muted);">${spec.tag}</div>
-                  </div>
-                </div>
-                <div class="node-badge-online">
-                  <span class="hero-pulse-dot" style="width: 6px; height: 6px;"></span>
-                  <span>ONLINE</span>
-                </div>
-              </div>
-
-              <div class="node-specs-grid">
-                <div class="spec-entry">
-                  <span class="spec-key">${isZh ? '入站端口' : 'Inbound Port'}</span>
-                  <span class="spec-value" style="color: var(--gold-bright);">${spec.port}</span>
-                </div>
-                <div class="spec-entry">
-                  <span class="spec-key">${isZh ? '传输协议' : 'Transport'}</span>
-                  <span class="spec-value">${spec.transport}</span>
-                </div>
-                <div class="spec-entry">
-                  <span class="spec-key">${isZh ? '安全伪装' : 'Security Layer'}</span>
-                  <span class="spec-value">${spec.security}</span>
-                </div>
-                <div class="spec-entry">
-                  <span class="spec-key">${isZh ? '流控/认证' : 'Flow / Cipher'}</span>
-                  <span class="spec-value">${spec.flowOrCipher}</span>
-                </div>
-                <div class="spec-entry" style="grid-column: span 2;">
-                  <span class="spec-key">${isZh ? '拥塞算法 / 域名' : 'Congestion / SNI Target'}</span>
-                  <span class="spec-value font-mono" style="font-size: 0.85rem;">${spec.congestionOrSni}</span>
-                </div>
-              </div>
-
-              <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.6; background: var(--bg-primary); padding: 0.85rem 1rem; border-radius: var(--radius-md); border-left: 3px solid var(--gold-primary);">
-                ${isZh ? spec.descZh : spec.descEn}
-              </div>
-
-              <!-- Animated Packet Flow -->
-              <div style="background: var(--bg-primary); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 0.5rem;">
-                  <span>CLIENT [Browser]</span>
-                  <span style="color: var(--telemetry-green);">PACKET ROUTE</span>
-                  <span>VPS EGRESS [sing-box]</span>
-                </div>
-                <div style="position: relative; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
-                  <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); animation: packet-flow 1.5s infinite linear;"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right: Real-Time Diagnostic Terminal Console -->
-            <div class="sandbox-probe-console">
-              <div class="probe-screen">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.6rem;">
-                  <span style="color: #9ca3af; font-size: 0.75rem;">$ wukong-probe --closed-loop --strict</span>
-                  <span class="badge-mono" style="color: var(--telemetry-green); border-color: rgba(16, 185, 129, 0.3);">
-                    ${this.isProbing ? 'PROBING...' : 'LOOPBACK READY'}
-                  </span>
-                </div>
-
-                <div class="probe-log-lines" id="sandbox-probe-logs">
-                  ${this.probeLogs.map((log) => `
-                    <div class="probe-log-line">
-                      <span class="log-timestamp">[${log.time}]</span>
-                      <span style="color: ${log.status === 'pass' ? '#34d399' : log.status === 'diag' ? '#d4ad57' : '#9ca3af'};">${log.text}</span>
-                    </div>
-                  `).join('')}
-                </div>
-
-                <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.6rem; display: flex; justify-content: space-between; font-size: 0.78rem;">
-                  <span style="color: #9ca3af;">Roundtrip: <b style="color: #34d399;">26 ms</b></span>
-                  <span style="color: #9ca3af;">Loss: <b style="color: #34d399;">0.0% (30m)</b></span>
-                  <span style="color: #9ca3af;">Jitter: <b style="color: #34d399;">1.2 ms</b></span>
-                </div>
-              </div>
-
-              <div class="sandbox-controls">
-                <button type="button" class="btn-probe-trigger" id="btn-run-probe" ${this.isProbing ? 'disabled' : ''}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                  </svg>
-                  <span>${this.isProbing ? (isZh ? '正在握手自检...' : 'Probing...') : (isZh ? '⚡ 立即执行闭环自检' : '⚡ Run Handshake Probe')}</span>
-                </button>
-
-                <button type="button" class="btn-share-trigger" id="btn-open-share">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="18" cy="5" r="3"></circle>
-                    <circle cx="6" cy="12" r="3"></circle>
-                    <circle cx="18" cy="19" r="3"></circle>
-                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-                  </svg>
-                  <span>${isZh ? '分享订阅 / QR' : 'Share & QR'}</span>
-                </button>
-              </div>
-            </div>
+          <div class="sandbox-stage" id="sandbox-stage">
+            ${this.getStageHtml()}
           </div>
         </div>
       </div>
 
       <!-- Share & Dark Gold QR Code Modal -->
       <div class="modal-overlay ${this.isShareModalOpen ? 'open' : ''}" id="share-modal" role="dialog" aria-modal="true" aria-label="Share Protocol Subscription">
-        <div class="modal-card">
-          <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
+        ${this.getModalHtml()}
+      </div>
+    `;
+
+    setTimeout(() => {
+      const spec = PROTOCOL_SPECS[this.activeProtocolIndex];
+      this.renderQRCode(spec.sampleUri);
+    }, 10);
+  }
+
+  private getStageHtml(): string {
+    const isZh = this.lang === 'zh';
+    const spec = PROTOCOL_SPECS[this.activeProtocolIndex];
+
+    return `
+      <!-- Left: Realistic Interactive Node Card -->
+      <div class="sandbox-node-card">
+        <div class="node-card-head">
+          <div class="node-title-group">
             <span class="cinnabar-seal">悟</span>
-            <h3 class="text-title-3">${spec.name} ${isZh ? '订阅二维码' : 'Universal QR'}</h3>
-          </div>
-
-          <p class="text-caption">
-            ${isZh ? '可直接使用客户端扫描导入，或复制通用协议 URI 链接' : 'Scan directly with any Sing-box / Clash client, or copy URI string.'}
-          </p>
-
-          <div class="qr-canvas-box">
-            <canvas id="qr-code-canvas" width="220" height="220"></canvas>
-          </div>
-
-          <div style="width: 100%; display: flex; flex-direction: column; gap: 0.75rem;">
-            <input type="text" readonly value="${spec.sampleUri}" class="font-mono text-caption" style="width: 100%; padding: 0.5rem 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); text-overflow: ellipsis;" id="share-uri-input">
-            
-            <div style="display: flex; gap: 0.75rem;">
-              <button type="button" class="btn-primary" style="flex: 1; padding: 0.6rem;" id="btn-copy-uri">
-                <span>${isZh ? '复制链接' : 'Copy URI'}</span>
-              </button>
-              <button type="button" class="btn-secondary" style="padding: 0.6rem 1.25rem;" id="btn-close-modal">
-                <span>${isZh ? '关闭' : 'Close'}</span>
-              </button>
+            <div>
+              <div style="font-weight: 700; font-size: 1.15rem; color: var(--text-primary);">${spec.name}</div>
+              <div class="font-mono text-caption" style="color: var(--text-muted);">${spec.tag}</div>
             </div>
+          </div>
+          <div class="node-badge-online">
+            <span class="hero-pulse-dot" style="width: 6px; height: 6px;"></span>
+            <span>ONLINE</span>
+          </div>
+        </div>
+
+        <div class="node-specs-grid">
+          <div class="spec-entry">
+            <span class="spec-key">${isZh ? '入站端口' : 'Inbound Port'}</span>
+            <span class="spec-value" style="color: var(--gold-bright);">${spec.port}</span>
+          </div>
+          <div class="spec-entry">
+            <span class="spec-key">${isZh ? '传输协议' : 'Transport'}</span>
+            <span class="spec-value">${spec.transport}</span>
+          </div>
+          <div class="spec-entry">
+            <span class="spec-key">${isZh ? '安全伪装' : 'Security Layer'}</span>
+            <span class="spec-value">${spec.security}</span>
+          </div>
+          <div class="spec-entry">
+            <span class="spec-key">${isZh ? '流控/认证' : 'Flow / Cipher'}</span>
+            <span class="spec-value">${spec.flowOrCipher}</span>
+          </div>
+          <div class="spec-entry" style="grid-column: span 2;">
+            <span class="spec-key">${isZh ? '拥塞算法 / 域名' : 'Congestion / SNI Target'}</span>
+            <span class="spec-value font-mono" style="font-size: 0.85rem;">${spec.congestionOrSni}</span>
+          </div>
+        </div>
+
+        <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.6; background: var(--bg-primary); padding: 0.85rem 1rem; border-radius: var(--radius-md); border-left: 3px solid var(--gold-primary);">
+          ${isZh ? spec.descZh : spec.descEn}
+        </div>
+
+        <!-- Animated Packet Flow Runner (Clean Minimalist Stream Track) -->
+        <div style="background: var(--bg-primary); padding: 0.75rem 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="position: relative; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
+            <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); animation: packet-flow 1.5s infinite linear;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Real-Time Diagnostic Terminal Console -->
+      <div class="sandbox-probe-console">
+        <div class="probe-screen">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.6rem;">
+            <span style="color: #9ca3af; font-size: 0.75rem;">$ wukong-probe --closed-loop --strict</span>
+            <span class="badge-mono" style="color: var(--telemetry-green); border-color: rgba(16, 185, 129, 0.3);">
+              ${this.isProbing ? 'PROBING...' : 'LOOPBACK READY'}
+            </span>
+          </div>
+
+          <div class="probe-log-lines" id="sandbox-probe-logs">
+            ${this.probeLogs.map((log) => `
+              <div class="probe-log-line">
+                <span class="log-timestamp">[${log.time}]</span>
+                <span style="color: ${log.status === 'pass' ? '#34d399' : log.status === 'diag' ? '#d4ad57' : '#9ca3af'};">${log.text}</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.6rem; display: flex; justify-content: space-between; font-size: 0.78rem;">
+            <span style="color: #9ca3af;">Roundtrip: <b style="color: #34d399;">26 ms</b></span>
+            <span style="color: #9ca3af;">Loss: <b style="color: #34d399;">0.0% (30m)</b></span>
+            <span style="color: #9ca3af;">Jitter: <b style="color: #34d399;">1.2 ms</b></span>
+          </div>
+        </div>
+
+        <div class="sandbox-controls">
+          <button type="button" class="btn-probe-trigger" id="btn-run-probe" ${this.isProbing ? 'disabled' : ''}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span>${this.isProbing ? (isZh ? '正在握手自检...' : 'Probing...') : (isZh ? '⚡ 立即执行闭环自检' : '⚡ Run Handshake Probe')}</span>
+          </button>
+
+          <button type="button" class="btn-share-trigger" id="btn-open-share">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+            <span>${isZh ? '分享订阅 / QR' : 'Share & QR'}</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private getModalHtml(): string {
+    const isZh = this.lang === 'zh';
+    const spec = PROTOCOL_SPECS[this.activeProtocolIndex];
+
+    return `
+      <div class="modal-card">
+        <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
+          <span class="cinnabar-seal">悟</span>
+          <h3 class="text-title-3">${spec.name} ${isZh ? '订阅二维码' : 'Universal QR'}</h3>
+        </div>
+
+        <p class="text-caption">
+          ${isZh ? '可直接使用客户端扫描导入，或复制通用协议 URI 链接' : 'Scan directly with any Sing-box / Clash client, or copy URI string.'}
+        </p>
+
+        <div class="qr-canvas-box">
+          <canvas id="qr-code-canvas" width="220" height="220"></canvas>
+        </div>
+
+        <div style="width: 100%; display: flex; flex-direction: column; gap: 0.75rem;">
+          <input type="text" readonly value="${spec.sampleUri}" class="font-mono text-caption" style="width: 100%; padding: 0.5rem 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); text-overflow: ellipsis;" id="share-uri-input">
+          
+          <div style="display: flex; gap: 0.75rem;">
+            <button type="button" class="btn-primary" style="flex: 1; padding: 0.6rem;" id="btn-copy-uri">
+              <span>${isZh ? '复制链接' : 'Copy URI'}</span>
+            </button>
+            <button type="button" class="btn-secondary" style="padding: 0.6rem 1.25rem;" id="btn-close-modal">
+              <span>${isZh ? '关闭' : 'Close'}</span>
+            </button>
           </div>
         </div>
       </div>
     `;
-
-    // Render QR Code if modal open or canvas exists
-    setTimeout(() => {
-      this.renderQRCode(spec.sampleUri);
-    }, 10);
   }
 
   private async renderQRCode(text: string) {
@@ -349,22 +362,103 @@ export class InteractiveSandbox {
     }
   }
 
+  /**
+   * Smoothly scrolls the protocol tab bar to position the active tab
+   * and bring subsequent protocols into clear view.
+   */
+  public scrollToActiveTab(smooth: boolean = true) {
+    const bar = this.element.querySelector('.sandbox-protocol-bar') as HTMLElement;
+    if (!bar) return;
+    const activeChip = bar.querySelector(`.protocol-chip[data-idx="${this.activeProtocolIndex}"]`) as HTMLElement;
+    if (!activeChip) return;
+
+    const barRect = bar.getBoundingClientRect();
+    const chipRect = activeChip.getBoundingClientRect();
+    const currentScrollLeft = bar.scrollLeft;
+    // Calculate chip position relative to the scrollable content container
+    const chipLeftInContent = (chipRect.left - barRect.left) + currentScrollLeft;
+    const maxScrollLeft = bar.scrollWidth - bar.clientWidth;
+
+    // Preferred visual offset: position the active chip ~28% from the left edge (up to 260px).
+    // When Shadowsocks 2022 (index 4) or following tabs are selected, this ensures
+    // the subsequent protocols (Trojan TLS, AnyTLS) automatically shift forward and remain visible!
+    const preferredVisualLeft = Math.min(bar.clientWidth * 0.28, 260);
+    const targetScrollLeft = chipLeftInContent - preferredVisualLeft;
+    const clampedScrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft));
+
+    bar.scrollTo({
+      left: clampedScrollLeft,
+      behavior: smooth ? 'smooth' : 'auto'
+    });
+  }
+
+  private selectProtocol(idx: number, smooth: boolean = true) {
+    if (idx === this.activeProtocolIndex) return;
+    this.activeProtocolIndex = idx;
+    this.resetProbeLogs();
+
+    // 1. Update chip buttons active states without destroying the tab bar DOM or losing scroll
+    const chips = this.element.querySelectorAll<HTMLButtonElement>('.protocol-chip');
+    chips.forEach((chip) => {
+      const chipIdx = Number(chip.getAttribute('data-idx'));
+      const isActive = chipIdx === this.activeProtocolIndex;
+      chip.classList.toggle('active', isActive);
+      chip.setAttribute('aria-selected', String(isActive));
+    });
+
+    // 2. Re-render the stage and bind its events
+    const stageEl = this.element.querySelector('#sandbox-stage');
+    if (stageEl) {
+      stageEl.innerHTML = this.getStageHtml();
+      this.bindStageEvents();
+    }
+
+    // 3. Update modal content
+    const modalEl = this.element.querySelector('#share-modal');
+    if (modalEl) {
+      modalEl.innerHTML = this.getModalHtml();
+      this.bindModalEvents();
+      if (this.isShareModalOpen) {
+        this.renderQRCode(PROTOCOL_SPECS[this.activeProtocolIndex].sampleUri);
+      }
+    }
+
+    // 4. Smoothly shift tabs so subsequent protocols move forward into view
+    this.scrollToActiveTab(smooth);
+  }
+
   private bindEvents() {
-    // Protocol Tabs Switch
+    this.bindProtocolBarEvents();
+    this.bindStageEvents();
+    this.bindModalEvents();
+
+    // Keyboard ESC to close modal
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isShareModalOpen) {
+        this.closeModal();
+      }
+    });
+
+    // Window resize adjustment
+    window.addEventListener('resize', () => {
+      this.scrollToActiveTab(false);
+    });
+  }
+
+  private bindProtocolBarEvents() {
     const chips = this.element.querySelectorAll('.protocol-chip');
     chips.forEach((chip) => {
       chip.addEventListener('click', () => {
         audioHaptics.playSwitch();
         const idx = Number(chip.getAttribute('data-idx'));
-        if (!isNaN(idx) && idx !== this.activeProtocolIndex) {
-          this.activeProtocolIndex = idx;
-          this.resetProbeLogs();
-          this.render();
-          this.bindEvents();
+        if (!isNaN(idx)) {
+          this.selectProtocol(idx, true);
         }
       });
     });
+  }
 
+  private bindStageEvents() {
     // Run Handshake Probe
     const probeBtn = this.element.querySelector('#btn-run-probe');
     if (probeBtn) {
@@ -385,7 +479,9 @@ export class InteractiveSandbox {
         this.renderQRCode(PROTOCOL_SPECS[this.activeProtocolIndex].sampleUri);
       });
     }
+  }
 
+  private bindModalEvents() {
     // Close Modal Button
     const closeBtn = this.element.querySelector('#btn-close-modal');
     if (closeBtn) {
@@ -424,13 +520,6 @@ export class InteractiveSandbox {
         }
       });
     }
-
-    // Keyboard ESC to close modal
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isShareModalOpen) {
-        this.closeModal();
-      }
-    });
   }
 
   private closeModal() {

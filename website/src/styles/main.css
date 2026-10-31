@@ -673,6 +673,19 @@ body {
   overflow-wrap: break-word;
 }
 
+@keyframes packet-flow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.packet-flow-runner {
+  will-change: transform;
+}
+
 .sandbox-probe-console {
   display: flex;
   flex-direction: column;
