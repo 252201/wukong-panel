@@ -189,6 +189,7 @@ export interface Settings {
   expiresAt?: string
   collectEndpoints: boolean
   subscriptionToken?: string
+  subscriptionTemplate?: string
 }
 
 export interface EndpointStat { nodeId: string; nodeName: string; endpoint: string; bytes: number }

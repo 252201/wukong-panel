@@ -494,6 +494,76 @@ func TestSaveSettingsExpiresAt(t *testing.T) {
 	}
 }
 
+func TestSaveSettingsSubscriptionTemplate(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "settings_tpl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Default should be "standard"
+	initial, err := s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load initial settings: %v", err)
+	}
+	if initial.SubscriptionTemplate != "standard" {
+		t.Fatalf("expected default subscription template 'standard', got %q", initial.SubscriptionTemplate)
+	}
+
+	// Save "smart"
+	settings := initial
+	settings.SubscriptionTemplate = "smart"
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to save smart template: %v", err)
+	}
+	loaded, err := s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if loaded.SubscriptionTemplate != "smart" {
+		t.Fatalf("expected 'smart', got %q", loaded.SubscriptionTemplate)
+	}
+
+	// Save "minimal"
+	settings.SubscriptionTemplate = "minimal"
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to save minimal template: %v", err)
+	}
+	loaded, err = s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if loaded.SubscriptionTemplate != "minimal" {
+		t.Fatalf("expected 'minimal', got %q", loaded.SubscriptionTemplate)
+	}
+
+	// Save invalid template normalizes to "standard"
+	settings.SubscriptionTemplate = "invalid-template"
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to save invalid template: %v", err)
+	}
+	loaded, err = s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if loaded.SubscriptionTemplate != "standard" {
+		t.Fatalf("expected fallback to 'standard', got %q", loaded.SubscriptionTemplate)
+	}
+
+	// Whitespace and case normalization
+	settings.SubscriptionTemplate = "  SMART  "
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatalf("failed to save uppercase smart template: %v", err)
+	}
+	loaded, err = s.Settings()
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if loaded.SubscriptionTemplate != "smart" {
+		t.Fatalf("expected 'smart', got %q", loaded.SubscriptionTemplate)
+	}
+}
+
 func TestNodesCumulativeTraffic(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "traffic_nodes.db"))
 	if err != nil {

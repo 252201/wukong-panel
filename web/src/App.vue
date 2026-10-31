@@ -97,7 +97,8 @@ function changeProcessSort(key: ProcessSortKey) {
 }
 const nodes = ref<NodeItem[]>([])
 const jobs = ref<Job[]>([])
-const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, expiresAt: '', collectEndpoints: true })
+const settings = ref<Settings>({ language: 'zh-CN', timezone: 'Asia/Shanghai', interface: 'auto', trafficQuotaBytes: 0, billingResetDay: 1, expiresAt: '', collectEndpoints: true, subscriptionTemplate: 'standard' })
+const selectedFleetTemplate = ref('standard')
 const endpoints = ref<EndpointStat[]>([])
 const timeline = ref<TrafficTimeline | null>(null)
 const singBoxMigrationPlan = ref<SingBoxMigrationPlan | null>(null)
@@ -809,6 +810,25 @@ async function saveFleetSubscriptionSelection() {
 		notify('全局订阅范围已保存，旧缓存已失效')
 	} catch (error) { notify(error instanceof Error ? error.message : '订阅范围保存失败') }
 	finally { busy.value = false }
+}
+
+function fleetSubscriptionUrlWithTemplate(tpl?: string): string {
+  const base = fleetStatus.value?.globalSubscription || ''
+  if (!base) return ''
+  const chosen = tpl || selectedFleetTemplate.value || 'standard'
+  try {
+    const url = new URL(base, window.location.origin)
+    url.searchParams.set('template', chosen)
+    return url.toString()
+  } catch {
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}template=${encodeURIComponent(chosen)}`
+  }
+}
+
+function copyFleetSubscriptionWithTemplate(tpl?: string) {
+  const target = fleetSubscriptionUrlWithTemplate(tpl)
+  if (target) copy(target)
 }
 
 async function probeFleetSubscription() {
@@ -2052,7 +2072,11 @@ async function refreshAll() {
   void fetchFirewallStatus()
   if (!settingsDraftDirty.value) {
     syncingSettingsDraft = true
-    try { settings.value = { ...settingData, expiresAt: settingData.expiresAt || '' }; language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN' }
+    try {
+      settings.value = { ...settingData, expiresAt: settingData.expiresAt || '', subscriptionTemplate: settingData.subscriptionTemplate || 'standard' }
+      if (settingData.subscriptionTemplate) selectedFleetTemplate.value = settingData.subscriptionTemplate
+      language.value = settingData.language === 'en-US' ? 'en-US' : 'zh-CN'
+    }
     finally { syncingSettingsDraft = false }
   }
   residentialExit.value = exitData
@@ -3082,7 +3106,33 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </template>
         </section>
         <section v-if="fleetStatus?.archivedHosts?.length" class="panel-card fleet-archive"><header><div><span class="section-mark red">档</span><div><h3>已移除主机</h3><p>凭据已撤销；归档指标保留 30 天，远端节点不受影响</p></div></div></header><div><article v-for="host in fleetStatus.archivedHosts" :key="host.id"><span><b>{{ host.name }}</b><small>{{ host.hostname }} · 最后心跳 {{ host.lastSeenAt ? new Date(host.lastSeenAt).toLocaleString(language) : '从未连接' }}</small></span><button class="danger-button" @click="stageFleetHostAction('purge', host)">永久清除</button></article></div></section>
-        <section class="panel-card fleet-subscription-scope"><header><div><span class="section-mark jade">订</span><div><h3>全局订阅范围</h3><p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p></div></div><div class="fleet-scope-actions"><button type="button" class="secondary" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button><button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button></div></header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item) || (item.snapshot?.nodes || []).length > 0)" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : isProbeHost(host) ? '离线 · 节点已就绪' : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
+        <section class="panel-card fleet-subscription-scope">
+          <header>
+            <div>
+              <span class="section-mark jade">订</span>
+              <div>
+                <h3>全局订阅范围</h3>
+                <p>默认纳入所有在线 active 节点；离线主机继续使用加密缓存</p>
+              </div>
+            </div>
+            <div class="fleet-scope-actions">
+              <div class="fleet-template-picker">
+                <label class="scope-template-label">
+                  <span>{{ language === 'en-US' ? 'Template:' : '模板:' }}</span>
+                  <select v-model="selectedFleetTemplate" class="scope-template-select" :aria-label="language === 'en-US' ? 'Rule Template' : '规则模板'">
+                    <option value="standard">{{ language === 'en-US' ? 'Standard (Recommended)' : '标准开箱即用 (推荐)' }}</option>
+                    <option value="smart">{{ language === 'en-US' ? 'Smart (Streaming & AI)' : '智能流媒体与 AI' }}</option>
+                    <option value="minimal">{{ language === 'en-US' ? 'Minimal Clean' : '极简纯净' }}</option>
+                  </select>
+                </label>
+                <button type="button" class="secondary btn-copy-template" :disabled="!fleetStatus?.globalSubscription" @click="copyFleetSubscriptionWithTemplate(selectedFleetTemplate)" :title="language === 'en-US' ? 'Copy subscription URL with chosen template' : '复制附带选定模板参数的订阅链接'">
+                  {{ language === 'en-US' ? 'Copy Template' : '复制选定模板' }}
+                </button>
+              </div>
+              <button type="button" class="secondary" :disabled="!fleetStatus?.globalSubscription" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button>
+              <button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button>
+            </div>
+          </header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item) || (item.snapshot?.nodes || []).length > 0)" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : isProbeHost(host) ? '离线 · 节点已就绪' : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
         <section v-if="enrollmentCommand" id="fleet-enrollment" class="panel-card enrollment-card"><div class="enrollment-col enrollment-join"><div class="enrollment-col-head"><div class="enrollment-col-title"><span class="section-mark">令</span><div><h3>{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div></div><button type="button" @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>{{ enrollmentMode === 'probe' ? '在远端 VPS 以 root 执行；仅安装探针，不安装面板、Nginx 或 sing-box。探针只主动连接可信 HTTPS 主控。' : '在远端 VPS 以 root 执行；将安装完整面板、Nginx 与 sing-box，Agent 主动连接可信 HTTPS 主控。' }}</small></div><div class="enrollment-col enrollment-leave"><div class="enrollment-leave-head enrollment-col-head"><div class="enrollment-leave-title enrollment-col-title"><span class="section-mark red">撤</span><div><h4>{{ enrollmentMode === 'probe' ? '卸载轻量探针' : '取消中央接入' }}</h4><p>{{ enrollmentMode === 'probe' ? '停止服务并删除探针文件；中央记录需在舰队卡片中另行移除。' : '仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。' }}</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
       </div>
 
@@ -3557,11 +3607,39 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 <span>令</span>
                 <div>
                   <div class="setting-title-inline">
-                    <h3>订阅令牌</h3>
+                    <h3>订阅设置</h3>
                     <span class="settings-scope-tag">单机独立</span>
                   </div>
                   <p>与管理入口完全隔离</p>
                 </div>
+              </div>
+              <div class="subscription-template-row">
+                <label>
+                  <span class="settings-label-head">
+                    <span>规则模板预设</span>
+                    <span class="settings-chip-row">
+                      <button v-for="tpl in [
+                        { id: 'standard', name: language === 'en-US' ? 'Standard' : '标准开箱' },
+                        { id: 'smart', name: language === 'en-US' ? 'Smart' : '智能分流' },
+                        { id: 'minimal', name: language === 'en-US' ? 'Minimal' : '极简纯净' }
+                      ]" :key="tpl.id" type="button" class="settings-preset-chip" :class="{ active: (settings.subscriptionTemplate || 'standard') === tpl.id }" :disabled="mutationsDisabled" @click="settings.subscriptionTemplate = tpl.id">{{ tpl.name }}</button>
+                    </span>
+                  </span>
+                  <select v-model="settings.subscriptionTemplate" class="template-select" :disabled="mutationsDisabled">
+                    <option value="standard">{{ language === 'en-US' ? 'Standard (Fake-IP & Direct, Recommended)' : '标准开箱即用 (推荐)' }}</option>
+                    <option value="smart">{{ language === 'en-US' ? 'Smart (Streaming & AI Egress DNS)' : '智能流媒体与 AI (落地联动)' }}</option>
+                    <option value="minimal">{{ language === 'en-US' ? 'Minimal Clean (Raw Proxies Only)' : '极简纯净 (仅裸节点)' }}</option>
+                  </select>
+                  <small class="field-hint">
+                    {{
+                      settings.subscriptionTemplate === 'smart'
+                        ? (language === 'en-US' ? 'Dedicated OpenAI/Claude and streaming groups with egress-bound DNS resolution' : '细分 OpenAI/Claude 与流媒体策略组，并联动落地机 DNS 出站解析')
+                        : settings.subscriptionTemplate === 'minimal'
+                        ? (language === 'en-US' ? 'Raw proxies with a single fallback group and no DNS block' : '仅输出裸节点与单条兜底规则，不注入 DNS 块')
+                        : (language === 'en-US' ? 'Built-in Fake-IP anti-pollution, private/CN direct routing, ad blocking and latency url-test' : '内置 Fake-IP 防污染、国内直连、广告拦截与自动延迟优选')
+                    }}
+                  </small>
+                </label>
               </div>
               <div class="token-box">
                 <code>{{ settings.subscriptionToken || '尚未生成' }}</code>
@@ -3571,7 +3649,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <button type="button" class="cancel-token-btn" @click="confirmRotateHostToken = false">取消</button>
                 </template>
               </div>
-              <p class="help-text">令牌轮换后旧订阅地址立即失效。节点密码仅在生成订阅或短时分享时由 Root Agent 解密。</p>
+              <p class="help-text">令牌轮换后旧订阅地址立即失效。可在订阅链接后附加 ?template=minimal / standard / smart 即时切换规则。</p>
             </div>
             <div class="composite-section danger-zone-section">
               <div class="setting-title"><span>险</span><div><h3>危险区域</h3><p>首版不会修改 SSH、防火墙或系统更新</p></div></div>
