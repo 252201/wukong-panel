@@ -22,12 +22,12 @@ function initApp() {
   const root = document.getElementById('app');
   if (!root) return;
 
-  // Determine initial color scheme
+  // Determine initial color scheme (default to Xuan Paper / light mode)
   const meta = document.querySelector('meta[name="color-scheme"]');
   const urlParams = new URLSearchParams(window.location.search);
   const urlTheme = urlParams.get('theme') as 'dark' | 'light' | null;
   const storedTheme = (localStorage.getItem('color-scheme') as 'dark' | 'light' | null);
-  const resolvedTheme: 'dark' | 'light' = urlTheme || storedTheme || (meta?.getAttribute('content') === 'light' ? 'light' : 'dark');
+  const resolvedTheme: 'dark' | 'light' = urlTheme || storedTheme || (meta?.getAttribute('content') === 'dark' ? 'dark' : 'light');
 
   if (urlTheme && meta) {
     meta.setAttribute('content', urlTheme);
