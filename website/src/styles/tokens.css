@@ -63,9 +63,6 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --radius-full: 9999px;
-
-  /* Noise Opacity */
-  --noise-opacity: light-dark(0.025, 0.04);
 }
 
 /* Modern Web Guidance: Map meta[name="color-scheme"] overrides back to CSS property */
