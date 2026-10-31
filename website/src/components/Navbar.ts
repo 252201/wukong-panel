@@ -134,6 +134,7 @@ export class Navbar {
         if (meta) {
           meta.setAttribute('content', nextTheme);
         }
+        document.documentElement.style.colorScheme = nextTheme;
         localStorage.setItem('color-scheme', nextTheme);
 
         this.render();

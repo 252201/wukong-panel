@@ -8,6 +8,8 @@ import { audioHaptics } from './AudioHaptics';
 
 export class Hero {
   private element: HTMLElement;
+  private canvasBox: HTMLElement;
+  private contentBox: HTMLElement;
   private lang: 'zh' | 'en' = 'zh';
   private arch: 'amd64' | 'arm64' = 'amd64';
   private isCopied: boolean = false;
@@ -17,6 +19,17 @@ export class Hero {
     this.element = document.createElement('section');
     this.element.className = 'hero-section';
     this.element.id = 'hero';
+
+    this.canvasBox = document.createElement('div');
+    this.canvasBox.className = 'hero-canvas-container';
+    this.canvasBox.id = 'hero-canvas-box';
+    this.canvasBox.setAttribute('aria-hidden', 'true');
+    this.element.appendChild(this.canvasBox);
+
+    this.contentBox = document.createElement('div');
+    this.contentBox.className = 'container hero-content';
+    this.element.appendChild(this.contentBox);
+
     this.render();
     this.bindEvents();
   }
@@ -39,10 +52,7 @@ export class Hero {
     const isZh = this.lang === 'zh';
     const cmd = this.getCommand();
 
-    this.element.innerHTML = `
-      <div class="hero-canvas-container" id="hero-canvas-box" aria-hidden="true"></div>
-      
-      <div class="container hero-content">
+    this.contentBox.innerHTML = `
         <!-- Left: Hero Headline & Narrative -->
         <div class="hero-narrative">
           <div class="hero-badge-pill">
@@ -134,7 +144,6 @@ export class Hero {
             </div>
           </div>
         </div>
-      </div>
     `;
   }
 

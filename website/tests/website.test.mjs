@@ -175,6 +175,19 @@ test('Magnetic Cursor 120fps LERP & Viewport Lifecycle', () => {
   assert.match(cursorTs, /mouseenter/, 'Must handle mouseenter to restore cursor');
 });
 
+test('Hero Canvas Persistence and Navbar State Decoupling', () => {
+  const heroTsPath = path.join(websiteDir, 'src/components/Hero.ts');
+  const heroTs = fs.readFileSync(heroTsPath, 'utf8');
+  assert.match(heroTs, /canvasBox/, 'Hero must manage a dedicated canvasBox instance variable');
+  assert.match(heroTs, /contentBox/, 'Hero must manage a dedicated contentBox for dynamic content');
+  assert.doesNotMatch(heroTs, /this\.element\.innerHTML\s*=/, 'Hero render must not overwrite this.element.innerHTML to preserve canvas');
+
+  const mainTsPath = path.join(websiteDir, 'src/main.ts');
+  const mainTs = fs.readFileSync(mainTsPath, 'utf8');
+  assert.match(mainTs, /newState\.lang\s*!==\s*currentLang/, 'main.ts must guard language change before re-rendering components');
+  assert.match(mainTs, /newState\.theme\s*!==\s*currentTheme/, 'main.ts must guard theme change before re-theming mesh');
+});
+
 test('Vite Production Build Artifacts Integrity', () => {
   const distDir = path.join(websiteDir, 'dist');
   if (!fs.existsSync(distDir)) {
