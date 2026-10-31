@@ -426,7 +426,7 @@ func fleetSubscriptionNodeCount(content string) int {
 				inProxies = false
 			}
 		}
-		if inProxies && strings.HasPrefix(line, "  - name:") {
+		if inProxies && (strings.HasPrefix(trimmed, "- name:") || strings.HasPrefix(trimmed, "- name ") || strings.HasPrefix(trimmed, "- {name:") || strings.HasPrefix(trimmed, "- { name:")) {
 			nodeCount++
 		}
 	}

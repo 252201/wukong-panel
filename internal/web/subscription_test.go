@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -213,6 +215,9 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 		if strings.Contains(out, "🤖 AI 服务") || strings.Contains(out, "nameserver-policy:") {
 			t.Errorf("standard template should not contain smart-only elements")
 		}
+		if strings.Contains(out, "listen:") {
+			t.Errorf("standard template should not force listen port in subscription profile:\n%s", out)
+		}
 	})
 
 	t.Run("smart template", func(t *testing.T) {
@@ -242,6 +247,7 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 			"GEOSITE,openai,🤖 AI 服务",
 			"GEOSITE,anthropic,🤖 AI 服务",
 			"DOMAIN-SUFFIX,chatgpt.com,🤖 AI 服务",
+			"DOMAIN-SUFFIX,claude.ai,🤖 AI 服务",
 			"GEOSITE,youtube,🎬 国际流媒体",
 			"GEOSITE,netflix,🎬 国际流媒体",
 			"GEOSITE,disney,🎬 国际流媒体",
@@ -253,12 +259,18 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 				t.Fatalf("smart template missing rule %q:\n%s", want, out)
 			}
 		}
+		if strings.Contains(out, "GEOSITE,claude") {
+			t.Fatalf("GEOSITE,claude is not a valid GeoSite tag in GeoSite.dat; claude must be covered via anthropic and domain rules:\n%s", out)
+		}
 		// Egress DNS via nameserver-policy
 		for _, want := range []string{
 			"nameserver-policy:",
-			`"geosite:youtube,netflix,disney,spotify": "https://1.1.1.1/dns-query#🚀 节点选择"`,
-			`"geosite:openai,claude": "https://1.1.1.1/dns-query#🚀 节点选择"`,
-			`"+.openai.com,+.chatgpt.com,+.anthropic.com,+.claude.ai": "https://1.1.1.1/dns-query#🚀 节点选择"`,
+			`"geosite:youtube,netflix,disney,spotify": "https://1.1.1.1/dns-query#🎬 国际流媒体"`,
+			`"geosite:openai,anthropic": "https://1.1.1.1/dns-query#🤖 AI 服务"`,
+			`"+.openai.com": "https://1.1.1.1/dns-query#🤖 AI 服务"`,
+			`"+.chatgpt.com": "https://1.1.1.1/dns-query#🤖 AI 服务"`,
+			`"+.claude.ai": "https://1.1.1.1/dns-query#🤖 AI 服务"`,
+			`"+.youtube.com": "https://1.1.1.1/dns-query#🎬 国际流媒体"`,
 		} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("smart template missing DNS policy %q:\n%s", want, out)
@@ -398,5 +410,63 @@ func TestSubscriptionSingleEndpointAndTemplateParam(t *testing.T) {
 	srv.Handler().ServeHTTP(recOverride, reqOverride)
 	if !strings.Contains(recOverride.Body.String(), "🤖 AI 服务") {
 		t.Fatalf("expected smart override over DB minimal:\n%s", recOverride.Body.String())
+	}
+}
+
+func findMihomoBinary() string {
+	if p, err := exec.LookPath("mihomo"); err == nil {
+		return p
+	}
+	candidates := []string{
+		"/Applications/Clash Party.app/Contents/Resources/sidecar/mihomo",
+		"/usr/local/bin/mihomo",
+		"/opt/homebrew/bin/mihomo",
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() && fi.Mode()&0111 != 0 {
+			return c
+		}
+	}
+	return ""
+}
+
+func TestSubscriptionMihomoCompatibility(t *testing.T) {
+	mihomoPath := findMihomoBinary()
+	if mihomoPath == "" {
+		t.Skip("mihomo binary not found on host, skipping kernel test")
+	}
+
+	items := []SubscriptionNode{
+		{
+			Node:     model.Node{Name: "US-01", Protocol: "hysteria2", Server: "us01.example.com", ListenPort: 443},
+			ShareURI: "hysteria2://pass1@us01.example.com:443/?sni=us01.example.com",
+		},
+		{
+			Node:     model.Node{Name: "SG-01", Protocol: "vless", Server: "sg01.example.com", ListenPort: 443},
+			ShareURI: "vless://00000000-0000-4000-8000-000000000001@sg01.example.com:443?security=tls&type=tcp",
+		},
+	}
+
+	for _, tpl := range []SubscriptionTemplate{TemplateMinimal, TemplateStandard, TemplateSmart} {
+		t.Run(string(tpl), func(t *testing.T) {
+			content, err := RenderClashSubscription(RenderSubscriptionOptions{
+				Template: tpl,
+				Items:    items,
+			})
+			if err != nil {
+				t.Fatalf("render failed: %v", err)
+			}
+
+			tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := exec.Command(mihomoPath, "-t", "-f", tmpFile)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("mihomo -t -f failed for template %s (exit: %v):\n%s\nConfig:\n%s", tpl, err, string(out), content)
+			}
+		})
 	}
 }

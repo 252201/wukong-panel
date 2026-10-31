@@ -229,10 +229,30 @@ dns:
   enable: true
   enhanced-mode: fake-ip
   nameserver-policy:
-    "geosite:openai,claude": "https://1.1.1.1/dns-query#🚀 节点选择"
+    "geosite:openai,anthropic": "https://1.1.1.1/dns-query#🤖 AI 服务"
 `
 	if got := fleetSubscriptionNodeCount(content); got != 2 {
 		t.Fatalf("node count=%d, want 2", got)
+	}
+}
+
+func TestFleetSubscriptionNodeCountFormattingVariations(t *testing.T) {
+	content := `proxies:
+    - name: "HK-01"
+      type: hysteria2
+  - { name: "SG-01", type: vless }
+  - {name: "JP-01", type: ss}
+proxy-groups:
+  - name: "Proxy"
+    proxies:
+      - "HK-01"
+      - "SG-01"
+      - "JP-01"
+rules:
+  - MATCH,Proxy
+`
+	if got := fleetSubscriptionNodeCount(content); got != 3 {
+		t.Fatalf("node count=%d, want 3", got)
 	}
 }
 
