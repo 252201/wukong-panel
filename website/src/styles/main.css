@@ -333,6 +333,7 @@ body {
   font-size: 1rem;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.6rem;
   border: none;
   cursor: pointer;
@@ -357,6 +358,7 @@ body {
   font-size: 1rem;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.6rem;
   border: 1px solid var(--border-subtle);
   cursor: pointer;
