@@ -436,7 +436,6 @@ interface ProtocolGuideItem {
   seal: string
   title: string
   specs: ProtocolGuideSpec[]
-  footer: string
 }
 
 const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
@@ -451,9 +450,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Camouflage' : '拟真特性', text: isEn ? 'Presents legitimate target TLS 1.3 certificate & SNI (e.g. AWS, Apple)' : '对外呈现真实境外大厂网站的 TLS 1.3 证书与握手特征' },
           { tag: isEn ? 'Defense' : '主动防御', text: isEn ? 'Diverts scanner probes to destination site, zero exposed proxy footprint' : '针对外部主动嗅探扫描直接转发至真实站点，阻断主动探测' },
         ],
-        footer: isEn
-          ? 'No domain purchase or certificate renewal required; optimal fallback during strict firewall periods.'
-          : '免域名购买、免证书申请与维护；高墙敏感时期最稳健的直连备用方案。',
       }
     case 'shadowsocks':
       return {
@@ -464,9 +460,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Replay Guard' : '安全防御', text: isEn ? 'Session Replay Filter prevents probe attacks and historical replay' : '内置 Session Replay Filter，彻底杜绝历史长连接重放攻击与探针' },
           { tag: isEn ? 'Performance' : '极致性能', text: isEn ? 'Microsecond-level latency, minimal single-core CPU overhead, high concurrency' : '微秒级加解密处理延迟，单核 CPU 占用极低，高并发多路复用' },
         ],
-        footer: isEn
-          ? 'Pure single-port lightweight proxy, ideal for high-speed routing, relay nodes, and LAN backbones.'
-          : '纯单端口轻量代理，最适合高速局域互联、软路由转发与中继节点链路。',
       }
     case 'tuic':
       return {
@@ -477,9 +470,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? '0-RTT' : '极速建连', text: isEn ? 'Ultra-low initial handshake latency with 0-RTT connection resumption' : '支持 0-RTT 极速握手，大幅降低移动设备与海外节点首次握手延迟' },
           { tag: isEn ? 'Migration' : '无感迁移', text: isEn ? 'Seamless migration between Wi-Fi and 5G cellular without packet interruption' : '蜂窝 4G/5G 与 Wi-Fi 频繁切换时连接平滑迁移，彻底杜绝断流重连' },
         ],
-        footer: isEn
-          ? 'Specially engineered for mobile roaming, low-latency gaming, and real-time voice calls.'
-          : '专为移动端漫游设计的高性能代理协议，低延迟游戏与实时语音首选。',
       }
     case 'trojan':
       return {
@@ -490,9 +480,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Compatibility' : '通用兼容', text: isEn ? 'Time-tested mature protocol compatible with enterprise firewalls & legacy routers' : '老牌经典成熟协议，对各类传统网络网关与软硬件防火墙通用兼容' },
           { tag: isEn ? 'Cert Chain' : '证书挂载', text: isEn ? 'Automatically mounts panel TLS certificate with zero extra configuration' : '自动绑定并挂载面板域名 SSL 证书链，无需额外配置与手动续期' },
         ],
-        footer: isEn
-          ? 'Ideal for environments demanding maximum cross-client compatibility and legacy OS access.'
-          : '适合对客户端通用兼容性要求高、有多设备老系统混用接入的场景。',
       }
     case 'anytls':
       return {
@@ -503,9 +490,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'DPI Resistance' : '特征抗检', text: isEn ? 'Randomized packet size distribution circumvents DPI statistical finger-printing' : '动态填充数据包尺寸分布，规避深度包检测（DPI）统计学指纹识别' },
           { tag: isEn ? 'TCP Fallback' : '链路保障', text: isEn ? 'Provides robust TCP fallback in networks where UDP is throttled or blocked' : '在 UDP 被强力 QoS 限速或阻断的网络环境下提供稳定的 TCP 兜底' },
         ],
-        footer: isEn
-          ? 'Hardened proxy defense against advanced deep packet inspection and network shaping.'
-          : '针对严苛 DPI 流量过滤网络环境的高级防护方案，保障链路持久稳定。',
       }
     case 'hysteria2':
     default:
@@ -517,9 +501,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Anti-Loss' : '弱网对抗', text: isEn ? 'Saturates available bandwidth even under 10%–30% severe packet loss' : '恶劣高丢包链路（10%~30%）下依然能充分压榨并跑满网络带宽' },
           { tag: isEn ? 'Port Policy' : '端口策略', text: isEn ? 'Single UDP port binding; auto-allow firewall rule is recommended' : '监听单 UDP 端口，建议勾选自动放行以联动系统防火墙' },
         ],
-        footer: isEn
-          ? 'Optimized for cross-ocean long-distance links, peak-hour congestion, and mobile cellular networks.'
-          : '专为跨洋长距离、晚高峰拥堵、移动蜂窝等高抗封锁弱网链路深度优化。',
       }
   }
 })
@@ -3867,7 +3848,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     <span>{{ spec.text }}</span>
                   </li>
                 </ul>
-                <p>{{ currentProtocolGuide.footer }}</p>
               </div>
             </div>
           </div>

@@ -642,7 +642,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .protocol-pipeline-guide ul { display: flex; flex-direction: column; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none; }
 .protocol-pipeline-guide li { display: flex; align-items: baseline; gap: 7px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .protocol-pipeline-guide .guide-tag { display: inline-block; padding: 1px 5px; border: 1px solid rgba(212,173,87,.25); border-radius: 2px; background: rgba(212,173,87,.08); color: var(--gold); font: 600 9px "IBM Plex Mono", monospace; letter-spacing: .2px; flex-shrink: 0; }
-.protocol-pipeline-guide p { margin: 7px 0 0; color: var(--muted-2); font-size: 9.5px; line-height: 1.5; }
 .toast { position: fixed; z-index: 50; right: 25px; bottom: 25px; padding: 13px 18px; background: #e0bd6d; color: #15120b; box-shadow: 0 16px 50px rgba(var(--shadow-rgb),.4); font-size: 12px; font-weight: 700; }.toast-enter-active,.toast-leave-active { transition: .2s; }.toast-enter-from,.toast-leave-to { opacity: 0; transform: translateY(10px); }
 
 .node-title-row { position: relative; display: flex; align-items: center; gap: 10px; margin: 28px 0 7px; }
@@ -1298,9 +1297,6 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .protocol-pipeline-guide li {
   color: #55606b;
-}
-:root[data-effective-theme="light"] .protocol-pipeline-guide p {
-  color: #8c97a2;
 }
 
 /* Mobile & Tablet Responsiveness */
