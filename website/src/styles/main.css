@@ -321,8 +321,11 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%);
-  color: #1a160d;
+  background: light-dark(
+    linear-gradient(135deg, #d93829 0%, #b82819 100%),
+    linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%)
+  );
+  color: light-dark(#ffffff, #1a160d);
   font-weight: 700;
   padding: 0.85rem 1.85rem;
   border-radius: var(--radius-full);
@@ -333,13 +336,23 @@ body {
   gap: 0.6rem;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 20px var(--gold-glow);
+  box-shadow: light-dark(
+    0 4px 20px rgba(217, 56, 41, 0.35),
+    0 4px 20px var(--gold-glow)
+  );
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-primary:hover {
+  background: light-dark(
+    linear-gradient(135deg, #e44434 0%, #c52d1e 100%),
+    linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%)
+  );
   transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 30px var(--gold-glow);
+  box-shadow: light-dark(
+    0 8px 30px rgba(217, 56, 41, 0.45),
+    0 8px 30px var(--gold-glow)
+  );
 }
 
 .btn-secondary {
@@ -735,8 +748,11 @@ body {
 
 .btn-probe-trigger {
   flex: 1;
-  background: var(--gold-primary);
-  color: #121008;
+  background: light-dark(
+    linear-gradient(135deg, #d93829 0%, #b82819 100%),
+    var(--gold-primary)
+  );
+  color: light-dark(#ffffff, #121008);
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 0.75rem 1.25rem;
@@ -747,11 +763,22 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  box-shadow: light-dark(
+    0 4px 14px rgba(217, 56, 41, 0.3),
+    none
+  );
   transition: all 0.2s ease;
 }
 
 .btn-probe-trigger:hover {
-  background: var(--gold-bright);
+  background: light-dark(
+    linear-gradient(135deg, #e44434 0%, #c52d1e 100%),
+    var(--gold-bright)
+  );
+  box-shadow: light-dark(
+    0 6px 20px rgba(217, 56, 41, 0.4),
+    none
+  );
   transform: translateY(-1px);
 }
 
