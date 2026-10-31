@@ -17,6 +17,9 @@ class ScopeTests(unittest.TestCase):
     def test_frontend_source_and_generated_assets_only(self):
         self.assertScopes(["web/src/App.vue", "internal/web/dist/assets/new.js", "internal/web/dist/index.html"], "frontend")
 
+    def test_website_source_only_triggers_frontend(self):
+        self.assertScopes(["website/src/main.ts", "website/index.html"], "frontend")
+
     def test_frontend_dependencies_require_frontend(self):
         self.assertScopes(["web/package-lock.json"], "frontend")
 

@@ -74,7 +74,7 @@ def classify(paths, read_blob=lambda revision, path: None):
         if path in ("Makefile", "web/package.json", "web/package-lock.json", "internal/web/release.go"):
             if version_only(path, read_blob("base", path), read_blob("head", path)):
                 continue
-        if path.startswith(("web/", "internal/web/dist/")):
+        if path.startswith(("web/", "internal/web/dist/", "website/")):
             selected["frontend"] = True
         elif path.startswith((".github/", "scripts/ci_")) or path in ("Makefile", "go.mod", "go.sum", "scripts/build-release.sh"):
             return dict.fromkeys(SCOPES, True)
