@@ -3326,7 +3326,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <p class="eyebrow">{{ deviceMode ? 'DEPLOY DEVICE FLEET' : isEditing ? 'EDIT MANAGED NODE' : 'DEPLOY PROXY NODE' }}</p>
             <h2>{{ deviceMode ? '部署设备专用节点' : isEditing ? `重新编辑 ${selectedNode?.name}` : '部署一座新节点' }}</h2>
             <p v-if="isEditing" class="form-hint edit-safety-hint">保存前会建立配置快照并校验；重启失败自动恢复原配置。协议与凭据不会在编辑中改变。</p>
-            <p v-if="defaultsLoading" class="form-hint loading-hint">正在读取面板域名与本机地址…</p>
           </div>
         </div>
 
