@@ -8,6 +8,7 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   // Modal header with seal and deploy mode switcher tabs
   assert.ok(vueSource.includes('class="node-form-top"'), 'Must have node-form-top header')
   assert.ok(vueSource.includes('class="node-form-title-area"'), 'Must have title area container')
+  assert.ok(!vueSource.includes('正在读取面板域名与本机地址'), 'Must remove 正在读取面板域名与本机地址 loading hint')
   assert.ok(vueSource.includes("class=\"modal-seal\" :class=\"{ jade: deviceMode, gold: !deviceMode && !isEditing, amber: isEditing }\""), 'Must render seal badge for deploy modes')
   assert.ok(vueSource.includes('class="deploy-mode-tabs"'), 'Must include deploy-mode-tabs segmented control')
   assert.ok(vueSource.includes("switchDeployKind('create')"), 'Must switch to standard node create')
