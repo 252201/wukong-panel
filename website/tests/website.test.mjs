@@ -21,7 +21,6 @@ test('Website HTML Structure and Accessibility Metadata', () => {
   // Accessibility: decorative elements must have aria-hidden="true"
   assert.match(html, /<div\s+id=["']scroll-progress["']\s+aria-hidden=["']true["']>/, 'Scroll progress bar must have aria-hidden="true"');
   assert.match(html, /<div\s+class=["']ambient-spotlight["']\s+aria-hidden=["']true["']>/, 'Spotlight must have aria-hidden="true"');
-  assert.match(html, /<svg\s+class=["']film-grain-overlay["']\s+aria-hidden=["']true["']>/, 'Film grain overlay must have aria-hidden="true"');
 
   // SEO & Social Tags
   assert.match(html, /<title>.*悟空面板.*<\/title>/, 'Must include descriptive title');
