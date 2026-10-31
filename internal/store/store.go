@@ -231,6 +231,7 @@ CREATE INDEX IF NOT EXISTS idx_fleet_probe_nodes_host ON fleet_probe_nodes(host_
 		"language": "zh-CN", "timezone": "Asia/Shanghai", "interface": "auto",
 		"traffic_quota_bytes": "0", "billing_reset_day": "1", "collect_endpoints": "true",
 		"fleet_subscription_public_url": "",
+		"subscription_template":         "standard",
 	}
 	for key, value := range defaults {
 		if _, err := s.DB.Exec("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", key, value); err != nil {
@@ -989,7 +990,21 @@ func (s *Store) Settings() (model.Settings, error) {
 	}
 	quota, _ := strconv.ParseInt(values["traffic_quota_bytes"], 10, 64)
 	day, _ := strconv.Atoi(values["billing_reset_day"])
-	return model.Settings{Language: values["language"], Timezone: values["timezone"], Interface: values["interface"], TrafficQuotaBytes: quota, BillingResetDay: day, ExpiresAt: values["expires_at"], CollectEndpoints: values["collect_endpoints"] != "false", SubscriptionToken: values["subscription_token"]}, nil
+	tpl := values["subscription_template"]
+	if tpl == "" {
+		tpl = "standard"
+	}
+	return model.Settings{
+		Language:             values["language"],
+		Timezone:             values["timezone"],
+		Interface:            values["interface"],
+		TrafficQuotaBytes:    quota,
+		BillingResetDay:      day,
+		ExpiresAt:            values["expires_at"],
+		CollectEndpoints:     values["collect_endpoints"] != "false",
+		SubscriptionToken:    values["subscription_token"],
+		SubscriptionTemplate: tpl,
+	}, nil
 }
 func (s *Store) SaveSettings(settings model.Settings) error {
 	if settings.BillingResetDay < 1 || settings.BillingResetDay > 28 {
@@ -1001,7 +1016,21 @@ func (s *Store) SaveSettings(settings model.Settings) error {
 			return errors.New("到期时间格式无效，应为 YYYY-MM-DD")
 		}
 	}
-	values := map[string]string{"language": settings.Language, "timezone": settings.Timezone, "interface": settings.Interface, "traffic_quota_bytes": strconv.FormatInt(settings.TrafficQuotaBytes, 10), "billing_reset_day": strconv.Itoa(settings.BillingResetDay), "expires_at": settings.ExpiresAt, "collect_endpoints": strconv.FormatBool(settings.CollectEndpoints)}
+	tpl := strings.ToLower(strings.TrimSpace(settings.SubscriptionTemplate))
+	if tpl != "minimal" && tpl != "standard" && tpl != "smart" {
+		tpl = "standard"
+	}
+	settings.SubscriptionTemplate = tpl
+	values := map[string]string{
+		"language":              settings.Language,
+		"timezone":              settings.Timezone,
+		"interface":             settings.Interface,
+		"traffic_quota_bytes":   strconv.FormatInt(settings.TrafficQuotaBytes, 10),
+		"billing_reset_day":     strconv.Itoa(settings.BillingResetDay),
+		"expires_at":            settings.ExpiresAt,
+		"collect_endpoints":     strconv.FormatBool(settings.CollectEndpoints),
+		"subscription_template": settings.SubscriptionTemplate,
+	}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err

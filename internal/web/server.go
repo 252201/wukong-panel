@@ -727,29 +727,47 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		used = max64(0, metrics[len(metrics)-1].RXBytes-metrics[0].RXBytes) + max64(0, metrics[len(metrics)-1].TXBytes-metrics[0].TXBytes)
 	}
 	expire := time.Now().AddDate(0, 1, 0).Unix()
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", used/2, used-used/2, settings.TrafficQuotaBytes, expire))
-	w.Header().Set("Profile-Update-Interval", "10")
-	w.Header().Set("Profile-Title", "Wukong Panel")
-	fmt.Fprintln(w, "proxies:")
-	proxyNames := make([]string, 0, len(nodes))
+
+	templateParam := r.URL.Query().Get("template")
+	if templateParam == "" {
+		templateParam = settings.SubscriptionTemplate
+		if templateParam == "" {
+			templateParam, _ = s.store.Setting("subscription_template")
+		}
+	}
+	tpl := NormalizeSubscriptionTemplate(templateParam)
+
+	var subItems []SubscriptionNode
 	for _, node := range nodes {
+		if node.Status != "active" {
+			continue
+		}
 		share, err := s.agent.Share(r.Context(), node.ID)
 		if err != nil {
 			continue
 		}
-		entry, err := clashProxyYAML(node, share.URI)
-		if err != nil {
-			continue
-		}
-		fmt.Fprint(w, entry)
-		proxyNames = append(proxyNames, node.Name)
+		subItems = append(subItems, SubscriptionNode{
+			Node:     node,
+			ShareURI: share.URI,
+		})
 	}
-	fmt.Fprintln(w, "proxy-groups:\n  - name: Wukong\n    type: select\n    proxies:")
-	for _, name := range proxyNames {
-		fmt.Fprintf(w, "      - %q\n", name)
+
+	content, err := RenderClashSubscription(RenderSubscriptionOptions{
+		Title:     "Wukong Panel",
+		GroupName: "Wukong",
+		Template:  tpl,
+		Items:     subItems,
+	})
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
 	}
-	fmt.Fprintln(w, "rules:\n  - MATCH,Wukong")
+
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", used/2, used-used/2, settings.TrafficQuotaBytes, expire))
+	w.Header().Set("Profile-Update-Interval", "10")
+	w.Header().Set("Profile-Title", "Wukong Panel")
+	fmt.Fprint(w, content)
 }
 
 func (s *Server) runJob(job model.Job, operation func(context.Context) error) {

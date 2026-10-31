@@ -349,14 +349,15 @@ type Job struct {
 }
 
 type Settings struct {
-	Language          string `json:"language"`
-	Timezone          string `json:"timezone"`
-	Interface         string `json:"interface"`
-	TrafficQuotaBytes int64  `json:"trafficQuotaBytes"`
-	BillingResetDay   int    `json:"billingResetDay"`
-	ExpiresAt         string `json:"expiresAt,omitempty"`
-	CollectEndpoints  bool   `json:"collectEndpoints"`
-	SubscriptionToken string `json:"subscriptionToken,omitempty"`
+	Language             string `json:"language"`
+	Timezone             string `json:"timezone"`
+	Interface            string `json:"interface"`
+	TrafficQuotaBytes    int64  `json:"trafficQuotaBytes"`
+	BillingResetDay      int    `json:"billingResetDay"`
+	ExpiresAt            string `json:"expiresAt,omitempty"`
+	CollectEndpoints     bool   `json:"collectEndpoints"`
+	SubscriptionToken    string `json:"subscriptionToken,omitempty"`
+	SubscriptionTemplate string `json:"subscriptionTemplate,omitempty"`
 }
 
 type FleetHost struct {

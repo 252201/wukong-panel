@@ -414,12 +414,17 @@ func fleetSubscriptionNodeCount(content string) int {
 	nodeCount := 0
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
-		switch trimmed {
-		case "proxies:":
-			inProxies = true
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
-		case "proxy-groups:", "rules:":
-			inProxies = false
+		}
+		isTopLevel := !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t")
+		if isTopLevel {
+			if trimmed == "proxies:" {
+				inProxies = true
+				continue
+			} else if strings.HasSuffix(trimmed, ":") {
+				inProxies = false
+			}
 		}
 		if inProxies && strings.HasPrefix(line, "  - name:") {
 			nodeCount++
@@ -1385,36 +1390,36 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 			entries = append(entries, cached[index])
 		}
 	}
-	seenNames := make(map[string]int)
-	for i := range entries {
-		baseName := entries[i].Node.Name
-		count := seenNames[baseName]
-		seenNames[baseName]++
-		if count > 0 {
-			entries[i].Node.Name = fmt.Sprintf("%s (%d)", baseName, count+1)
-		}
+	templateParam := r.URL.Query().Get("template")
+	if templateParam == "" {
+		templateParam, _ = s.store.Setting("subscription_template")
 	}
+	tpl := NormalizeSubscriptionTemplate(templateParam)
+
+	var subItems []SubscriptionNode
+	for _, item := range entries {
+		subItems = append(subItems, SubscriptionNode{
+			Node:     item.Node,
+			ShareURI: item.Share.URI,
+		})
+	}
+
+	content, err := RenderClashSubscription(RenderSubscriptionOptions{
+		Title:     "Wukong Fleet",
+		GroupName: "Wukong Fleet",
+		Template:  tpl,
+		Items:     subItems,
+		Comments:  comments,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	w.Header().Set("Profile-Update-Interval", "10")
 	w.Header().Set("Profile-Title", "Wukong Fleet")
-	for _, comment := range comments {
-		fmt.Fprintln(w, comment)
-	}
-	fmt.Fprintln(w, "proxies:")
-	names := []string{}
-	for _, item := range entries {
-		entry, err := clashProxyYAML(item.Node, item.Share.URI)
-		if err != nil {
-			continue
-		}
-		fmt.Fprint(w, entry)
-		names = append(names, item.Node.Name)
-	}
-	fmt.Fprintln(w, "proxy-groups:\n  - name: Wukong Fleet\n    type: select\n    proxies:")
-	for _, name := range names {
-		fmt.Fprintf(w, "      - %q\n", name)
-	}
-	fmt.Fprintln(w, "rules:\n  - MATCH,Wukong Fleet")
+	fmt.Fprint(w, content)
 }
 
 func fleetSubscriptionRevision(host model.FleetHost) string {

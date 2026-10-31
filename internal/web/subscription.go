@@ -146,3 +146,266 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	}
 	return builder.String(), nil
 }
+
+type SubscriptionTemplate string
+
+const (
+	TemplateMinimal  SubscriptionTemplate = "minimal"
+	TemplateStandard SubscriptionTemplate = "standard"
+	TemplateSmart    SubscriptionTemplate = "smart"
+)
+
+func NormalizeSubscriptionTemplate(tpl string) SubscriptionTemplate {
+	switch strings.ToLower(strings.TrimSpace(tpl)) {
+	case string(TemplateMinimal):
+		return TemplateMinimal
+	case string(TemplateSmart):
+		return TemplateSmart
+	default:
+		return TemplateStandard
+	}
+}
+
+type SubscriptionNode struct {
+	Node     model.Node
+	ShareURI string
+}
+
+type RenderSubscriptionOptions struct {
+	Title     string
+	GroupName string // Used for minimal template, defaults to "Wukong" if empty
+	Template  SubscriptionTemplate
+	Items     []SubscriptionNode
+	Comments  []string
+}
+
+func RenderClashSubscription(opts RenderSubscriptionOptions) (string, error) {
+	tpl := opts.Template
+	if tpl == "" {
+		tpl = TemplateStandard
+	}
+
+	// Deduplicate node names to ensure valid Clash YAML
+	items := make([]SubscriptionNode, len(opts.Items))
+	copy(items, opts.Items)
+	seenNames := make(map[string]int)
+	for i := range items {
+		baseName := items[i].Node.Name
+		count := seenNames[baseName]
+		seenNames[baseName]++
+		if count > 0 {
+			items[i].Node.Name = fmt.Sprintf("%s (%d)", baseName, count+1)
+		}
+	}
+
+	var sb strings.Builder
+
+	for _, comment := range opts.Comments {
+		trimmed := strings.TrimSpace(comment)
+		if trimmed != "" {
+			if !strings.HasPrefix(trimmed, "#") {
+				sb.WriteString("# ")
+			}
+			sb.WriteString(trimmed)
+			sb.WriteByte('\n')
+		}
+	}
+
+	sb.WriteString("proxies:\n")
+	proxyNames := make([]string, 0, len(items))
+	for _, item := range items {
+		entry, err := clashProxyYAML(item.Node, item.ShareURI)
+		if err != nil {
+			continue
+		}
+		sb.WriteString(entry)
+		proxyNames = append(proxyNames, item.Node.Name)
+	}
+
+	groupName := opts.GroupName
+	if groupName == "" {
+		groupName = "Wukong"
+	}
+
+	switch tpl {
+	case TemplateMinimal:
+		renderMinimalGroupsAndRules(&sb, groupName, proxyNames)
+	case TemplateSmart:
+		renderSmartGroupsAndRules(&sb, proxyNames)
+		renderSmartDNS(&sb)
+	case TemplateStandard:
+		fallthrough
+	default:
+		renderStandardGroupsAndRules(&sb, proxyNames)
+		renderStandardDNS(&sb)
+	}
+
+	return sb.String(), nil
+}
+
+func renderMinimalGroupsAndRules(sb *strings.Builder, groupName string, proxyNames []string) {
+	fmt.Fprintf(sb, "proxy-groups:\n  - name: %s\n    type: select\n    proxies:\n", groupName)
+	if len(proxyNames) == 0 {
+		sb.WriteString("      - DIRECT\n")
+	} else {
+		for _, name := range proxyNames {
+			fmt.Fprintf(sb, "      - %q\n", name)
+		}
+	}
+	fmt.Fprintf(sb, "rules:\n  - MATCH,%s\n", groupName)
+}
+
+func renderStandardGroupsAndRules(sb *strings.Builder, proxyNames []string) {
+	sb.WriteString("proxy-groups:\n")
+
+	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("  - name: ♻️ 自动选择\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    tolerance: 50\n    proxies:\n")
+	if len(proxyNames) == 0 {
+		sb.WriteString("      - DIRECT\n")
+	} else {
+		for _, name := range proxyNames {
+			fmt.Fprintf(sb, "      - %q\n", name)
+		}
+	}
+
+	sb.WriteString("  - name: 🎯 全球直连\n    type: select\n    proxies:\n      - DIRECT\n")
+
+	sb.WriteString("  - name: 🛑 广告拦截\n    type: select\n    proxies:\n      - REJECT\n      - DIRECT\n")
+
+	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("rules:\n")
+	sb.WriteString("  - GEOIP,private,DIRECT,no-resolve\n")
+	sb.WriteString("  - GEOSITE,category-ads-all,🛑 广告拦截\n")
+	sb.WriteString("  - GEOSITE,cn,🎯 全球直连\n")
+	sb.WriteString("  - GEOIP,CN,🎯 全球直连\n")
+	sb.WriteString("  - MATCH,🐟 漏网之鱼\n")
+}
+
+func renderSmartGroupsAndRules(sb *strings.Builder, proxyNames []string) {
+	sb.WriteString("proxy-groups:\n")
+
+	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("  - name: ♻️ 自动选择\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    tolerance: 50\n    proxies:\n")
+	if len(proxyNames) == 0 {
+		sb.WriteString("      - DIRECT\n")
+	} else {
+		for _, name := range proxyNames {
+			fmt.Fprintf(sb, "      - %q\n", name)
+		}
+	}
+
+	sb.WriteString("  - name: 🤖 AI 服务\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("  - name: 🎬 国际流媒体\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("  - name: 🎯 全球直连\n    type: select\n    proxies:\n      - DIRECT\n")
+
+	sb.WriteString("  - name: 🛑 广告拦截\n    type: select\n    proxies:\n      - REJECT\n      - DIRECT\n")
+
+	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	for _, name := range proxyNames {
+		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	sb.WriteString("rules:\n")
+	sb.WriteString("  - GEOIP,private,DIRECT,no-resolve\n")
+	sb.WriteString("  - GEOSITE,category-ads-all,🛑 广告拦截\n")
+
+	// AI rules
+	sb.WriteString("  - GEOSITE,openai,🤖 AI 服务\n")
+	sb.WriteString("  - GEOSITE,anthropic,🤖 AI 服务\n")
+	sb.WriteString("  - GEOSITE,claude,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,oaistatic.com,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,oaiusercontent.com,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,openai.com,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,chatgpt.com,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,anthropic.com,🤖 AI 服务\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,claude.ai,🤖 AI 服务\n")
+
+	// Streaming rules
+	sb.WriteString("  - GEOSITE,youtube,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,youtube.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,googlevideo.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,ytimg.com,🎬 国际流媒体\n")
+	sb.WriteString("  - GEOSITE,netflix,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,netflix.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,netflix.net,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,nflximg.net,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,nflxvideo.net,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,nflxso.net,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,nflxext.com,🎬 国际流媒体\n")
+	sb.WriteString("  - GEOSITE,disney,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,disneyplus.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,disney-plus.net,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,dssott.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,disneystreaming.com,🎬 国际流媒体\n")
+	sb.WriteString("  - GEOSITE,spotify,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,spotify.com,🎬 国际流媒体\n")
+	sb.WriteString("  - DOMAIN-SUFFIX,scdn.co,🎬 国际流媒体\n")
+
+	// Domestic direct
+	sb.WriteString("  - GEOSITE,cn,🎯 全球直连\n")
+	sb.WriteString("  - GEOIP,CN,🎯 全球直连\n")
+
+	// Fallback
+	sb.WriteString("  - MATCH,🐟 漏网之鱼\n")
+}
+
+func renderStandardDNS(sb *strings.Builder) {
+	sb.WriteString("dns:\n")
+	sb.WriteString("  enable: true\n")
+	sb.WriteString("  listen: 0.0.0.0:1053\n")
+	sb.WriteString("  ipv6: false\n")
+	sb.WriteString("  enhanced-mode: fake-ip\n")
+	sb.WriteString("  fake-ip-range: 198.18.0.1/16\n")
+	sb.WriteString("  fake-ip-filter:\n")
+	sb.WriteString("    - \"*.lan\"\n")
+	sb.WriteString("    - \"*.local\"\n")
+	sb.WriteString("    - \"localhost\"\n")
+	sb.WriteString("    - \"*.msftncsi.com\"\n")
+	sb.WriteString("    - \"msftconnecttest.com\"\n")
+	sb.WriteString("  nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
+	sb.WriteString("    - https://dns.alidns.com/dns-query\n")
+	sb.WriteString("  fallback:\n")
+	sb.WriteString("    - https://1.1.1.1/dns-query\n")
+	sb.WriteString("    - https://8.8.8.8/dns-query\n")
+	sb.WriteString("  fallback-filter:\n")
+	sb.WriteString("    geoip: true\n")
+	sb.WriteString("    geoip-code: CN\n")
+	sb.WriteString("    geosite:\n")
+	sb.WriteString("      - gfw\n")
+	sb.WriteString("    ipcidr:\n")
+	sb.WriteString("      - 240.0.0.0/4\n")
+}
+
+func renderSmartDNS(sb *strings.Builder) {
+	renderStandardDNS(sb)
+	sb.WriteString("  nameserver-policy:\n")
+	sb.WriteString("    \"geosite:youtube,netflix,disney,spotify\": \"https://1.1.1.1/dns-query#🚀 节点选择\"\n")
+	sb.WriteString("    \"geosite:openai,claude\": \"https://1.1.1.1/dns-query#🚀 节点选择\"\n")
+	sb.WriteString("    \"+.openai.com,+.chatgpt.com,+.anthropic.com,+.claude.ai\": \"https://1.1.1.1/dns-query#🚀 节点选择\"\n")
+	sb.WriteString("    \"+.youtube.com,+.googlevideo.com,+.ytimg.com,+.netflix.com,+.netflix.net,+.nflxvideo.net,+.disneyplus.com,+.spotify.com\": \"https://1.1.1.1/dns-query#🚀 节点选择\"\n")
+	sb.WriteString("    \"geosite:cn\":\n")
+	sb.WriteString("      - 223.5.5.5\n")
+	sb.WriteString("      - 119.29.29.29\n")
+}

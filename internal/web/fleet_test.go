@@ -202,6 +202,106 @@ func TestFleetSubscriptionNodeCountExcludesProxyGroup(t *testing.T) {
 	}
 }
 
+func TestFleetSubscriptionNodeCountWithDNS(t *testing.T) {
+	content := `# OFFLINE CACHE: Central Edge
+proxies:
+  - name: "HK-01"
+    type: hysteria2
+    server: "hk.example.com"
+  - name: "SG-01"
+    type: vless
+    server: "sg.example.com"
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - ♻️ 自动选择
+      - "HK-01"
+      - "SG-01"
+  - name: ♻️ 自动选择
+    type: url-test
+    proxies:
+      - "HK-01"
+      - "SG-01"
+rules:
+  - MATCH,🐟 漏网之鱼
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  nameserver-policy:
+    "geosite:openai,claude": "https://1.1.1.1/dns-query#🚀 节点选择"
+`
+	if got := fleetSubscriptionNodeCount(content); got != 2 {
+		t.Fatalf("node count=%d, want 2", got)
+	}
+}
+
+func TestFleetSubscriptionTemplateOverride(t *testing.T) {
+	server, database := fleetWebTestServer(t)
+	enrolled := enrollFleetAgent(t, server, database, "edge-tpl", "Tpl Edge")
+	selected, _ := json.Marshal([]string{enrolled.HostID})
+	_ = database.SetSetting("fleet_subscription_hosts", string(selected))
+	_ = database.SetSetting("fleet_global_token", "global-tpl")
+
+	host, err := database.FleetHost(enrolled.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []fleetSubscriptionEntry{
+		{
+			Node:  model.Node{ID: "node-1", Name: "US-Node", Protocol: "vless", Status: "active"},
+			Share: model.Share{URI: "vless://00000000-0000-4000-8000-000000000001@203.0.113.10:443?security=tls&type=tcp#US-Node"},
+		},
+	}
+	plain, _ := json.Marshal(entries)
+	sealed, err := server.fleetVault.Encrypt(string(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.SaveFleetSubscriptionCache(host.ID, fleetSubscriptionRevision(host), sealed); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Default -> standard (fake-ip + 🚀 节点选择)
+	reqDef := httptest.NewRequest(http.MethodGet, "/fleet-sub/global-tpl/clash.yaml", nil)
+	recDef := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recDef, reqDef)
+	if recDef.Code != http.StatusOK {
+		t.Fatalf("status=%d", recDef.Code)
+	}
+	bodyDef := recDef.Body.String()
+	if !strings.Contains(bodyDef, "🚀 节点选择") || !strings.Contains(bodyDef, "enhanced-mode: fake-ip") {
+		t.Fatalf("expected standard template:\n%s", bodyDef)
+	}
+	if strings.Contains(bodyDef, "🤖 AI 服务") {
+		t.Fatalf("standard template should not have AI group")
+	}
+
+	// 2. URL param ?template=smart -> smart
+	reqSmart := httptest.NewRequest(http.MethodGet, "/fleet-sub/global-tpl/clash.yaml?template=smart", nil)
+	recSmart := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recSmart, reqSmart)
+	if recSmart.Code != http.StatusOK {
+		t.Fatalf("status=%d", recSmart.Code)
+	}
+	bodySmart := recSmart.Body.String()
+	if !strings.Contains(bodySmart, "🤖 AI 服务") || !strings.Contains(bodySmart, "nameserver-policy:") {
+		t.Fatalf("expected smart template:\n%s", bodySmart)
+	}
+
+	// 3. URL param ?template=minimal -> minimal
+	reqMin := httptest.NewRequest(http.MethodGet, "/fleet-sub/global-tpl/clash.yaml?template=minimal", nil)
+	recMin := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recMin, reqMin)
+	if recMin.Code != http.StatusOK {
+		t.Fatalf("status=%d", recMin.Code)
+	}
+	bodyMin := recMin.Body.String()
+	if strings.Contains(bodyMin, "dns:") || !strings.Contains(bodyMin, "MATCH,Wukong Fleet") {
+		t.Fatalf("expected minimal template:\n%s", bodyMin)
+	}
+}
+
 func TestProbeFleetSubscriptionDoesNotFollowRedirects(t *testing.T) {
 	server, database := fleetWebTestServer(t)
 	if err := database.SetSetting("fleet_global_token", "global-secret"); err != nil {
