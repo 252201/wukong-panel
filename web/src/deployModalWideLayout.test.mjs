@@ -77,6 +77,7 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.modal-card.node-form .modal-close'), 'Must style .modal-card.node-form .modal-close as header item without overlap')
   assert.ok(cssSource.includes('.deploy-mode-tabs'), 'Must style .deploy-mode-tabs')
   assert.ok(cssSource.includes('.deploy-mode-tab.active'), 'Must style active mode tab')
+  assert.ok(cssSource.includes('white-space: nowrap;\n  flex-shrink: 0;'), 'tab-tag must be nowrap and not shrink to prevent vertical character breaking')
 
   // Protocol matrix
   assert.ok(cssSource.includes('.protocol-matrix'), 'Must style .protocol-matrix grid')
@@ -115,4 +116,5 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   // Responsiveness
   assert.ok(cssSource.includes('@media (max-width: 980px)'), 'Must include 980px tablet breakpoint')
   assert.ok(cssSource.includes('@media (max-width: 650px)'), 'Must include 650px mobile breakpoint')
+  assert.ok(cssSource.includes('.deploy-mode-tab .tab-tag {\n    display: none;\n  }'), 'Must hide tab-tag on mobile <= 650px to eliminate vertical stacking and right border overflow')
 })
