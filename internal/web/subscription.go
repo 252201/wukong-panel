@@ -221,7 +221,7 @@ const (
 
 func NormalizeSubscriptionTemplate(tpl string) SubscriptionTemplate {
 	switch strings.ToLower(strings.TrimSpace(tpl)) {
-	case string(TemplateMinimal):
+	case string(TemplateMinimal), "raw", "none", "zero", "zero-rules", "bare":
 		return TemplateMinimal
 	case string(TemplateSmart):
 		return TemplateSmart
