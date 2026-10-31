@@ -32,6 +32,7 @@ function initApp() {
   if (urlTheme && meta) {
     meta.setAttribute('content', urlTheme);
   }
+  document.documentElement.style.colorScheme = resolvedTheme;
 
   const initialState: NavState = {
     lang: 'zh',
@@ -47,26 +48,34 @@ function initApp() {
   const footer = new Footer(initialState.lang);
 
   let quantumMesh: QuantumMesh | null = null;
+  let currentLang = initialState.lang;
+  let currentTheme = initialState.theme;
 
   // 2. Create Navbar with State Change Handler
   const navbar = new Navbar(initialState, (newState) => {
-    // Update children language
-    hero.setLang(newState.lang);
-    sandbox.setLang(newState.lang);
-    scrollytelling.setLang(newState.lang);
-    performanceMatrix.setLang(newState.lang);
-    footer.setLang(newState.lang);
-
-    // Update quantum mesh theme
-    if (quantumMesh) {
-      quantumMesh.setTheme(newState.theme === 'dark');
+    // 1. Theme toggle
+    if (newState.theme !== currentTheme) {
+      currentTheme = newState.theme;
+      if (quantumMesh) {
+        quantumMesh.setTheme(currentTheme === 'dark');
+      }
     }
 
-    // Update document title and lang
-    document.documentElement.lang = newState.lang;
-    document.title = newState.lang === 'zh'
-      ? '悟空面板 (Wukong Panel) - 官方主页 · 万里云霄舰队归一'
-      : 'Wukong Panel - Official Sovereign VPS Mesh & Fleet Console';
+    // 2. Language toggle (only re-render components if language actually changed)
+    if (newState.lang !== currentLang) {
+      currentLang = newState.lang;
+      hero.setLang(currentLang);
+      sandbox.setLang(currentLang);
+      scrollytelling.setLang(currentLang);
+      performanceMatrix.setLang(currentLang);
+      footer.setLang(currentLang);
+
+      // Update document title and lang
+      document.documentElement.lang = currentLang;
+      document.title = currentLang === 'zh'
+        ? '悟空面板 (Wukong Panel) - 官方主页 · 万里云霄舰队归一'
+        : 'Wukong Panel - Official Sovereign VPS Mesh & Fleet Console';
+    }
   });
 
   // 3. Assemble DOM Hierarchy
