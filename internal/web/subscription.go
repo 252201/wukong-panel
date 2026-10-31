@@ -109,6 +109,9 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 			if sid != "" {
 				fmt.Fprintf(&builder, "      short-id: %q\n", sid)
 			}
+			if insecure {
+				fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
+			}
 		} else if strings.EqualFold(query.Get("type"), "ws") {
 			path := query.Get("path")
 			hostHdr := query.Get("host")
@@ -117,9 +120,15 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 			}
 			tls := query.Get("security") == "tls"
 			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: %t\n    udp: true\n    servername: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), tls, sni, path, hostHdr)
+			if insecure {
+				fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
+			}
 		} else {
 			tls := query.Get("security") == "tls"
 			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: %t\n    udp: true\n    servername: %q\n", parsed.User.Username(), tls, sni)
+			if insecure {
+				fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
+			}
 		}
 	case "vless-ws-tunnel":
 		serverName := node.Server
@@ -127,6 +136,9 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 			serverName = sni
 		}
 		fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: true\n    udp: true\n    servername: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), serverName, query.Get("path"), serverName)
+		if insecure {
+			fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
+		}
 	case "ss", "shadowsocks":
 		decoded, decodeErr := base64.RawURLEncoding.DecodeString(parsed.User.Username())
 		if decodeErr != nil {
@@ -173,6 +185,10 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 //    be safely omitted from reality-opts without breaking client profile validation.
 func SanitizeRealityShortID(raw string) string {
 	sid := strings.TrimSpace(raw)
+	if unescaped, err := url.QueryUnescape(sid); err == nil && unescaped != "" {
+		sid = unescaped
+	}
+	sid = strings.Trim(sid, "[]\"' \t\r\n")
 	if sid == "" {
 		return ""
 	}
@@ -205,7 +221,7 @@ const (
 
 func NormalizeSubscriptionTemplate(tpl string) SubscriptionTemplate {
 	switch strings.ToLower(strings.TrimSpace(tpl)) {
-	case string(TemplateMinimal):
+	case string(TemplateMinimal), "raw", "none", "zero", "zero-rules", "bare":
 		return TemplateMinimal
 	case string(TemplateSmart):
 		return TemplateSmart
@@ -419,29 +435,31 @@ func renderSmartGroupsAndRules(sb *strings.Builder, proxyNames []string) {
 func renderStandardDNS(sb *strings.Builder) {
 	sb.WriteString("dns:\n")
 	sb.WriteString("  enable: true\n")
-	sb.WriteString("  ipv6: false\n")
+	sb.WriteString("  ipv6: true\n")
 	sb.WriteString("  enhanced-mode: fake-ip\n")
 	sb.WriteString("  fake-ip-range: 198.18.0.1/16\n")
+	sb.WriteString("  use-hosts: true\n")
 	sb.WriteString("  fake-ip-filter:\n")
 	sb.WriteString("    - \"*.lan\"\n")
 	sb.WriteString("    - \"*.local\"\n")
 	sb.WriteString("    - \"localhost\"\n")
 	sb.WriteString("    - \"*.msftncsi.com\"\n")
 	sb.WriteString("    - \"msftconnecttest.com\"\n")
+	sb.WriteString("    - \"*.msftconnecttest.com\"\n")
+	sb.WriteString("    - \"dns.alidns.com\"\n")
+	sb.WriteString("    - \"doh.pub\"\n")
+	sb.WriteString("    - \"+.252202.xyz\"\n")
+	sb.WriteString("    - \"+.877774.xyz\"\n")
+	sb.WriteString("    - \"+.cnmd.xx.kg\"\n")
+	sb.WriteString("  default-nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
+	sb.WriteString("  proxy-server-nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
 	sb.WriteString("  nameserver:\n")
 	sb.WriteString("    - 223.5.5.5\n")
 	sb.WriteString("    - 119.29.29.29\n")
-	sb.WriteString("    - https://dns.alidns.com/dns-query\n")
-	sb.WriteString("  fallback:\n")
-	sb.WriteString("    - https://1.1.1.1/dns-query\n")
-	sb.WriteString("    - https://8.8.8.8/dns-query\n")
-	sb.WriteString("  fallback-filter:\n")
-	sb.WriteString("    geoip: true\n")
-	sb.WriteString("    geoip-code: CN\n")
-	sb.WriteString("    geosite:\n")
-	sb.WriteString("      - gfw\n")
-	sb.WriteString("    ipcidr:\n")
-	sb.WriteString("      - 240.0.0.0/4\n")
 }
 
 func renderSmartDNS(sb *strings.Builder) {

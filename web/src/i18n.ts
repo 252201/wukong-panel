@@ -343,6 +343,8 @@ const english: Record<string, string> = {
   '标准开箱即用 (推荐)': 'Standard (Recommended)',
   '智能流媒体与 AI': 'Smart (Streaming & AI)',
   '极简纯净': 'Minimal clean',
+  '零规则裸配置 (原版纯净)': 'Zero-rules bare config (Original clean)',
+  '零规则': 'Zero-rules',
   '复制选定模板订阅': 'Copy template subscription',
   '复制默认': 'Copy default',
   '与管理入口完全隔离': 'Isolated from the management endpoint',

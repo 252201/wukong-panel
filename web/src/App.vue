@@ -3122,7 +3122,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   <select v-model="selectedFleetTemplate" class="scope-template-select" :aria-label="language === 'en-US' ? 'Rule Template' : '规则模板'">
                     <option value="standard">{{ language === 'en-US' ? 'Standard (Recommended)' : '标准开箱即用 (推荐)' }}</option>
                     <option value="smart">{{ language === 'en-US' ? 'Smart (Streaming & AI)' : '智能流媒体与 AI' }}</option>
-                    <option value="minimal">{{ language === 'en-US' ? 'Minimal Clean' : '极简纯净' }}</option>
+                    <option value="minimal">{{ language === 'en-US' ? 'Zero-Rules (Original Clean)' : '零规则裸配置 (原版纯净)' }}</option>
                   </select>
                 </label>
                 <button type="button" class="secondary btn-copy-template" :disabled="!fleetStatus?.globalSubscription" @click="copyFleetSubscriptionWithTemplate(selectedFleetTemplate)" :title="language === 'en-US' ? 'Copy subscription URL with chosen template' : '复制附带选定模板参数的订阅链接'">
@@ -3621,21 +3621,21 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                       <button v-for="tpl in [
                         { id: 'standard', name: language === 'en-US' ? 'Standard' : '标准开箱' },
                         { id: 'smart', name: language === 'en-US' ? 'Smart' : '智能分流' },
-                        { id: 'minimal', name: language === 'en-US' ? 'Minimal' : '极简纯净' }
+                        { id: 'minimal', name: language === 'en-US' ? 'Zero-Rules' : '零规则' }
                       ]" :key="tpl.id" type="button" class="settings-preset-chip" :class="{ active: (settings.subscriptionTemplate || 'standard') === tpl.id }" :disabled="mutationsDisabled" @click="settings.subscriptionTemplate = tpl.id">{{ tpl.name }}</button>
                     </span>
                   </span>
                   <select v-model="settings.subscriptionTemplate" class="template-select" :disabled="mutationsDisabled">
                     <option value="standard">{{ language === 'en-US' ? 'Standard (Fake-IP & Direct, Recommended)' : '标准开箱即用 (推荐)' }}</option>
                     <option value="smart">{{ language === 'en-US' ? 'Smart (Streaming & AI Egress DNS)' : '智能流媒体与 AI (落地联动)' }}</option>
-                    <option value="minimal">{{ language === 'en-US' ? 'Minimal Clean (Raw Proxies Only)' : '极简纯净 (仅裸节点)' }}</option>
+                    <option value="minimal">{{ language === 'en-US' ? 'Zero-Rules Bare Config (Original Clean)' : '零规则裸配置 (原版纯净)' }}</option>
                   </select>
                   <small class="field-hint">
                     {{
                       settings.subscriptionTemplate === 'smart'
                         ? (language === 'en-US' ? 'Dedicated OpenAI/Claude and streaming groups with egress-bound DNS resolution' : '细分 OpenAI/Claude 与流媒体策略组，并联动落地机 DNS 出站解析')
                         : settings.subscriptionTemplate === 'minimal'
-                        ? (language === 'en-US' ? 'Raw proxies with a single fallback group and no DNS block' : '仅输出裸节点与单条兜底规则，不注入 DNS 块')
+                        ? (language === 'en-US' ? 'Original zero-rule bare configuration: raw nodes with a single group, no routing rules and no DNS block' : '原版零规则裸配置：仅输出节点列表与单策略组兜底，不包含任何分流规则与 DNS 注入')
                         : (language === 'en-US' ? 'Built-in Fake-IP anti-pollution, private/CN direct routing, ad blocking and latency url-test' : '内置 Fake-IP 防污染、国内直连、广告拦截与自动延迟优选')
                     }}
                   </small>

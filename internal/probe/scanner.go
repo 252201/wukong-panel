@@ -517,12 +517,14 @@ func extractReality(inbound map[string]any) (pbk, sid, sni string) {
 			if pbk == "" {
 				pbk = deriveRealityPublicKey(getString(reality, "private_key"))
 			}
-			sid = getString(reality, "short_id")
-			if sid == "" {
-				if sids, ok := reality["short_id"].([]any); ok && len(sids) > 0 {
-					sid = fmt.Sprintf("%v", sids[0])
-				}
+			if sids, ok := reality["short_id"].([]any); ok && len(sids) > 0 {
+				sid = fmt.Sprintf("%v", sids[0])
+			} else if sids, ok := reality["short_id"].([]string); ok && len(sids) > 0 {
+				sid = sids[0]
+			} else {
+				sid = getString(reality, "short_id")
 			}
+			sid = strings.Trim(sid, "[]\"' \t\r\n")
 			if handshake, ok := reality["handshake"].(map[string]any); ok {
 				sni = getString(handshake, "server")
 			}
@@ -542,7 +544,10 @@ func extractReality(inbound map[string]any) (pbk, sid, sni string) {
 			}
 			if sids, ok := reality["shortIds"].([]any); ok && len(sids) > 0 {
 				sid = fmt.Sprintf("%v", sids[0])
+			} else if sids, ok := reality["shortIds"].([]string); ok && len(sids) > 0 {
+				sid = sids[0]
 			}
+			sid = strings.Trim(sid, "[]\"' \t\r\n")
 			if names, ok := reality["serverNames"].([]any); ok && len(names) > 0 {
 				sni = fmt.Sprintf("%v", names[0])
 			}
@@ -618,7 +623,22 @@ func deriveRealityPublicKey(privateValue string) string {
 
 func getString(m map[string]any, key string) string {
 	if val, ok := m[key]; ok && val != nil {
-		return strings.TrimSpace(fmt.Sprintf("%v", val))
+		switch v := val.(type) {
+		case string:
+			return strings.TrimSpace(v)
+		case []any:
+			if len(v) > 0 {
+				return strings.TrimSpace(fmt.Sprintf("%v", v[0]))
+			}
+			return ""
+		case []string:
+			if len(v) > 0 {
+				return strings.TrimSpace(v[0])
+			}
+			return ""
+		default:
+			return strings.TrimSpace(fmt.Sprintf("%v", val))
+		}
 	}
 	return ""
 }
