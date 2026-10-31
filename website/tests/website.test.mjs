@@ -85,10 +85,11 @@ test('Interactive Sandbox Protocols Matrix Completeness', async () => {
   assert.match(content, /runSimulatedProbe/, 'Must implement simulated probe execution');
   assert.match(content, /scrollToActiveTab/, 'Must implement scrollToActiveTab for auto-shifting tabs');
 
-  // Must remove outdated CLIENT [Browser], PACKET ROUTE, and VPS EGRESS labels
-  assert.ok(!content.includes('CLIENT [Browser]'), 'Must remove CLIENT [Browser] text label');
-  assert.ok(!content.includes('PACKET ROUTE'), 'Must remove PACKET ROUTE text label');
-  assert.ok(!content.includes('VPS EGRESS [sing-box]'), 'Must remove VPS EGRESS [sing-box] text label');
+  // Verify packet route bar with CLIENT [Browser], PACKET ROUTE, and VPS EGRESS is in the right console
+  assert.ok(content.includes('CLIENT [Browser]'), 'Must include CLIENT [Browser] text label in right console');
+  assert.ok(content.includes('PACKET ROUTE'), 'Must include PACKET ROUTE text label in right console');
+  assert.ok(content.includes('VPS EGRESS [sing-box]'), 'Must include VPS EGRESS [sing-box] text label in right console');
+  assert.match(content, /sandbox-probe-console[\s\S]*CLIENT \[Browser\][\s\S]*sandbox-controls/, 'Packet route bar must be placed in the right probe console above sandbox-controls');
 
   // Verify high contrast for active protocol chip badge text
   const mainCssPath = path.join(websiteDir, 'src/styles/main.css');

@@ -251,13 +251,6 @@ export class InteractiveSandbox {
         <div style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.6; background: var(--bg-primary); padding: 0.85rem 1rem; border-radius: var(--radius-md); border-left: 3px solid var(--gold-primary);">
           ${isZh ? spec.descZh : spec.descEn}
         </div>
-
-        <!-- Animated Packet Flow Runner (Clean Minimalist Stream Track) -->
-        <div style="background: var(--bg-primary); padding: 0.75rem 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-          <div style="position: relative; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
-            <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); animation: packet-flow 1.5s infinite linear;"></div>
-          </div>
-        </div>
       </div>
 
       <!-- Right: Real-Time Diagnostic Terminal Console -->
@@ -283,6 +276,18 @@ export class InteractiveSandbox {
             <span style="color: #9ca3af;">Roundtrip: <b style="color: #34d399;">26 ms</b></span>
             <span style="color: #9ca3af;">Loss: <b style="color: #34d399;">0.0% (30m)</b></span>
             <span style="color: #9ca3af;">Jitter: <b style="color: #34d399;">1.2 ms</b></span>
+          </div>
+        </div>
+
+        <!-- Animated Packet Route Bar -->
+        <div style="background: var(--bg-primary); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 0.5rem;">
+            <span>CLIENT [Browser]</span>
+            <span style="color: var(--telemetry-green);">PACKET ROUTE</span>
+            <span>VPS EGRESS [sing-box]</span>
+          </div>
+          <div style="position: relative; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
+            <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); animation: packet-flow 1.5s infinite linear;"></div>
           </div>
         </div>
 
