@@ -82,3 +82,28 @@ test('Simulated openNodeForm defaults race condition logic correctly preserves u
   assert.equal(form2.domain, 'reality.microsoft.com', 'Must not overwrite manually entered domain')
 })
 
+test('deleteNode, editNode, importSelected, and deleteCandidate retain page and trigger watchActionJob instead of showJobLog', () => {
+  const vueSource = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
+
+  // Verify deleteNode does not call showJobLog()
+  assert.ok(!vueSource.includes("modal.value = null; notify('删除任务已创建'); await showJobLog()"), 'deleteNode must not call showJobLog')
+  assert.ok(vueSource.includes("void watchActionJob(res.jobId, targetName, 'delete')"), 'deleteNode must invoke watchActionJob')
+
+  // Verify editNode in createNode does not call showJobLog()
+  assert.ok(!vueSource.includes("modal.value = null; notify('节点编辑任务已进入队列'); await showJobLog()"), 'editNode must not call showJobLog')
+  assert.ok(vueSource.includes("void watchActionJob(result.jobId, targetName, 'edit')"), 'editNode must invoke watchActionJob')
+
+  // Verify importSelected does not call showJobLog()
+  assert.ok(!vueSource.includes("modal.value = null; notify('接管任务已创建'); await showJobLog()"), 'importSelected must not call showJobLog')
+  assert.ok(vueSource.includes("void watchActionJob(res.jobId, targetLabel, 'import')"), 'importSelected must invoke watchActionJob')
+
+  // Verify deleteCandidate does not call showJobLog()
+  assert.ok(!vueSource.includes("notify('彻底删除任务已创建'); await showJobLog()"), 'deleteCandidate must not call showJobLog')
+  assert.ok(vueSource.includes("void watchActionJob(res.jobId, targetName, 'delete_candidate')"), 'deleteCandidate must invoke watchActionJob')
+
+  // Verify watchActionJob handles adaptive polling and success/failure notifications
+  assert.ok(vueSource.includes("async function watchActionJob("), 'must define watchActionJob')
+  assert.ok(vueSource.includes("language.value === 'en-US' ? `${targetName} deleted successfully` : `${targetName} 已成功删除`"), 'must notify on delete success')
+})
+
+

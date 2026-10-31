@@ -2007,7 +2007,9 @@ async function createNode() {
     const creatingDeviceBatch = deviceMode.value
     const common = { ...createForm, v6OnlyDomains: createForm.v6OnlyDomains.split(',').map(item => item.trim()).filter(Boolean) }
     if (modal.value === 'edit' && selectedNode.value) {
-      const result = await api.editNode(selectedNode.value.id, {
+      const editTarget = selectedNode.value
+      const targetName = common.name.trim() || editTarget.name
+      const result = await api.editNode(editTarget.id, {
         name: common.name.trim(), mode: common.mode, egress: common.egress, listenPort: common.listenPort,
         server: common.server.trim(), domain: common.domain.trim(), preferredServer: common.preferredServer.trim(),
         webSocketPath: common.webSocketPath.trim(), ipv4Bind: common.ipv4Bind.trim(), ipv6Bind: common.ipv6Bind.trim(),
@@ -2017,7 +2019,9 @@ async function createNode() {
         securityStatusCache.clear(selectedHostId.value)
         void fetchFirewallStatus()
       }
-      modal.value = null; notify('节点编辑任务已进入队列'); await showJobLog()
+      modal.value = null
+      notify(language.value === 'en-US' ? `Updating ${targetName}...` : `正在更新 ${targetName}...`)
+      void watchActionJob(result.jobId, targetName, 'edit')
       return
     }
     let deployRes: { jobId: string }
@@ -2135,6 +2139,72 @@ async function watchDeploymentJob(jobId: string, targetName: string, hostId = se
     if (deploymentProgress.value?.jobId === jobId) {
       deploymentProgress.value = null
     }
+  }
+}
+async function watchActionJob(jobId: string, targetName: string, action: 'delete' | 'edit' | 'import' | 'delete_candidate', hostId = selectedHostId.value) {
+  let delay = 300
+  try {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (!authenticated.value) return
+      await new Promise(resolve => window.setTimeout(resolve, delay))
+      if (!authenticated.value) return
+      delay = 800
+      let job: Job
+      try {
+        job = await api.job(jobId)
+      } catch {
+        continue
+      }
+      const existingIdx = jobs.value.findIndex(j => j.id === jobId)
+      if (existingIdx >= 0) {
+        jobs.value[existingIdx] = job
+      } else {
+        jobs.value.unshift(job)
+      }
+      if (job.status === 'success') {
+        const [nodeData, jobData, overviewData] = await Promise.all([
+          api.nodes(),
+          api.jobs(),
+          api.overview().catch(() => null),
+        ])
+        if (selectedHostId.value === hostId) {
+          nodes.value = nodeData
+          jobs.value = jobData
+          if (overviewData) overview.value = overviewData
+        }
+        void refreshFleetStatus()
+
+        let successMsg = ''
+        if (action === 'delete') {
+          successMsg = language.value === 'en-US' ? `${targetName} deleted successfully` : `${targetName} 已成功删除`
+        } else if (action === 'edit') {
+          successMsg = language.value === 'en-US' ? `${targetName} updated successfully` : `${targetName} 配置已更新`
+        } else if (action === 'import') {
+          successMsg = language.value === 'en-US' ? 'Nodes adopted successfully' : '节点接管完成'
+        } else if (action === 'delete_candidate') {
+          successMsg = language.value === 'en-US' ? `${targetName} completely deleted` : `${targetName} 已彻底删除`
+        }
+        notify(successMsg)
+        return
+      } else if (job.status === 'failed') {
+        let actionLabel = action === 'delete' ? '删除' : action === 'edit' ? '更新' : action === 'import' ? '接管' : '删除'
+        if (language.value === 'en-US') {
+          actionLabel = action === 'delete' ? 'Delete' : action === 'edit' ? 'Update' : action === 'import' ? 'Adopt' : 'Delete'
+        }
+        const failMsg = language.value === 'en-US'
+          ? `${actionLabel} ${targetName} failed: ${job.error || job.message || 'unknown error'}`
+          : `${actionLabel} ${targetName} 失败：${job.error || job.message || '未知错误'}`
+        notify(failMsg)
+        if (selectedHostId.value === hostId) {
+          const jobData = await api.jobs().catch(() => null)
+          if (jobData) jobs.value = jobData
+        }
+        return
+      }
+    }
+    notify(language.value === 'en-US' ? 'Task still running in background, check Jobs log.' : '任务仍在后台运行，可前往任务日志查看进度')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : (language.value === 'en-US' ? 'Failed to track task status' : '轮询任务状态失败'))
   }
 }
 function newDeviceDraft(index: number): DeviceDraft {
@@ -2385,10 +2455,20 @@ async function watchProbeJob(nodeId: string, jobId: string) {
 async function deleteNode() {
 	if (!ensureHostWritable()) return
   if (!selectedNode.value) return
+  const nodeToDelete = selectedNode.value
+  const targetName = nodeToDelete.name
   busy.value = true
-  try { await api.nodeAction(selectedNode.value.id, 'delete', deleteConfirm.value); modal.value = null; notify('删除任务已创建'); await showJobLog() }
-  catch (error) { notify(error instanceof Error ? error.message : '删除失败') }
-  finally { busy.value = false }
+  try {
+    const res = await api.nodeAction(nodeToDelete.id, 'delete', deleteConfirm.value)
+    modal.value = null
+    deleteConfirm.value = ''
+    notify(language.value === 'en-US' ? `Deleting ${targetName}...` : `正在删除 ${targetName}...`)
+    void watchActionJob(res.jobId, targetName, 'delete')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '删除失败')
+  } finally {
+    busy.value = false
+  }
 }
 async function revealShare(node: NodeItem) {
   selectedNode.value = node; shareURI.value = ''; shareQR.value = ''; modal.value = 'share'
@@ -2404,9 +2484,17 @@ async function openImport() {
 async function importSelected() {
 	if (!ensureHostWritable()) return
   busy.value = true
-  try { await api.importNodes(selectedCandidates.value); modal.value = null; notify('接管任务已创建'); await showJobLog() }
-  catch (error) { notify(error instanceof Error ? error.message : '接管失败') }
-  finally { busy.value = false }
+  try {
+    const res = await api.importNodes(selectedCandidates.value)
+    modal.value = null
+    const targetLabel = `${selectedCandidates.value.length} 个节点`
+    notify(language.value === 'en-US' ? 'Adopting nodes...' : '正在接管选中节点...')
+    void watchActionJob(res.jobId, targetLabel, 'import')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '接管失败')
+  } finally {
+    busy.value = false
+  }
 }
 function stageCandidateDelete(candidate: Candidate) {
   candidateDeleteTarget.value = candidate
@@ -2421,13 +2509,18 @@ async function deleteCandidate() {
 	if (!ensureHostWritable()) return
   const candidate = candidateDeleteTarget.value
   if (!candidate || candidateDeleteConfirm.value !== candidate.name) return
+  const targetName = candidate.name
   busy.value = true
   try {
-    await api.deleteCandidate(candidate.fingerprint, candidateDeleteConfirm.value)
+    const res = await api.deleteCandidate(candidate.fingerprint, candidateDeleteConfirm.value)
     modal.value = null; candidateDeleteTarget.value = null; candidateDeleteConfirm.value = ''
-    notify('彻底删除任务已创建'); await showJobLog()
-  } catch (error) { notify(error instanceof Error ? error.message : '无法创建彻底删除任务') }
-  finally { busy.value = false }
+    notify(language.value === 'en-US' ? `Deleting candidate ${targetName}...` : `正在彻底删除 ${targetName}...`)
+    void watchActionJob(res.jobId, targetName, 'delete_candidate')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '无法创建彻底删除任务')
+  } finally {
+    busy.value = false
+  }
 }
 async function saveSettings() {
 	if (!ensureHostWritable()) return
