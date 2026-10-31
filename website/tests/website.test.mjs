@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -176,6 +177,9 @@ test('Magnetic Cursor 120fps LERP & Viewport Lifecycle', () => {
 
 test('Vite Production Build Artifacts Integrity', () => {
   const distDir = path.join(websiteDir, 'dist');
+  if (!fs.existsSync(distDir)) {
+    execSync('npm run build', { cwd: websiteDir, stdio: 'pipe' });
+  }
   assert.ok(fs.existsSync(distDir), 'dist/ directory must exist after build');
 
   const htmlPath = path.join(distDir, 'index.html');
