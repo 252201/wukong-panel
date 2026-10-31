@@ -192,6 +192,22 @@ const probeJobs = reactive<Record<string, string>>({})
 const hostFirewall = ref<FirewallState | null>(null)
 const diagnosticNode = ref<NodeItem | null>(null)
 
+interface DeploymentProgress {
+  jobId: string
+  targetName: string
+  progress: number
+  message: string
+}
+interface DeploymentReadyNotice {
+  jobId: string
+  title: string
+  message: string
+  node?: NodeItem
+}
+const deploymentProgress = ref<DeploymentProgress | null>(null)
+const deploymentReady = ref<DeploymentReadyNotice | null>(null)
+let deploymentReadyTimer: number | null = null
+
 watch(nodes, (newNodes) => {
   if (diagnosticNode.value) {
     const updated = newNodes.find(n => n.id === diagnosticNode.value?.id)
@@ -2004,6 +2020,7 @@ async function createNode() {
       modal.value = null; notify('节点编辑任务已进入队列'); await showJobLog()
       return
     }
+    let deployRes: { jobId: string }
     if (creatingDeviceBatch) {
       const requests = deviceNodes.map(device => ({
         ...common,
@@ -2017,17 +2034,108 @@ async function createNode() {
           webSocketPath: device.webSocketPath.trim(),
         } : {}),
       }))
-      await api.createNodeBatch(requests)
+      deployRes = await api.createNodeBatch(requests)
     } else {
-      await api.createNode(common)
+      deployRes = await api.createNode(common)
     }
     if (!isTunnelProtocol.value && common.autoAllowPort) {
       securityStatusCache.clear(selectedHostId.value)
       void fetchFirewallStatus()
     }
-    modal.value = null; notify(creatingDeviceBatch ? `${deviceNodes.length} 台设备的部署任务已进入队列` : '部署任务已进入队列'); await showJobLog()
+    modal.value = null
+    const deployTargetLabel = creatingDeviceBatch ? `${deviceNodes.length} 台设备编队` : (common.name.trim() || '节点')
+    notify(creatingDeviceBatch ? `${deviceNodes.length} 台设备的部署任务已启动...` : `${deployTargetLabel} 部署任务已启动...`)
+    void watchDeploymentJob(deployRes.jobId, deployTargetLabel)
   } catch (error) { notify(error instanceof Error ? error.message : '部署失败') }
   finally { busy.value = false }
+}
+async function quickCopyShare(node: NodeItem) {
+  try {
+    const share = await api.share(node.id)
+    await copy(share.uri)
+    notify(language.value === 'en-US' ? 'Node share link copied' : '节点分享链接已复制到剪贴板')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : (language.value === 'en-US' ? 'Failed to get share link' : '无法获取分享链接'))
+  }
+}
+async function watchDeploymentJob(jobId: string, targetName: string, hostId = selectedHostId.value) {
+  const previousNodeIds = new Set(nodes.value.map(n => n.id))
+  deploymentProgress.value = { jobId, targetName, progress: 10, message: language.value === 'en-US' ? 'Initializing...' : '初始化部署...' }
+  let delay = 300
+  try {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (!authenticated.value) return
+      await new Promise(resolve => window.setTimeout(resolve, delay))
+      if (!authenticated.value) return
+      delay = 800
+      let job: Job
+      try {
+        job = await api.job(jobId)
+      } catch {
+        continue
+      }
+      const existingIdx = jobs.value.findIndex(j => j.id === jobId)
+      if (existingIdx >= 0) {
+        jobs.value[existingIdx] = job
+      } else {
+        jobs.value.unshift(job)
+      }
+      if (deploymentProgress.value && deploymentProgress.value.jobId === jobId) {
+        deploymentProgress.value.progress = job.progress
+        deploymentProgress.value.message = job.message || (language.value === 'en-US' ? 'Deploying...' : '正在部署...')
+      }
+      if (job.status === 'success') {
+        const [nodeData, jobData, overviewData] = await Promise.all([
+          api.nodes(),
+          api.jobs(),
+          api.overview().catch(() => null),
+        ])
+        if (selectedHostId.value === hostId) {
+          nodes.value = nodeData
+          jobs.value = jobData
+          if (overviewData) overview.value = overviewData
+        }
+        void refreshFleetStatus()
+
+        const newlyAdded = nodeData.find(n => !previousNodeIds.has(n.id)) || nodeData[0]
+        const successMsg = language.value === 'en-US'
+          ? `${targetName} deployed successfully and is ready!`
+          : `${targetName} 部署完成并已就绪！已更新节点列表`
+        notify(successMsg)
+
+        deploymentReady.value = {
+          jobId,
+          title: language.value === 'en-US' ? `${targetName} Ready` : `${targetName} 部署就绪`,
+          message: language.value === 'en-US' ? 'Node started and passed inbound verification.' : '节点服务已启动并完成闭环校验，可直接使用。',
+          node: newlyAdded,
+        }
+        if (deploymentReadyTimer) window.clearTimeout(deploymentReadyTimer)
+        deploymentReadyTimer = window.setTimeout(() => {
+          if (deploymentReady.value?.jobId === jobId) {
+            deploymentReady.value = null
+          }
+        }, 15000)
+        return
+      } else if (job.status === 'failed') {
+        const failMsg = language.value === 'en-US'
+          ? `${targetName} deployment failed: ${job.error || job.message || 'unknown error'}`
+          : `${targetName} 部署失败：${job.error || job.message || '未知错误'}`
+        notify(failMsg)
+        if (selectedHostId.value === hostId) {
+          const jobData = await api.jobs().catch(() => null)
+          if (jobData) jobs.value = jobData
+        }
+        return
+      }
+    }
+    notify(language.value === 'en-US' ? 'Deployment still running in background, check Jobs log.' : '部署任务仍在后台运行，可前往任务日志查看进度')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : (language.value === 'en-US' ? 'Failed to track deployment' : '轮询任务状态失败'))
+  } finally {
+    if (deploymentProgress.value?.jobId === jobId) {
+      deploymentProgress.value = null
+    }
+  }
 }
 function newDeviceDraft(index: number): DeviceDraft {
   deviceSequence.value += 1
@@ -2169,12 +2277,18 @@ async function openNodeForm(kind: 'create' | 'device-create') {
   modal.value = kind; defaultsLoading.value = true
   try {
     const defaults = await api.nodeDeploymentDefaults()
+    if (modal.value !== kind) return
     deploymentDefaults.value = { panelDomain: defaults.panelDomain || '', ipv4: defaults.ipv4 || [], ipv6: defaults.ipv6 || [], residentialExitReady: !!defaults.residentialExitReady, socksExitReady: !!defaults.socksExitReady }
-    createForm.server = deploymentDefaults.value.panelDomain
-    createForm.domain = deploymentDefaults.value.panelDomain
-    if (deploymentDefaults.value.ipv4.length === 1) { bindChoice.ipv4 = deploymentDefaults.value.ipv4[0].address; applyBindChoice('ipv4') }
-    if (deploymentDefaults.value.ipv6.length === 1) { bindChoice.ipv6 = deploymentDefaults.value.ipv6[0].address; applyBindChoice('ipv6') }
+    if (!createForm.server) {
+      createForm.server = deploymentDefaults.value.panelDomain
+    }
+    if (!createForm.domain) {
+      createForm.domain = deploymentDefaults.value.panelDomain
+    }
+    if (!bindChoice.ipv4 && deploymentDefaults.value.ipv4.length === 1) { bindChoice.ipv4 = deploymentDefaults.value.ipv4[0].address; applyBindChoice('ipv4') }
+    if (!bindChoice.ipv6 && deploymentDefaults.value.ipv6.length === 1) { bindChoice.ipv6 = deploymentDefaults.value.ipv6[0].address; applyBindChoice('ipv6') }
   } catch (error) {
+    if (modal.value !== kind) return
     deploymentDefaults.value = { panelDomain: '', ipv4: [], ipv6: [], residentialExitReady: false, socksExitReady: false }
     notify(error instanceof Error ? `无法读取部署默认值：${error.message}` : '无法读取部署默认值，请手动填写')
   } finally { defaultsLoading.value = false }
@@ -4798,5 +4912,40 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
     </div>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
+  <transition name="toast">
+    <div v-if="deploymentProgress" class="deployment-progress-indicator" role="status" aria-live="polite">
+      <div class="deployment-progress-header">
+        <i class="deployment-spinner"></i>
+        <div class="deployment-progress-body">
+          <span class="deployment-progress-title">{{ deploymentProgress.targetName }}</span>
+          <span class="deployment-progress-msg">{{ deploymentProgress.message }} ({{ deploymentProgress.progress }}%)</span>
+        </div>
+      </div>
+      <div class="deployment-progress-bar"><i :style="{ width: `${deploymentProgress.progress}%` }"></i></div>
+    </div>
+  </transition>
+  <transition name="toast">
+    <div v-if="deploymentReady" class="deployment-ready-card" role="alert">
+      <div class="ready-header">
+        <span class="ready-badge">✓</span>
+        <div class="ready-copy">
+          <b>{{ deploymentReady.title }}</b>
+          <p>{{ deploymentReady.message }}</p>
+        </div>
+        <button type="button" class="ready-close-btn" :title="language === 'en-US' ? 'Dismiss' : '关闭'" @click="deploymentReady = null">✕</button>
+      </div>
+      <div class="ready-actions">
+        <button v-if="deploymentReady.node" type="button" class="ready-action-btn primary" @click="quickCopyShare(deploymentReady.node)">
+          {{ language === 'en-US' ? 'Copy Share Link' : '复制分享链接' }}
+        </button>
+        <button v-if="deploymentReady.node" type="button" class="ready-action-btn secondary" @click="revealShare(deploymentReady.node); deploymentReady = null">
+          {{ language === 'en-US' ? 'QR Code' : '二维码 / 链接' }}
+        </button>
+        <button v-if="fleetStatus?.globalSubscription" type="button" class="ready-action-btn secondary" @click="copy(fleetStatus.globalSubscription)">
+          {{ language === 'en-US' ? 'Copy Subscription' : '复制全局订阅' }}
+        </button>
+      </div>
+    </div>
+  </transition>
   <transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></transition>
 </template>

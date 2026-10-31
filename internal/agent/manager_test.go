@@ -3,14 +3,18 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/252201/wukong-panel/internal/config"
+	"github.com/252201/wukong-panel/internal/hostsecurity"
 	"github.com/252201/wukong-panel/internal/model"
 	"github.com/252201/wukong-panel/internal/security"
 	"github.com/252201/wukong-panel/internal/store"
@@ -967,4 +971,232 @@ func TestAutoAllowFirewallPort(t *testing.T) {
 	manager.autoAllowFirewallPort(t.Context(), 0, protocolHysteria2)
 	manager.autoAllowFirewallPort(t.Context(), 8443, protocolVLESSWSTunnel)
 	manager.autoAllowFirewallPort(t.Context(), 8443, protocolHysteria2)
+
+	// Batch autoAllowFirewallPorts safely no-ops with contiguous and mixed specs in demo mode
+	specs := []portRuleSpec{
+		{Port: 20001, Protocol: protocolHysteria2},
+		{Port: 20002, Protocol: protocolHysteria2},
+		{Port: 20003, Protocol: protocolHysteria2},
+		{Port: 0, Protocol: protocolHysteria2},
+		{Port: 8443, Protocol: protocolVLESSWSTunnel},
+	}
+	manager.autoAllowFirewallPorts(t.Context(), specs)
 }
+
+func TestAutoAllowFirewallPortsNonDemo(t *testing.T) {
+	dir := t.TempDir()
+	secretDir := filepath.Join(dir, "secrets")
+	root := filepath.Join(dir, "root")
+	for _, p := range []string{secretDir, root} {
+		if e := os.MkdirAll(p, 0o700); e != nil {
+			t.Fatal(e)
+		}
+	}
+
+	for p, body := range map[string]string{
+		"/etc/os-release":                     "ID=debian\n",
+		"/proc/self/status":                   "CapEff:\t0000000000001000\n",
+		"/proc/sys/kernel/random/boot_id":     "boot-a\n",
+		"/etc/nginx/conf.d/wukong-panel.conf": "server {\n listen 9443 ssl;\n listen [::]:9443 ssl;\n}\n",
+	} {
+		fullPath := filepath.Join(root, p)
+		if e := os.MkdirAll(filepath.Dir(fullPath), 0o700); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.WriteFile(fullPath, []byte(body), 0o600); e != nil {
+			t.Fatal(e)
+		}
+	}
+
+	var mu sync.Mutex
+	rules := []string{
+		"ufw allow 46961/tcp",
+		"ufw allow 9443/tcp",
+		"ufw allow 30000/tcp",
+	}
+	var executed []string
+
+	runner := func(_ context.Context, name string, args []string, _ string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		key := strings.Join(args, " ")
+		switch {
+		case name == "ss":
+			return "LISTEN 0 128 0.0.0.0:46961 *:* users:((\"sshd\",pid=1,fd=3))\nLISTEN 0 128 0.0.0.0:9443 *:* users:((\"nginx\",pid=2,fd=4))", nil
+		case name == "ufw" && key == "status verbose":
+			return "Status: active\nDefault: deny (incoming), allow (outgoing)", nil
+		case name == "ufw" && key == "show added":
+			return strings.Join(rules, "\n"), nil
+		case name == "ufw" && len(args) >= 2 && args[0] == "allow":
+			rules = append(rules, "ufw "+key)
+			executed = append(executed, key)
+			return "Rule added", nil
+		}
+		return "", fmt.Errorf("fixture command unavailable: %s %v", name, args)
+	}
+
+	database, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	manager := &Manager{
+		cfg:   config.Config{SecretDir: secretDir, Demo: false},
+		store: database,
+	}
+	manager.securityFactory = func() *hostsecurity.Controller {
+		c := hostsecurity.New(secretDir, false)
+		c.Root = root
+		c.Run = runner
+		c.Lookup = func(n string) bool { return n == "ufw" }
+		c.Arm = func(context.Context) error { return nil }
+		return c
+	}
+
+	specs := []portRuleSpec{
+		{Port: 20001, Protocol: protocolHysteria2},
+		{Port: 20002, Protocol: protocolHysteria2},
+		{Port: 20003, Protocol: protocolHysteria2},
+		{Port: 20003, Protocol: protocolHysteria2},    // Duplicate
+		{Port: 20005, Protocol: protocolHysteria2},    // Non-contiguous
+		{Port: 46961, Protocol: protocolVLESS},        // Already covered (tcp)
+		{Port: 8443, Protocol: protocolVLESSWSTunnel}, // Tunnel protocol (should skip)
+		{Port: 30000, Protocol: protocolShadowsocks},  // SS needs tcp & udp; tcp is already covered, so only udp needed!
+	}
+
+	manager.autoAllowFirewallPorts(t.Context(), specs)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	foundRange := false
+	foundSingle := false
+	foundSSUDP := false
+	for _, cmd := range executed {
+		if strings.Contains(cmd, "20001:20003/udp") {
+			foundRange = true
+		}
+		if strings.Contains(cmd, "20005/udp") {
+			foundSingle = true
+		}
+		if strings.Contains(cmd, "30000/udp") {
+			foundSSUDP = true
+		}
+		if strings.Contains(cmd, "46961") {
+			t.Errorf("unexpected allow command for already covered port 46961: %s", cmd)
+		}
+		if strings.Contains(cmd, "8443") {
+			t.Errorf("unexpected allow command for tunnel port 8443: %s", cmd)
+		}
+		if strings.Contains(cmd, "30000/tcp") {
+			t.Errorf("unexpected allow command for already covered tcp port 30000: %s", cmd)
+		}
+	}
+	if !foundRange {
+		t.Fatalf("expected aggregated port range 20001:20003/udp, got executed: %v", executed)
+	}
+	if !foundSingle {
+		t.Fatalf("expected single port 20005/udp, got executed: %v", executed)
+	}
+	if !foundSSUDP {
+		t.Fatalf("expected UDP allow 30000/udp for Shadowsocks with existing TCP rule, got executed: %v", executed)
+	}
+}
+
+func TestProbeInboundsConcurrently(t *testing.T) {
+	// Case 1: All tasks succeed
+	tasks := []probeTask{
+		{index: 0, proto: protocolVLESS, port: 10001},
+		{index: 1, proto: protocolVLESS, port: 10002},
+		{index: 2, proto: protocolVLESS, port: 10003},
+		{index: 3, proto: protocolVLESS, port: 10004},
+		{index: 4, proto: protocolVLESS, port: 10005},
+	}
+	var active int32
+	var maxActive int32
+	var completed int32
+	err := probeInboundsConcurrently(t.Context(), tasks, func(ctx context.Context, proto string, port int) error {
+		cur := atomic.AddInt32(&active, 1)
+		for {
+			old := atomic.LoadInt32(&maxActive)
+			if cur <= old || atomic.CompareAndSwapInt32(&maxActive, old, cur) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		atomic.AddInt32(&active, -1)
+		atomic.AddInt32(&completed, 1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if completed != 5 {
+		t.Fatalf("expected 5 completed tasks, got %d", completed)
+	}
+	if maxActive > 4 {
+		t.Fatalf("concurrency limit exceeded: maxActive=%d > 4", maxActive)
+	}
+
+	// Case 2: One task fails, does NOT deadlock and aborts promptly
+	failTasks := []probeTask{
+		{index: 0, proto: protocolVLESS, port: 20001},
+		{index: 1, proto: protocolVLESS, port: 20002},
+		{index: 2, proto: protocolVLESS, port: 20003},
+		{index: 3, proto: protocolVLESS, port: 20004},
+		{index: 4, proto: protocolVLESS, port: 20005},
+		{index: 5, proto: protocolVLESS, port: 20006},
+	}
+	failErr := probeInboundsConcurrently(t.Context(), failTasks, func(ctx context.Context, proto string, port int) error {
+		if port == 20002 {
+			return errors.New("simulated handshake probe failure")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			return nil
+		}
+	})
+	if failErr == nil || !strings.Contains(failErr.Error(), "device 2 local preflight failed") {
+		t.Fatalf("expected device 2 preflight error, got %v", failErr)
+	}
+
+	// Case 3: Parent context cancelled
+	cancelCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	parentErr := probeInboundsConcurrently(cancelCtx, tasks, func(ctx context.Context, proto string, port int) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if parentErr == nil {
+		t.Fatal("expected parent context error")
+	}
+}
+
+func TestProgressMilestonesContext(t *testing.T) {
+	var milestones []int
+	var messages []string
+	reporter := func(progress int, msg string) {
+		milestones = append(milestones, progress)
+		messages = append(messages, msg)
+	}
+
+	ctx := model.ContextWithProgress(t.Context(), reporter)
+	model.ReportProgress(ctx, 20, "生成配置")
+	model.ReportProgress(ctx, 50, "启动服务")
+	model.ReportProgress(ctx, 75, "闭环探测")
+	model.ReportProgress(ctx, 90, "放行防火墙")
+
+	if len(milestones) != 4 || milestones[0] != 20 || milestones[3] != 90 {
+		t.Fatalf("unexpected milestones: %+v", milestones)
+	}
+	if messages[0] != "生成配置" || messages[3] != "放行防火墙" {
+		t.Fatalf("unexpected messages: %+v", messages)
+	}
+
+	// No-op when no reporter in context
+	model.ReportProgress(t.Context(), 100, "完成")
+}
+

@@ -753,10 +753,13 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runJob(job model.Job, operation func(context.Context) error) {
-	_ = s.store.UpdateJob(job.ID, "running", 20, "正在执行", "")
+	_ = s.store.UpdateJob(job.ID, "running", 10, "任务初始化", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	err := operation(ctx)
+	progressCtx := model.ContextWithProgress(ctx, func(progress int, message string) {
+		_ = s.store.UpdateJob(job.ID, "running", progress, message, "")
+	})
+	err := operation(progressCtx)
 	if err != nil {
 		_ = s.store.UpdateJob(job.ID, "failed", 100, "执行失败", err.Error())
 		return
