@@ -136,19 +136,14 @@ jobs:
 
   installer-matrix:
     needs: changes
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && needs.changes.outputs.installers == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
         image: [debian:12, ubuntu:24.04, rockylinux:9, almalinux:9, alpine:3.21]
     steps:
-      - name: Installer changes not present
-        if: needs.changes.outputs.installers != 'true'
-        run: echo "No installer changes; compatibility check completed without containers."
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.installers == 'true'
       - name: Validate installer syntax in target image
-        if: needs.changes.outputs.installers == 'true'
         run: |
           docker run --rm -v "$PWD:/src:ro" "${{ matrix.image }}" sh -c '
             sh -n /src/install.sh /src/uninstall.sh /src/bootstrap.sh /src/probe-install.sh

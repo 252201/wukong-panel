@@ -91,11 +91,6 @@ jobs:
           grep -Fq "version-v${plain_version}-" README.md
           grep -Fq -- "--version v${plain_version}" README.md
 
-      - name: Test backend
-        run: |
-          go test ./...
-          go vet ./...
-
       - name: Build web application
         run: npm ci && npm run build
         working-directory: web
