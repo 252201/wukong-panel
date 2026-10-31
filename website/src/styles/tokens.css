@@ -63,6 +63,33 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --radius-full: 9999px;
+
+  /* Cinnabar & Gold Gradients for Buttons and Badges */
+  --btn-cinnabar-grad: linear-gradient(135deg, #d93829 0%, #b82819 100%);
+  --btn-cinnabar-hover-grad: linear-gradient(135deg, #e44434 0%, #c52d1e 100%);
+  --btn-gold-grad: linear-gradient(135deg, var(--gold-bright) 0%, var(--gold-primary) 100%);
+
+  /* Default Dark Mode Button Tokens */
+  --cta-btn-bg: var(--btn-gold-grad);
+  --cta-btn-hover-bg: var(--btn-gold-grad);
+  --cta-btn-color: #1a160d;
+  --cta-btn-shadow: 0 4px 20px var(--gold-glow);
+  --cta-btn-hover-shadow: 0 8px 30px var(--gold-glow);
+
+  --chip-active-bg: var(--gold-primary);
+  --chip-active-color: #121008;
+  --chip-active-border: var(--gold-bright);
+  --chip-active-shadow: 0 2px 10px var(--gold-glow);
+  --chip-active-badge-bg: rgba(18, 16, 8, 0.15);
+  --chip-active-badge-color: #121008;
+  --chip-active-badge-border: rgba(18, 16, 8, 0.25);
+
+  --github-btn-bg: var(--gold-primary);
+  --github-btn-color: #ffffff;
+  --github-btn-hover-bg: var(--gold-bright);
+  --github-btn-hover-color: #1a160d;
+  --github-btn-shadow: 0 4px 14px var(--gold-glow);
+  --github-btn-hover-shadow: 0 6px 20px var(--gold-glow);
 }
 
 /* Modern Web Guidance: Map meta[name="color-scheme"] overrides back to CSS property */
@@ -72,4 +99,55 @@
 
 :root:has(> head > meta[name="color-scheme"][content="light"]) {
   color-scheme: light;
+}
+
+/* Light Mode Overrides for Buttons & Chips (Cinnabar Red Theme) */
+:root:has(> head > meta[name="color-scheme"][content="light"]),
+:root[data-theme="light"],
+[data-theme="light"] {
+  --cta-btn-bg: var(--btn-cinnabar-grad);
+  --cta-btn-hover-bg: var(--btn-cinnabar-hover-grad);
+  --cta-btn-color: #ffffff;
+  --cta-btn-shadow: 0 4px 20px rgba(217, 56, 41, 0.35);
+  --cta-btn-hover-shadow: 0 8px 30px rgba(217, 56, 41, 0.45);
+
+  --chip-active-bg: var(--btn-cinnabar-grad);
+  --chip-active-color: #ffffff;
+  --chip-active-border: #d93829;
+  --chip-active-shadow: 0 2px 12px rgba(217, 56, 41, 0.35);
+  --chip-active-badge-bg: rgba(255, 255, 255, 0.22);
+  --chip-active-badge-color: #ffffff;
+  --chip-active-badge-border: rgba(255, 255, 255, 0.35);
+
+  --github-btn-bg: var(--btn-cinnabar-grad);
+  --github-btn-color: #ffffff;
+  --github-btn-hover-bg: var(--btn-cinnabar-hover-grad);
+  --github-btn-hover-color: #ffffff;
+  --github-btn-shadow: 0 4px 14px rgba(217, 56, 41, 0.35);
+  --github-btn-hover-shadow: 0 6px 20px rgba(217, 56, 41, 0.45);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(:has(> head > meta[name="color-scheme"][content="dark"])) {
+    --cta-btn-bg: var(--btn-cinnabar-grad);
+    --cta-btn-hover-bg: var(--btn-cinnabar-hover-grad);
+    --cta-btn-color: #ffffff;
+    --cta-btn-shadow: 0 4px 20px rgba(217, 56, 41, 0.35);
+    --cta-btn-hover-shadow: 0 8px 30px rgba(217, 56, 41, 0.45);
+
+    --chip-active-bg: var(--btn-cinnabar-grad);
+    --chip-active-color: #ffffff;
+    --chip-active-border: #d93829;
+    --chip-active-shadow: 0 2px 12px rgba(217, 56, 41, 0.35);
+    --chip-active-badge-bg: rgba(255, 255, 255, 0.22);
+    --chip-active-badge-color: #ffffff;
+    --chip-active-badge-border: rgba(255, 255, 255, 0.35);
+
+    --github-btn-bg: var(--btn-cinnabar-grad);
+    --github-btn-color: #ffffff;
+    --github-btn-hover-bg: var(--btn-cinnabar-hover-grad);
+    --github-btn-hover-color: #ffffff;
+    --github-btn-shadow: 0 4px 14px rgba(217, 56, 41, 0.35);
+    --github-btn-hover-shadow: 0 6px 20px rgba(217, 56, 41, 0.45);
+  }
 }

@@ -135,6 +135,7 @@ export class Navbar {
           meta.setAttribute('content', nextTheme);
         }
         document.documentElement.style.colorScheme = nextTheme;
+        document.documentElement.setAttribute('data-theme', nextTheme);
         localStorage.setItem('color-scheme', nextTheme);
 
         this.render();
