@@ -445,6 +445,22 @@ func TestSubscriptionMihomoCompatibility(t *testing.T) {
 			Node:     model.Node{Name: "SG-01", Protocol: "vless", Server: "sg01.example.com", ListenPort: 443},
 			ShareURI: "vless://00000000-0000-4000-8000-000000000001@sg01.example.com:443?security=tls&type=tcp",
 		},
+		{
+			Node:     model.Node{Name: "US-Reality-Standard", Protocol: "vless", Server: "us02.example.com", ListenPort: 443},
+			ShareURI: "vless://00000000-0000-4000-8000-000000000002@us02.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=0123456789abcdef&sni=us02.example.com&type=tcp#US-Reality-Standard",
+		},
+		{
+			Node:     model.Node{Name: "US-Reality-LongHex32", Protocol: "vless", Server: "us03.example.com", ListenPort: 443},
+			ShareURI: "vless://00000000-0000-4000-8000-000000000003@us03.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=0123456789abcdef0123456789abcdef&sni=us03.example.com&type=tcp#US-Reality-LongHex32",
+		},
+		{
+			Node:     model.Node{Name: "US-Reality-InvalidNonHex", Protocol: "vless", Server: "us04.example.com", ListenPort: 443},
+			ShareURI: "vless://00000000-0000-4000-8000-000000000004@us04.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=sid1&sni=us04.example.com&type=tcp#US-Reality-InvalidNonHex",
+		},
+		{
+			Node:     model.Node{Name: "US-Reality-EmptySID", Protocol: "vless", Server: "us05.example.com", ListenPort: 443},
+			ShareURI: "vless://00000000-0000-4000-8000-000000000005@us05.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=&sni=us05.example.com&type=tcp#US-Reality-EmptySID",
+		},
 	}
 
 	for _, tpl := range []SubscriptionTemplate{TemplateMinimal, TemplateStandard, TemplateSmart} {
@@ -468,5 +484,87 @@ func TestSubscriptionMihomoCompatibility(t *testing.T) {
 				t.Fatalf("mihomo -t -f failed for template %s (exit: %v):\n%s\nConfig:\n%s", tpl, err, string(out), content)
 			}
 		})
+	}
+}
+
+func TestSanitizeRealityShortID(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"0123456789abcdef", "0123456789abcdef"},
+		{"6ba9633e", "6ba9633e"},
+		{"6BA9633E", "6ba9633e"},
+		{"0123456789abcdef0123456789abcdef", "0123456789abcdef"}, // Truncates 32 chars to 16
+		{"6ba9633e-1234-5678-9abc-def012345678", "6ba9633e12345678"}, // Strips dashes and takes 16
+		{"1234567", "01234567"},                                       // Pads odd length
+		{"sid1", ""},                                                  // Non-hex characters
+		{"none", ""},                                                  // Non-hex
+		{"undefined", ""},                                             // Non-hex
+		{"null", ""},                                                  // Non-hex
+		{"", ""},                                                      // Empty
+		{"   ", ""},                                                   // Whitespace
+	}
+	for _, tc := range cases {
+		got := SanitizeRealityShortID(tc.input)
+		if got != tc.want {
+			t.Errorf("SanitizeRealityShortID(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestClashRealityShortIDFormatting(t *testing.T) {
+	node := model.Node{
+		Name:       "Test-Reality",
+		Protocol:   "vless",
+		Server:     "node.example.com",
+		Domain:     "node.example.com",
+		ListenPort: 443,
+	}
+
+	// 1. Valid short id should output quoted short-id
+	validShare := "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@node.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=0123456789abcdef"
+	entry, err := clashProxyYAML(node, validShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(entry, `short-id: "0123456789abcdef"`) {
+		t.Fatalf("expected quoted short-id, got:\n%s", entry)
+	}
+
+	// 2. 32-char hex short id should be truncated to 16 chars
+	longShare := "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@node.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=0123456789abcdef0123456789abcdef"
+	entry, err = clashProxyYAML(node, longShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(entry, `short-id: "0123456789abcdef"`) {
+		t.Fatalf("expected truncated 16-char short-id, got:\n%s", entry)
+	}
+	if strings.Contains(entry, "0123456789abcdef0123456789abcdef") {
+		t.Fatalf("should not contain original 32-char short-id in:\n%s", entry)
+	}
+
+	// 3. Invalid non-hex short id should be omitted
+	invalidShare := "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@node.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=sid1"
+	entry, err = clashProxyYAML(node, invalidShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(entry, "short-id:") {
+		t.Fatalf("short-id should be omitted for invalid non-hex sid, got:\n%s", entry)
+	}
+	if !strings.Contains(entry, `public-key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"`) {
+		t.Fatalf("public-key should still be present, got:\n%s", entry)
+	}
+
+	// 4. Empty short id should be omitted
+	emptyShare := "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@node.example.com:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid="
+	entry, err = clashProxyYAML(node, emptyShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(entry, "short-id:") {
+		t.Fatalf("short-id should be omitted for empty sid, got:\n%s", entry)
 	}
 }

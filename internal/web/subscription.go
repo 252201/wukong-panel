@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,7 +94,21 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 		fmt.Fprintf(&builder, "    type: hysteria2\n    password: %q\n    sni: %q\n    alpn: [h3]\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, insecure)
 	case "vless":
 		if query.Get("pbk") != "" || query.Get("security") == "reality" {
-			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: true\n    udp: true\n    flow: xtls-rprx-vision\n    servername: %q\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: %q\n      short-id: %q\n", parsed.User.Username(), sni, query.Get("pbk"), query.Get("sid"))
+			flow := query.Get("flow")
+			if flow == "" || flow == "none" {
+				flow = "xtls-rprx-vision"
+			}
+			fp := query.Get("fp")
+			if fp == "" {
+				fp = "chrome"
+			}
+			pbk := strings.TrimSpace(query.Get("pbk"))
+			sid := SanitizeRealityShortID(query.Get("sid"))
+
+			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: true\n    udp: true\n    flow: %s\n    servername: %q\n    client-fingerprint: %s\n    reality-opts:\n      public-key: %q\n", parsed.User.Username(), flow, sni, fp, pbk)
+			if sid != "" {
+				fmt.Fprintf(&builder, "      short-id: %q\n", sid)
+			}
 		} else if strings.EqualFold(query.Get("type"), "ws") {
 			path := query.Get("path")
 			hostHdr := query.Get("host")
@@ -145,6 +160,39 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 		return "", fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}
 	return builder.String(), nil
+}
+
+// SanitizeRealityShortID validates and sanitizes a REALITY short ID to ensure
+// strict compatibility with Clash Meta / Mihomo specifications:
+// 1. Must contain only valid hexadecimal characters ([0-9a-fA-F]).
+// 2. Cannot exceed 16 hex characters (8 bytes, RealityMaxShortIDLen). If longer,
+//    it is safely truncated to the first 16 characters.
+// 3. Must be an even number of characters. If odd length <= 15, it is padded with
+//    a leading '0'.
+// 4. If empty, malformed, or non-hex, it returns an empty string so the field can
+//    be safely omitted from reality-opts without breaking client profile validation.
+func SanitizeRealityShortID(raw string) string {
+	sid := strings.TrimSpace(raw)
+	if sid == "" {
+		return ""
+	}
+	sid = strings.ReplaceAll(sid, "-", "")
+	for _, ch := range sid {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			return ""
+		}
+	}
+	if len(sid) > 16 {
+		sid = sid[:16]
+	}
+	if len(sid)%2 != 0 {
+		sid = "0" + sid
+	}
+	decoded, err := hex.DecodeString(sid)
+	if err != nil || len(decoded) == 0 || len(decoded) > 8 {
+		return ""
+	}
+	return strings.ToLower(sid)
 }
 
 type SubscriptionTemplate string
