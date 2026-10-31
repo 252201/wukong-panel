@@ -46,6 +46,11 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   // REALITY domain input group must be div to restrict click trigger solely to quick select button
   assert.ok(vueSource.includes('<div v-if="createForm.protocol !== \'shadowsocks\' && !isTunnelProtocol" class="field-item domain-input-group">'), 'domain-input-group must be div, not label, to lock trigger scope to button')
 
+  // Protocol pipeline guide for non-tunnel protocols to fill empty space
+  assert.ok(vueSource.includes('class="protocol-pipeline-guide"'), 'Must render protocol-pipeline-guide')
+  assert.ok(vueSource.includes('const currentProtocolGuide = computed'), 'Must compute currentProtocolGuide')
+  assert.ok(vueSource.includes('class="guide-tag"'), 'Must render guide-tag for protocol specs')
+
   // Device fleet tools and responsive grid
   assert.ok(vueSource.includes('class="fleet-deploy-grid"'), 'Must render fleet-deploy-grid in deviceMode')
   assert.ok(vueSource.includes('fleet-devices-card'), 'Must render fleet-devices-card')
@@ -97,6 +102,11 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.field-foot-row {\n  display: flex !important;\n  align-items: center !important;\n  justify-content: space-between !important;\n  gap: 8px !important;\n  min-height: 22px !important;'), 'Must standardize field-foot-row for symmetry')
   assert.ok(cssSource.includes('.modal-card label.port-auto-allow-label'), 'Must override .modal-card label for port-auto-allow-label')
   assert.ok(cssSource.includes('.port-auto-allow-label'), 'Must style port-auto-allow-label')
+
+  // Protocol pipeline guide for non-tunnel protocols
+  assert.ok(cssSource.includes('.protocol-pipeline-guide'), 'Must style .protocol-pipeline-guide')
+  assert.ok(cssSource.includes('.protocol-pipeline-guide .guide-tag'), 'Must style .guide-tag')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .protocol-pipeline-guide'), 'Must style light theme protocol-pipeline-guide')
 
   // Reality quick menu upward expansion and full height display
   assert.ok(cssSource.includes('.reality-quick-menu { position: absolute; right: 0; bottom: calc(100% + 6px);'), 'Must expand reality quick menu upwards')

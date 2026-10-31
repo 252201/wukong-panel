@@ -636,6 +636,13 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .tunnel-guide ol { margin: 8px 0 0; padding-left: 17px; color: var(--muted); font-size: 10px; line-height: 1.75; }
 .tunnel-guide p { margin: 7px 0 0; color: var(--muted-2); font-size: 9px; line-height: 1.6; }
 .tunnel-guide code { color: var(--jade); font: 500 9px "IBM Plex Mono", monospace; }
+.protocol-pipeline-guide { display: grid; grid-template-columns: 35px 1fr; gap: 13px; margin: 8px 0 2px; padding: 13px 15px; border: 1px solid rgba(212,173,87,.22); border-radius: 3px; background: linear-gradient(110deg, rgba(212,173,87,.045), rgba(var(--wash-rgb), .015)); }
+.protocol-pipeline-guide > span { display: grid; place-items: center; width: 35px; height: 35px; border: 1px solid rgba(212,173,87,.38); border-radius: 2px; background: rgba(212,173,87,.08); color: var(--gold); font-family: "STKaiti", serif; font-size: 17px; font-weight: 700; flex-shrink: 0; }
+.protocol-pipeline-guide b { display: block; color: var(--text-detail); font-size: 11.5px; font-weight: 600; letter-spacing: .2px; }
+.protocol-pipeline-guide ul { display: flex; flex-direction: column; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none; }
+.protocol-pipeline-guide li { display: flex; align-items: baseline; gap: 7px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.protocol-pipeline-guide .guide-tag { display: inline-block; padding: 1px 5px; border: 1px solid rgba(212,173,87,.25); border-radius: 2px; background: rgba(212,173,87,.08); color: var(--gold); font: 600 9px "IBM Plex Mono", monospace; letter-spacing: .2px; flex-shrink: 0; }
+.protocol-pipeline-guide p { margin: 7px 0 0; color: var(--muted-2); font-size: 9.5px; line-height: 1.5; }
 .toast { position: fixed; z-index: 50; right: 25px; bottom: 25px; padding: 13px 18px; background: #e0bd6d; color: #15120b; box-shadow: 0 16px 50px rgba(var(--shadow-rgb),.4); font-size: 12px; font-weight: 700; }.toast-enter-active,.toast-leave-active { transition: .2s; }.toast-enter-from,.toast-leave-to { opacity: 0; transform: translateY(10px); }
 
 .node-title-row { position: relative; display: flex; align-items: center; gap: 10px; margin: 28px 0 7px; }
@@ -1315,6 +1322,29 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .protocol-note-strip {
   background: #fbfbf9;
   border-color: rgba(242,138,11,.25);
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide {
+  border-color: rgba(242, 138, 11, .25);
+  background: linear-gradient(110deg, rgba(242, 138, 11, .05), #ffffff);
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide > span {
+  border-color: rgba(242, 138, 11, .38);
+  background: rgba(242, 138, 11, .08);
+  color: #bd6804;
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide b {
+  color: #2c3238;
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide .guide-tag {
+  border-color: rgba(242, 138, 11, .3);
+  background: rgba(242, 138, 11, .08);
+  color: #bd6804;
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide li {
+  color: #55606b;
+}
+:root[data-effective-theme="light"] .protocol-pipeline-guide p {
+  color: #8c97a2;
 }
 
 /* Mobile & Tablet Responsiveness */
