@@ -121,6 +121,7 @@ def check_jobs(needs):
         "frontend": "frontend", "backend": "backend",
         "host-security-matrix": "security",
         "installer-regressions": "installers",
+        "installer-matrix": "installers",
     }
     for job, scope in expected.items():
         value = outputs[scope]
@@ -129,10 +130,6 @@ def check_jobs(needs):
         wanted = "success" if value == "true" else "skipped"
         if needs[job]["result"] != wanted:
             raise ValueError(f"{job}: expected {wanted}, got {needs[job]['result']}")
-    # Preserve existing required matrix check names; no Docker is started when
-    # installers are out of scope, but each compatibility job still completes.
-    if needs["installer-matrix"]["result"] != "success":
-        raise ValueError("Installer checks failed or were cancelled")
 
 
 def git(*args):

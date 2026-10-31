@@ -137,7 +137,7 @@ def needs_fixture(selected):
         "backend": {"result": "success" if "backend" in selected else "skipped"},
         "installer-regressions": {"result": "success" if "installers" in selected else "skipped"},
         "host-security-matrix": {"result": "success" if "security" in selected else "skipped"},
-        "installer-matrix": {"result": "success"},
+        "installer-matrix": {"result": "success" if "installers" in selected else "skipped"},
     }
 
 
