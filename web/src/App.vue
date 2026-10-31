@@ -3571,7 +3571,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
 
       <!-- Seven Protocols Matrix Deck -->
       <div class="protocol-selection-area">
-        <div class="protocol-matrix">
+        <div class="protocol-matrix" :class="{ 'has-odd-cards': protocolList.length % 2 === 1 }">
           <button
             v-for="item in protocolList"
             :key="item.key"
@@ -3592,12 +3592,17 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <b class="matrix-title">{{ item.label }}</b>
             <small class="matrix-highlight">{{ item.highlight }}</small>
           </button>
-        </div>
-        <div class="protocol-note-strip">
-          <span class="strip-icon">💡</span>
-          <div class="strip-text">
-            <strong>{{ selectedProtocolInfo.label }}（{{ selectedProtocolInfo.transport }}）</strong>：
-            <span>{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</span>
+
+          <div class="protocol-note-strip">
+            <div class="strip-header-row">
+              <span class="strip-icon">💡</span>
+              <span class="strip-badge">{{ language === 'en-US' ? 'Feature' : '特性说明' }}</span>
+              <b class="strip-title">{{ selectedProtocolInfo.label }}</b>
+            </div>
+            <div class="strip-text">
+              <strong class="strip-label">{{ selectedProtocolInfo.label }}（{{ selectedProtocolInfo.transport }}）：</strong>
+              <span class="strip-desc">{{ isEditing ? '已部署节点不能原地切换协议；如需换协议请新建节点' : selectedProtocolInfo.note }}</span>
+            </div>
           </div>
         </div>
       </div>
