@@ -806,6 +806,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border-radius: 2px;
   font: 600 9px "IBM Plex Mono", monospace;
   letter-spacing: .06em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .deploy-mode-tab .tab-tag.gold {
   background: rgba(212,173,87,.15);
@@ -1346,10 +1348,32 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   .deploy-mode-tabs {
     grid-area: tabs;
     width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
   }
   .deploy-mode-tab {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     justify-content: center;
+    padding: 8px 10px;
+    gap: 7px;
+  }
+  .deploy-mode-tab .tab-icon {
+    flex-shrink: 0;
+  }
+  .deploy-mode-tab .tab-text {
+    min-width: 0;
+    justify-content: center;
+    gap: 0;
+  }
+  .deploy-mode-tab .tab-text b {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .deploy-mode-tab .tab-tag {
+    display: none;
   }
   .protocol-matrix {
     grid-template-columns: repeat(2, 1fr);
