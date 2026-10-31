@@ -48,6 +48,7 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
 
   // Protocol pipeline guide for non-tunnel protocols to fill empty space
   assert.ok(vueSource.includes('class="protocol-pipeline-guide"'), 'Must render protocol-pipeline-guide')
+  assert.ok(vueSource.includes(':class="createForm.protocol"'), 'Must bind protocol class dynamically to guide card')
   assert.ok(vueSource.includes('const currentProtocolGuide = computed'), 'Must compute currentProtocolGuide')
   assert.ok(vueSource.includes('class="guide-tag"'), 'Must render guide-tag for protocol specs')
 
@@ -107,7 +108,10 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   // Protocol pipeline guide for non-tunnel protocols
   assert.ok(cssSource.includes('.protocol-pipeline-guide'), 'Must style .protocol-pipeline-guide')
   assert.ok(cssSource.includes('.protocol-pipeline-guide .guide-tag'), 'Must style .guide-tag')
+  assert.ok(cssSource.includes('.protocol-pipeline-guide.hysteria2'), 'Must style hysteria2 guide accent')
+  assert.ok(cssSource.includes('.protocol-pipeline-guide.vless'), 'Must style vless guide accent')
   assert.ok(cssSource.includes(':root[data-effective-theme="light"] .protocol-pipeline-guide'), 'Must style light theme protocol-pipeline-guide')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .protocol-pipeline-guide.hysteria2'), 'Must style light theme hysteria2 guide accent')
 
   // Reality quick menu upward expansion and full height display
   assert.ok(cssSource.includes('.reality-quick-menu { position: absolute; right: 0; bottom: calc(100% + 6px);'), 'Must expand reality quick menu upwards')

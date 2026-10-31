@@ -3838,7 +3838,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </template>
 
             <!-- Non-tunnel protocol pipeline & specs guide to eliminate empty space -->
-            <div v-if="!isTunnelProtocol" class="protocol-pipeline-guide">
+            <div v-if="!isTunnelProtocol" class="protocol-pipeline-guide" :class="createForm.protocol">
               <span>{{ currentProtocolGuide.seal }}</span>
               <div>
                 <b>{{ currentProtocolGuide.title }}</b>
