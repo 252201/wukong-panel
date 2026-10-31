@@ -83,11 +83,18 @@ test('Interactive Sandbox Protocols Matrix Completeness', async () => {
   // Must have QR code rendering logic and probe simulation
   assert.match(content, /QRCode\.toCanvas/, 'Must use QRCode.toCanvas');
   assert.match(content, /runSimulatedProbe/, 'Must implement simulated probe execution');
+  assert.match(content, /scrollToActiveTab/, 'Must implement scrollToActiveTab for auto-shifting tabs');
+
+  // Must remove outdated CLIENT [Browser], PACKET ROUTE, and VPS EGRESS labels
+  assert.ok(!content.includes('CLIENT [Browser]'), 'Must remove CLIENT [Browser] text label');
+  assert.ok(!content.includes('PACKET ROUTE'), 'Must remove PACKET ROUTE text label');
+  assert.ok(!content.includes('VPS EGRESS [sing-box]'), 'Must remove VPS EGRESS [sing-box] text label');
 
   // Verify high contrast for active protocol chip badge text
   const mainCssPath = path.join(websiteDir, 'src/styles/main.css');
   const mainCss = fs.readFileSync(mainCssPath, 'utf8');
   assert.match(mainCss, /\.protocol-chip\.active\s+\.badge-mono\s*\{[^}]*color:\s*#121008/s, 'Active protocol chip badge text must be dark #121008 for high contrast against gold background');
+  assert.match(mainCss, /@keyframes packet-flow/, 'Must define @keyframes packet-flow');
 });
 
 test('Web Audio API Haptics Engine Definition', () => {
