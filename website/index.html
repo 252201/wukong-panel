@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    
+    <!-- Modern Web Guidance: Strict color-scheme declaration & FOUC prevention script -->
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        const stored = localStorage.getItem("color-scheme");
+        if (stored) {
+          document.querySelector('meta[name="color-scheme"]').content = stored;
+        }
+      } catch (e) {}
+    </script>
+
+    <!-- SEO & Metadata -->
+    <title>悟空面板 (Wukong Panel) - 官方主页 · 万里云霄舰队归一</title>
+    <meta name="description" content="面向个人与小型团队的自治 VPS 舰队控制台。Go 单二进制驱动，极低 25MB 内存开销；七大主流代理协议本机闭环握手，无感纳管 10 台远端舰队。" />
+    <meta name="keywords" content="悟空面板, Wukong Panel, VPS, sing-box, Hysteria 2, VLESS REALITY, CF Tunnel, TUIC, Shadowsocks, Fleet Mesh" />
+    <meta name="author" content="Wukong Panel Authors" />
+    <meta name="theme-color" content="#06080a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f4ec" media="(prefers-color-scheme: light)" />
+
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="悟空面板 (Wukong Panel) - 万里云霄舰队归一" />
+    <meta property="og:description" content="面向个人与小型团队的自治 VPS 舰队控制台。Go 单二进制驱动，极低 25MB 内存开销，七大主流代理协议现场调度。" />
+    <meta property="og:image" content="./favicon.svg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="悟空面板 (Wukong Panel)" />
+    <meta name="twitter:description" content="面向个人与小型团队的自治 VPS 舰队控制台。Go 单二进制驱动，极低 25MB 内存开销。" />
+
+    <!-- Favicon & Branding -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./favicon.svg" />
+
+    <!-- Schema.org JSON-LD Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Wukong Panel",
+        "operatingSystem": "Linux",
+        "applicationCategory": "NetworkingApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "description": "Autonomous multi-host VPS fleet mesh and node console powered by Go and sing-box.",
+        "softwareVersion": "2.3.0"
+      }
+    </script>
+  </head>
+  <body>
+    <!-- Modern Web Guidance: Purely visual scroll progress indicator removed from AT -->
+    <div id="scroll-progress" aria-hidden="true"></div>
+
+    <!-- Ambient Radial Spotlight Follower -->
+    <div class="ambient-spotlight" aria-hidden="true"></div>
+
+    <!-- SVG Cinematic Film Grain Overlay -->
+    <svg class="film-grain-overlay" aria-hidden="true">
+      <filter id="noiseFilter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="3" stitchTiles="stitch" />
+      </filter>
+      <rect width="100%" height="100%" filter="url(#noiseFilter)" />
+    </svg>
+
+    <!-- Application Root Mount -->
+    <div id="app"></div>
+
+    <script>
+      const urlParams = new URLSearchParams(window.location.search);
+      const scrollY = urlParams.get('scrollY');
+      if (scrollY) {
+        window.scrollTo(0, parseInt(scrollY, 10));
+      }
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
