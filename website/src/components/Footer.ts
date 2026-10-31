@@ -36,7 +36,7 @@ export class Footer {
               <span style="font-family: var(--font-kaiti); font-size: 1.35rem; font-weight: 700;">
                 ${isZh ? '悟空面板' : 'Wukong Panel'}
               </span>
-              <span class="brand-badge">v2.3.3</span>
+              <span class="brand-badge">v2.3.4</span>
             </div>
             <p class="text-caption" style="max-width: 320px; line-height: 1.7;">
               ${isZh
