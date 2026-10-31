@@ -37,7 +37,7 @@ export class QuantumMesh {
 
   private isRunning: boolean = false;
   private rafId: number | null = null;
-  private isDark: boolean = true;
+  private isDark: boolean = false;
   private reducedMotion: boolean = false;
 
   constructor(container: HTMLElement) {
@@ -70,12 +70,10 @@ export class QuantumMesh {
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const meta = document.querySelector('meta[name="color-scheme"]');
     const content = meta?.getAttribute('content') || '';
-    if (content === 'light') {
-      this.isDark = false;
-    } else if (content === 'dark') {
+    if (content === 'dark') {
       this.isDark = true;
     } else {
-      this.isDark = !window.matchMedia('(prefers-color-scheme: light)').matches;
+      this.isDark = false;
     }
   }
 
