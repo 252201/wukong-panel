@@ -286,8 +286,8 @@ export class InteractiveSandbox {
             <span style="color: var(--telemetry-green);">PACKET ROUTE</span>
             <span>VPS EGRESS [sing-box]</span>
           </div>
-          <div style="position: relative; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
-            <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); animation: packet-flow 1.5s infinite linear;"></div>
+          <div style="position: relative; height: 6px; background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08)); border-radius: 3px; overflow: hidden;">
+            <div class="packet-flow-runner" style="position: absolute; top: 0; left: 0; height: 100%; width: 35%; background: linear-gradient(90deg, transparent, var(--telemetry-green-bright), transparent); box-shadow: 0 0 10px var(--telemetry-glow); animation: packet-flow 1.5s infinite linear;"></div>
           </div>
         </div>
 

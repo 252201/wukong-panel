@@ -690,6 +690,8 @@ body {
 }
 
 .packet-flow-runner {
+  background: linear-gradient(90deg, transparent, var(--telemetry-green-bright), transparent);
+  box-shadow: 0 0 10px var(--telemetry-glow);
   will-change: transform;
 }
 
