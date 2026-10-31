@@ -1,0 +1,78 @@
+/* ==========================================================================
+   WUKONG OFFICIAL SITE - TOKENS & COLOR SYSTEM
+   Eastern Dark Gold Void (Void & Obsidian) & Xuan Paper Light Mode
+   Modern Web Guidance: color-scheme & light-dark() compliant
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* Fonts */
+  --font-serif: "Songti SC", "STSong", "Noto Serif SC", serif;
+  --font-kaiti: "STKaiti", "KaiTi", "Noto Serif SC", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Theme-adaptive tokens using light-dark() */
+  --bg-primary: light-dark(#f7f4ec, #06080a);
+  --bg-secondary: light-dark(#ede8dc, #0d1117);
+  --bg-card: light-dark(rgba(255, 255, 255, 0.78), rgba(15, 20, 28, 0.75));
+  --bg-card-hover: light-dark(rgba(255, 255, 255, 0.95), rgba(24, 32, 45, 0.85));
+  --bg-glass: light-dark(rgba(247, 244, 236, 0.75), rgba(6, 8, 10, 0.75));
+  --bg-code: light-dark(rgba(235, 230, 220, 0.9), rgba(12, 16, 22, 0.9));
+  --bg-terminal: light-dark(#1f2429, #080c10);
+
+  /* Borders */
+  --border-subtle: light-dark(rgba(184, 134, 11, 0.22), rgba(212, 173, 87, 0.16));
+  --border-medium: light-dark(rgba(184, 134, 11, 0.45), rgba(212, 173, 87, 0.35));
+  --border-bright: light-dark(#b8860b, #d4ad57);
+
+  /* Gold Palette (Alchemical & Xuan Gold) */
+  --gold-primary: light-dark(#9e782f, #d4ad57);
+  --gold-bright: light-dark(#b88e38, #f5d77f);
+  --gold-deep: light-dark(#7a5d20, #947633);
+  --gold-dim: light-dark(rgba(158, 120, 47, 0.12), rgba(212, 173, 87, 0.1));
+  --gold-glow: light-dark(rgba(158, 120, 47, 0.2), rgba(212, 173, 87, 0.25));
+
+  /* Cinnabar Seal (朱砂印) */
+  --cinnabar: #c44635;
+  --cinnabar-bright: #e05442;
+  --cinnabar-glow: rgba(196, 70, 53, 0.28);
+
+  /* Telemetry Emerald (碧玉遥测) */
+  --telemetry-green: light-dark(#059669, #10b981);
+  --telemetry-green-bright: light-dark(#10b981, #34d399);
+  --telemetry-glow: light-dark(rgba(5, 150, 105, 0.2), rgba(16, 185, 129, 0.25));
+
+  /* Text Colors */
+  --text-primary: light-dark(#1c1b18, #f3f4f6);
+  --text-secondary: light-dark(#555148, #9ca3af);
+  --text-muted: light-dark(#888276, #6b7280);
+  --text-gold: light-dark(#9e782f, #f5d77f);
+  --text-inverse: light-dark(#ffffff, #06080a);
+
+  /* Shadows & Depth */
+  --shadow-sm: light-dark(0 2px 8px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.4));
+  --shadow-md: light-dark(0 8px 24px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.5));
+  --shadow-lg: light-dark(0 16px 40px rgba(0, 0, 0, 0.12), 0 16px 48px rgba(0, 0, 0, 0.7));
+  --shadow-gold: 0 0 30px var(--gold-glow);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Noise Opacity */
+  --noise-opacity: light-dark(0.025, 0.04);
+}
+
+/* Modern Web Guidance: Map meta[name="color-scheme"] overrides back to CSS property */
+:root:has(> head > meta[name="color-scheme"][content="dark"]) {
+  color-scheme: dark;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="light"]) {
+  color-scheme: light;
+}
