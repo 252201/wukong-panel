@@ -201,12 +201,10 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 			"fake-ip-range: 198.18.0.1/16",
 			"223.5.5.5",
 			"119.29.29.29",
-			"https://1.1.1.1/dns-query",
-			"https://8.8.8.8/dns-query",
-			"geoip: true",
-			"geoip-code: CN",
-			"geosite:\n      - gfw",
-			"240.0.0.0/4",
+			"default-nameserver:",
+			"proxy-server-nameserver:",
+			"ipv6: true",
+			"use-hosts: true",
 		} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("standard template missing DNS setting %q:\n%s", want, out)
@@ -498,6 +496,9 @@ func TestSanitizeRealityShortID(t *testing.T) {
 		{"0123456789abcdef0123456789abcdef", "0123456789abcdef"}, // Truncates 32 chars to 16
 		{"6ba9633e-1234-5678-9abc-def012345678", "6ba9633e12345678"}, // Strips dashes and takes 16
 		{"1234567", "01234567"},                                       // Pads odd length
+		{"[ce7c5293131775d9]", "ce7c5293131775d9"},                   // Bracket-wrapped probe array
+		{"%5Bce7c5293131775d9%5D", "ce7c5293131775d9"},               // URL-encoded bracket-wrapped probe array
+		{"[\"ce7c5293131775d9\"]", "ce7c5293131775d9"},               // JSON array string representation
 		{"sid1", ""},                                                  // Non-hex characters
 		{"none", ""},                                                  // Non-hex
 		{"undefined", ""},                                             // Non-hex
