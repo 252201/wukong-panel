@@ -58,7 +58,7 @@ export class Hero {
           <div class="hero-badge-pill">
             <span class="hero-pulse-dot" aria-hidden="true"></span>
             <span class="cinnabar-seal">悟</span>
-            <span>${isZh ? 'v2.3.7 正式发布 · REALITY 适配与客户端兼容加固' : 'v2.3.7 Released · REALITY Compatibility & Client Hardening'}</span>
+            <span>${isZh ? 'v2.3.8 正式发布 · 订阅 DNS 引导加固与零规则裸配置回归' : 'v2.3.8 Released · Subscription DNS Hardening & Zero-Rules Support'}</span>
           </div>
 
           <h1 class="text-display">
@@ -104,7 +104,7 @@ export class Hero {
                 <span class="terminal-dot dot-yellow"></span>
                 <span class="terminal-dot dot-green"></span>
               </div>
-              <span class="terminal-title">bash — wukong-deploy-v2.3.7</span>
+              <span class="terminal-title">bash — wukong-deploy-v2.3.8</span>
               <div class="terminal-arch-toggle">
                 <button type="button" class="arch-btn ${this.arch === 'amd64' ? 'active' : ''}" data-arch="amd64">amd64</button>
                 <button type="button" class="arch-btn ${this.arch === 'arm64' ? 'active' : ''}" data-arch="arm64">arm64</button>
