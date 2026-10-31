@@ -337,10 +337,10 @@ export class InteractiveSandbox {
           <input type="text" readonly value="${spec.sampleUri}" class="font-mono text-caption" style="width: 100%; padding: 0.5rem 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); text-overflow: ellipsis;" id="share-uri-input">
           
           <div style="display: flex; gap: 0.75rem;">
-            <button type="button" class="btn-primary" style="flex: 1; padding: 0.6rem;" id="btn-copy-uri">
+            <button type="button" class="btn-primary" style="flex: 1; padding: 0.6rem; justify-content: center;" id="btn-copy-uri">
               <span>${isZh ? '复制链接' : 'Copy URI'}</span>
             </button>
-            <button type="button" class="btn-secondary" style="padding: 0.6rem 1.25rem;" id="btn-close-modal">
+            <button type="button" class="btn-secondary" style="padding: 0.6rem 1.25rem; justify-content: center;" id="btn-close-modal">
               <span>${isZh ? '关闭' : 'Close'}</span>
             </button>
           </div>
