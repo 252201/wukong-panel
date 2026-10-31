@@ -450,7 +450,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'TCP-based VLESS with zero-cert REALITY TLS 1.3 handshake' : '基于 TCP 的 VLESS 协议，搭载 REALITY 真实 TLS 偷跑伪装' },
           { tag: isEn ? 'Camouflage' : '拟真特性', text: isEn ? 'Presents legitimate target TLS 1.3 certificate & SNI (e.g. AWS, Apple)' : '对外呈现真实境外大厂网站的 TLS 1.3 证书与握手特征' },
           { tag: isEn ? 'Defense' : '主动防御', text: isEn ? 'Diverts scanner probes to destination site, zero exposed proxy footprint' : '针对外部主动嗅探扫描直接转发至真实站点，阻断主动探测' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'sing-box 1.4+, Mihomo (Clash.Meta), v2rayN native support' : '推荐使用 sing-box 1.4+、Mihomo (Clash.Meta)、v2rayN' },
         ],
         footer: isEn
           ? 'No domain purchase or certificate renewal required; optimal fallback during strict firewall periods.'
@@ -464,7 +463,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'AEAD 2022 specification using modern BLAKE3 + AES-128-GCM ciphers' : 'AEAD 2022 规范，采用 BLAKE3 + AES-128-GCM 现代密码学算法' },
           { tag: isEn ? 'Replay Guard' : '安全防御', text: isEn ? 'Session Replay Filter prevents probe attacks and historical replay' : '内置 Session Replay Filter，彻底杜绝历史长连接重放攻击与探针' },
           { tag: isEn ? 'Performance' : '极致性能', text: isEn ? 'Microsecond-level latency, minimal single-core CPU overhead, high concurrency' : '微秒级加解密处理延迟，单核 CPU 占用极低，高并发多路复用' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'Universally supported by sing-box, Clash, Shadowrocket across all platforms' : '全平台成熟开箱即用，支持 TCP 与 UDP 原生全双工转发' },
         ],
         footer: isEn
           ? 'Pure single-port lightweight proxy, ideal for high-speed routing, relay nodes, and LAN backbones.'
@@ -478,7 +476,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'Native QUIC v5 stack with BBR congestion control over single UDP port' : '基于 QUIC v5 原生栈与 BBR 拥塞控制，单 UDP 端口多路复用' },
           { tag: isEn ? '0-RTT' : '极速建连', text: isEn ? 'Ultra-low initial handshake latency with 0-RTT connection resumption' : '支持 0-RTT 极速握手，大幅降低移动设备与海外节点首次握手延迟' },
           { tag: isEn ? 'Migration' : '无感迁移', text: isEn ? 'Seamless migration between Wi-Fi and 5G cellular without packet interruption' : '蜂窝 4G/5G 与 Wi-Fi 频繁切换时连接平滑迁移，彻底杜绝断流重连' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'Native support in sing-box, Mihomo (Clash.Meta), Loon, Surge' : '推荐使用 sing-box、Mihomo、Loon、Surge 原生兼容' },
         ],
         footer: isEn
           ? 'Specially engineered for mobile roaming, low-latency gaming, and real-time voice calls.'
@@ -492,7 +489,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'Standard TLS 1.3 encrypted transport, indistinguishable from normal HTTPS' : '标准 TLS 1.3 加密传输通道，流量表现与正常 HTTPS 访问完全一致' },
           { tag: isEn ? 'Compatibility' : '通用兼容', text: isEn ? 'Time-tested mature protocol compatible with enterprise firewalls & legacy routers' : '老牌经典成熟协议，对各类传统网络网关与软硬件防火墙通用兼容' },
           { tag: isEn ? 'Cert Chain' : '证书挂载', text: isEn ? 'Automatically mounts panel TLS certificate with zero extra configuration' : '自动绑定并挂载面板域名 SSL 证书链，无需额外配置与手动续期' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'Supported out-of-the-box by virtually all proxy clients on every OS' : '几乎所有平台客户端（Clash、v2rayN、Quantumult X 等）开箱即用' },
         ],
         footer: isEn
           ? 'Ideal for environments demanding maximum cross-client compatibility and legacy OS access.'
@@ -506,7 +502,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'TLS transport extension with dynamic packet padding and connection multiplexing' : '基于 TLS 传输层扩展，支持动态碎片化流量填充与多路会话复用' },
           { tag: isEn ? 'DPI Resistance' : '特征抗检', text: isEn ? 'Randomized packet size distribution circumvents DPI statistical finger-printing' : '动态填充数据包尺寸分布，规避深度包检测（DPI）统计学指纹识别' },
           { tag: isEn ? 'TCP Fallback' : '链路保障', text: isEn ? 'Provides robust TCP fallback in networks where UDP is throttled or blocked' : '在 UDP 被强力 QoS 限速或阻断的网络环境下提供稳定的 TCP 兜底' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'Supported by modern sing-box clients with extended TLS stack capability' : '支持具备 AnyTLS 扩展协议栈能力的现代 sing-box 客户端' },
         ],
         footer: isEn
           ? 'Hardened proxy defense against advanced deep packet inspection and network shaping.'
@@ -521,7 +516,6 @@ const currentProtocolGuide = computed<ProtocolGuideItem>(() => {
           { tag: isEn ? 'Kernel' : '核心协议', text: isEn ? 'UDP-based QUIC transport stack with proprietary Brutal congestion control' : '基于 UDP 的 QUIC 传输栈，搭载自研 Brutal 拥塞控制算法' },
           { tag: isEn ? 'Anti-Loss' : '弱网对抗', text: isEn ? 'Saturates available bandwidth even under 10%–30% severe packet loss' : '恶劣高丢包链路（10%~30%）下依然能充分压榨并跑满网络带宽' },
           { tag: isEn ? 'Port Policy' : '端口策略', text: isEn ? 'Single UDP port binding; auto-allow firewall rule is recommended' : '监听单 UDP 端口，建议勾选自动放行以联动系统防火墙' },
-          { tag: isEn ? 'Clients' : '客户端推荐', text: isEn ? 'Native support in sing-box, Clash Verge Rev, Shadowrocket, Surge' : '推荐使用 sing-box、Clash Verge Rev、Shadowrocket 原生客户端' },
         ],
         footer: isEn
           ? 'Optimized for cross-ocean long-distance links, peak-hour congestion, and mobile cellular networks.'
