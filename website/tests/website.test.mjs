@@ -83,6 +83,11 @@ test('Interactive Sandbox Protocols Matrix Completeness', async () => {
   // Must have QR code rendering logic and probe simulation
   assert.match(content, /QRCode\.toCanvas/, 'Must use QRCode.toCanvas');
   assert.match(content, /runSimulatedProbe/, 'Must implement simulated probe execution');
+
+  // Verify that all 7 protocol chips wrap cleanly and are never hidden behind horizontal overflow
+  const mainCssPath = path.join(websiteDir, 'src/styles/main.css');
+  const mainCss = fs.readFileSync(mainCssPath, 'utf8');
+  assert.match(mainCss, /\.sandbox-protocol-bar\s*\{[^}]*flex-wrap:\s*wrap/s, 'Protocol bar must flex-wrap: wrap so all 7 protocols remain visible and selectable');
 });
 
 test('Web Audio API Haptics Engine Definition', () => {
