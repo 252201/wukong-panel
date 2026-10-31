@@ -64,9 +64,10 @@ test('App.vue implements wide multi-column layout, seven protocols matrix, and m
   assert.ok(!vueSource.includes('自动跟随 IP 变化'), 'Must hide 自动跟随 IP 变化 toggle')
   assert.ok(vueSource.includes('autoBind: false'), 'Must default autoBind to false')
 
-  // Footer status bar
-  assert.ok(vueSource.includes('class="node-form-foot"'), 'Must have node-form-foot footer')
-  assert.ok(vueSource.includes('class="node-form-status-bar"'), 'Must have status chips bar in footer')
+  // Header action buttons replace close button; footer status chips removed
+  assert.ok(vueSource.includes('class="modal-actions node-form-top-actions"'), 'Must have top actions inside header')
+  assert.ok(!vueSource.includes('class="node-form-foot"'), 'Must remove obsolete node-form-foot')
+  assert.ok(!vueSource.includes('class="node-form-status-bar"'), 'Must remove obsolete status chips bar')
 })
 
 test('styles.css contains wide 1200px modal layout and responsive styles', () => {
@@ -79,7 +80,7 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
 
   // Header and switcher tabs
   assert.ok(cssSource.includes('.node-form-top'), 'Must style .node-form-top')
-  assert.ok(cssSource.includes('.modal-card.node-form .modal-close'), 'Must style .modal-card.node-form .modal-close as header item without overlap')
+  assert.ok(cssSource.includes('.node-form-top-actions'), 'Must style .node-form-top-actions as header actions replacing close button')
   assert.ok(cssSource.includes('.deploy-mode-tabs'), 'Must style .deploy-mode-tabs')
   assert.ok(cssSource.includes('.deploy-mode-tab.active'), 'Must style active mode tab')
   assert.ok(cssSource.includes('white-space: nowrap;\n  flex-shrink: 0;'), 'tab-tag must be nowrap and not shrink to prevent vertical character breaking')
@@ -117,7 +118,8 @@ test('styles.css contains wide 1200px modal layout and responsive styles', () =>
   assert.ok(cssSource.includes('.tunnel-fleet-banner'), 'Must style .tunnel-fleet-banner')
   assert.ok(cssSource.includes('.field-grid-4 > .span-2'), 'Must style .field-grid-4 > .span-2')
   assert.ok(cssSource.includes('.mini-tool-btn'), 'Must style batch mini tools')
-  assert.ok(cssSource.includes('.node-form-foot'), 'Must style footer bar')
+  assert.ok(cssSource.includes('.node-form-top-actions'), 'Must style top action bar')
+  assert.ok(!cssSource.includes('.node-form-foot'), 'Must not retain legacy footer bar')
 
   // Light theme overrides
   assert.ok(cssSource.includes(':root[data-effective-theme="light"] .modal-card.node-form'), 'Must style light theme modal')

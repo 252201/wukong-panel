@@ -3668,7 +3668,12 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </div>
           </button>
         </div>
-        <button type="button" class="modal-close" @click="modal = null">×</button>
+        <div class="modal-actions node-form-top-actions">
+          <button type="button" class="secondary" @click="modal = null">取消</button>
+          <button class="primary" :disabled="busy || defaultsLoading || !!conflictingNodeName || (deviceMode && hasDevicePortDuplicate)">
+            {{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}
+          </button>
+        </div>
       </header>
 
       <!-- Seven Protocols Matrix Deck -->
@@ -4121,23 +4126,6 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           </div>
         </section>
       </div>
-
-      <!-- Footer Action Bar -->
-      <footer class="node-form-foot">
-        <div class="node-form-status-bar">
-          <span class="status-chip proto-chip">{{ selectedProtocolInfo.badge }}</span>
-          <span class="status-chip mode-chip">{{ modeLabel(createForm.mode) }}</span>
-          <span class="status-chip egress-chip">{{ createForm.egress === 'direct' ? 'A 机直出' : createForm.egress === 'residential' ? 'B 机落地' : 'SOCKS' }}</span>
-          <span v-if="conflictingNodeName" class="status-chip danger-chip">⚠️ 端口 {{ createForm.listenPort }} 冲突</span>
-          <span v-else-if="deviceMode && hasDevicePortDuplicate" class="status-chip danger-chip">⚠️ 编队设备间端口冲突</span>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="secondary" @click="modal = null">取消</button>
-          <button class="primary" :disabled="busy || defaultsLoading || !!conflictingNodeName || (deviceMode && hasDevicePortDuplicate)">
-            {{ busy ? '正在创建任务…' : isEditing ? '保存并安全重启' : '确认部署' }}
-          </button>
-        </div>
-      </footer>
     </form>
     <section v-else-if="modal === 'import'" class="modal-card import-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">DISCOVER EXISTING NODES</p><h2>扫描并接管现有节点</h2><p>接管不会重写配置或升级 sing-box；未知字段将原样保留。彻底删除会先建立校验快照。</p><div class="candidate-list"><div v-for="item in candidates" :key="item.fingerprint" class="candidate-row" :class="{ deleting: candidateDeleteTarget?.fingerprint === item.fingerprint }"><label class="candidate-select"><input v-model="selectedCandidates" type="checkbox" :value="item.fingerprint"><span><b>{{ item.name }} · {{ protocolInfo(item.protocol).badge }}</b><small>{{ item.configPath }} · {{ item.serviceName }}</small></span><em>{{ item.listenPort }}/{{ protocolInfo(item.protocol).transport }}</em></label><button type="button" class="candidate-purge" title="从服务器彻底删除此候选节点" @click="stageCandidateDelete(item)">彻底删除</button></div><p v-if="!candidates.length" class="empty">未发现可接管的代理节点</p></div><section v-if="candidateDeleteTarget" class="candidate-delete-confirm" role="alert"><header><span>险</span><div><b>彻底删除 {{ candidateDeleteTarget.name }}？</b><small>{{ candidateDeleteTarget.configPath }}</small></div></header><p v-if="candidateDeleteTarget.sharedGroup">系统会先建立 SHA-256 快照，只从共享配置移除端口 {{ candidateDeleteTarget.listenPort }} 的 inbound；其他节点与共享服务会保留。配置校验或重启失败将自动恢复。</p><p v-else>系统会先建立 SHA-256 快照，再停止并删除 {{ candidateDeleteTarget.serviceName === 'unknown' ? '对应配置文件' : '对应服务与配置文件' }}。此操作不可从面板撤销。</p><label>输入完整节点名称确认<input v-model="candidateDeleteConfirm" autocomplete="off" :placeholder="candidateDeleteTarget.name"></label><div><button type="button" class="secondary" @click="cancelCandidateDelete">保留节点</button><button type="button" class="danger-button" :disabled="busy || candidateDeleteConfirm !== candidateDeleteTarget.name" @click="deleteCandidate">{{ busy ? '正在创建任务…' : '确认彻底删除' }}</button></div></section><div class="modal-actions"><button class="secondary" @click="modal = null">取消</button><button class="primary" :disabled="busy || !selectedCandidates.length" @click="importSelected">接管 {{ selectedCandidates.length }} 个端点</button></div></section>
     <section v-else-if="modal === 'share'" class="modal-card share-modal"><button class="modal-close" @click="modal = null">×</button><p class="eyebrow">EPHEMERAL SHARE</p><h2>{{ selectedNode?.name }}</h2><p>敏感链接仅在当前会话短时显示。</p><img v-if="shareQR" :src="shareQR" alt="节点二维码"><div class="share-code"><code>{{ shareURI || '正在向 Root Agent 请求密钥…' }}</code><button :disabled="!shareURI" @click="copy(shareURI)">复制</button></div></section>
