@@ -4,8 +4,8 @@
  */
 
 export interface VersionInfo {
-  version: string; // e.g. "v2.4.3"
-  cleanVersion: string; // e.g. "2.4.3"
+  version: string; // e.g. "v2.4.4"
+  cleanVersion: string; // e.g. "2.4.4"
   releaseTitle?: string;
   isLatest: boolean;
 }
@@ -14,7 +14,7 @@ const CACHE_KEY = 'wukong_latest_version_cache';
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache TTL
 
 // Default fallback version bundled at build-time
-export const DEFAULT_VERSION = 'v2.4.3';
+export const DEFAULT_VERSION = 'v2.4.4';
 
 export type VersionListener = (info: VersionInfo) => void;
 
