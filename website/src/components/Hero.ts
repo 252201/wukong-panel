@@ -5,6 +5,7 @@
  */
 
 import { audioHaptics } from './AudioHaptics';
+import { versionService } from '../services/versionService';
 
 export class Hero {
   private element: HTMLElement;
@@ -13,6 +14,7 @@ export class Hero {
   private lang: 'zh' | 'en' = 'zh';
   private arch: 'amd64' | 'arm64' = 'amd64';
   private isCopied: boolean = false;
+  private version: string = versionService.getVersion().version;
 
   constructor(lang: 'zh' | 'en') {
     this.lang = lang;
@@ -32,6 +34,18 @@ export class Hero {
 
     this.render();
     this.bindEvents();
+
+    versionService.subscribe((info) => {
+      this.version = info.version;
+      const pill = this.element.querySelector('#hero-release-pill');
+      if (pill) {
+        pill.textContent = this.getHeroReleaseText();
+      }
+      const title = this.element.querySelector('#hero-terminal-title');
+      if (title) {
+        title.textContent = `bash — wukong-deploy-${info.version}`;
+      }
+    });
   }
 
   public getElement(): HTMLElement {
@@ -42,6 +56,13 @@ export class Hero {
     this.lang = lang;
     this.render();
     this.bindEvents();
+  }
+
+  private getHeroReleaseText(): string {
+    const isZh = this.lang === 'zh';
+    return isZh
+      ? `${this.version} 正式发布 · 全协议引导 DNS 加固与节点域名防劫持`
+      : `${this.version} Released · Bootstrap DNS Hardening & Anti-Poisoning Filter`;
   }
 
   private getCommand(): string {
@@ -58,7 +79,7 @@ export class Hero {
           <div class="hero-badge-pill">
             <span class="hero-pulse-dot" aria-hidden="true"></span>
             <span class="cinnabar-seal">悟</span>
-            <span>${isZh ? 'v2.3.10 正式发布 · 全协议引导 DNS 加固与节点域名防劫持' : 'v2.3.10 Released · Bootstrap DNS Hardening & Anti-Poisoning Filter'}</span>
+            <span id="hero-release-pill">${this.getHeroReleaseText()}</span>
           </div>
 
           <h1 class="text-display">
@@ -104,7 +125,7 @@ export class Hero {
                 <span class="terminal-dot dot-yellow"></span>
                 <span class="terminal-dot dot-green"></span>
               </div>
-              <span class="terminal-title">bash — wukong-deploy-v2.3.10</span>
+              <span class="terminal-title" id="hero-terminal-title">bash — wukong-deploy-${this.version}</span>
               <div class="terminal-arch-toggle">
                 <button type="button" class="arch-btn ${this.arch === 'amd64' ? 'active' : ''}" data-arch="amd64">amd64</button>
                 <button type="button" class="arch-btn ${this.arch === 'arm64' ? 'active' : ''}" data-arch="arm64">arm64</button>
