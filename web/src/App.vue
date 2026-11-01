@@ -5482,16 +5482,22 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <small>支持标准 HTTP/HTTPS Clash YAML 或 Base64 格式订阅源（已启用内网 IP 与私有地址 SSRF 防护）</small>
       </label>
 
-      <div class="form-grid">
-        <label class="checkbox-label inline-checkbox">
+      <div class="toggle-row inline external-sub-toggle-row">
+        <div>
+          <b>启用后台定时自动更新</b>
+          <small>定时拉取外部机场最新节点与同步流量用量</small>
+        </div>
+        <label class="switch">
           <input v-model="externalSubDraft.autoSync" type="checkbox">
-          <span>启用后台定时自动更新</span>
-        </label>
-        <label v-if="externalSubDraft.autoSync">
-          同步间隔（小时）
-          <input v-model.number="externalSubDraft.syncIntervalHours" type="number" min="1" max="168" required>
+          <i></i>
         </label>
       </div>
+
+      <label v-if="externalSubDraft.autoSync" class="external-sub-interval-label">
+        同步间隔（小时）
+        <input v-model.number="externalSubDraft.syncIntervalHours" type="number" min="1" max="168" required>
+        <small>建议设置为 6 ~ 24 小时；定时由后台守护进程在静默拉取更新</small>
+      </label>
 
       <div class="modal-actions">
         <button type="button" class="secondary" :disabled="busy" @click="modal = null">取消</button>
