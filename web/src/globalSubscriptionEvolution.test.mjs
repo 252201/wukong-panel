@@ -72,6 +72,7 @@ test('App.vue renders external subscriptions card, sync actions, and node select
   // External Sub Modal
   assert.ok(vueSource.includes("modal === 'external-sub'"), 'App.vue must render external-sub modal')
   assert.ok(vueSource.includes('submitExternalSubModal'), 'App.vue must define submitExternalSubModal')
+  assert.ok(vueSource.includes('autoSync: false'), 'externalSubDraft must default autoSync to false')
 
   // External Sub Delete Confirmation Modal (no browser native confirm popups)
   assert.ok(vueSource.includes('externalSubDeleteTarget'), 'App.vue must declare externalSubDeleteTarget')

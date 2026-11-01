@@ -904,7 +904,7 @@ const externalSubDraft = ref<{
   proxyUrl: '',
   rawContent: '',
   userAgent: '',
-  autoSync: true,
+  autoSync: false,
   syncIntervalHours: 12,
 })
 const syncingExternalSubId = ref<string | null>(null)
@@ -941,7 +941,7 @@ function openCreateExternalSubModal() {
     proxyUrl: '',
     rawContent: '',
     userAgent: '',
-    autoSync: true,
+    autoSync: false,
     syncIntervalHours: 12,
   }
   modal.value = 'external-sub'
