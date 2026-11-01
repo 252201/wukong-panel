@@ -88,4 +88,47 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-node-chip'), 'styles.css must style .external-node-chip')
   assert.ok(cssSource.includes('.external-nodes-filter-input'), 'styles.css must style .external-nodes-filter-input')
   assert.ok(cssSource.includes('.subscription-qr-modal'), 'styles.css must style .subscription-qr-modal')
+
+  // Checkbox dimension and overflow-x protections to avoid squashing node names
+  assert.ok(cssSource.includes('.external-nodes-grid'), 'styles.css must style .external-nodes-grid')
+  assert.ok(cssSource.includes('overflow-x: hidden'), 'styles.css .external-nodes-grid must hide horizontal overflow')
+  assert.ok(cssSource.includes('.external-node-chip input[type="checkbox"]'), 'styles.css must style external node checkbox')
+  assert.ok(cssSource.includes('flex: 0 0 14px !important'), 'checkbox must fix flex sizing to prevent expanding to 100% width')
+})
+
+test('externalSubSelectedIds filters out obsolete node IDs not present in subscription nodes', () => {
+  // Simulate externalSubSelectedIds logic
+  function externalSubNodes(sub) {
+    if (!sub || !Array.isArray(sub.nodes)) return []
+    return sub.nodes
+  }
+
+  function externalSubSelectedIds(sub) {
+    const nodes = externalSubNodes(sub)
+    if (!nodes.length) return []
+    if (Array.isArray(sub?.selectedNodeIds)) {
+      const validIds = new Set(nodes.map(n => n.id))
+      return sub.selectedNodeIds.filter(id => validIds.has(id))
+    }
+    return nodes.map(n => n.id)
+  }
+
+  const sub = {
+    id: 'sub-test',
+    nodes: [
+      { id: 'node-1', name: 'HK 01' },
+      { id: 'node-2', name: 'SG 01' },
+    ],
+    selectedNodeIds: ['node-1', 'obsolete-announcement-1', 'obsolete-announcement-2'],
+  }
+
+  const selected = externalSubSelectedIds(sub)
+  assert.deepEqual(selected, ['node-1'], 'should prune obsolete IDs so count matches valid nodes')
+  assert.equal(selected.length, 1)
+
+  // When selectedNodeIds is undefined, default to all valid nodes
+  assert.deepEqual(externalSubSelectedIds({ nodes: sub.nodes }), ['node-1', 'node-2'])
+
+  // When selectedNodeIds is empty array (user explicitly unselected all), return empty array
+  assert.deepEqual(externalSubSelectedIds({ nodes: sub.nodes, selectedNodeIds: [] }), [])
 })

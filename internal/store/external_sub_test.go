@@ -188,3 +188,54 @@ func TestExternalSubscriptionNilNodesSafe(t *testing.T) {
 		t.Fatalf("expected 1 sub with non-nil nodes in list, got %+v", list)
 	}
 }
+
+func TestExternalSubscriptionSelectedNodesPruning(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	sub := model.ExternalSubscription{
+		ID:   "sub-prune",
+		Name: "Prune Airport",
+		URL:  "https://airport.invalid/sub",
+		Nodes: []model.Node{
+			{ID: "node-1", Name: "HK 1", Protocol: "trojan", Server: "hk1.com", ListenPort: 443},
+			{ID: "node-2", Name: "HK 2", Protocol: "trojan", Server: "hk2.com", ListenPort: 443},
+		},
+		SelectedNodeIDs: []string{"node-1", "node-deleted-1", "node-deleted-2"},
+	}
+	if err := db.SaveExternalSubscription(sub); err != nil {
+		t.Fatalf("SaveExternalSubscription failed: %v", err)
+	}
+
+	// Retrieval should automatically prune obsolete IDs
+	got, err := db.ExternalSubscription("sub-prune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.SelectedNodeIDs) != 1 || got.SelectedNodeIDs[0] != "node-1" {
+		t.Fatalf("expected obsolete node IDs pruned, got %+v", got.SelectedNodeIDs)
+	}
+
+	// UpdateExternalSubscriptionSyncResult with new node set
+	newNodes := []model.Node{
+		{ID: "node-2", Name: "HK 2", Protocol: "trojan", Server: "hk2.com", ListenPort: 443},
+		{ID: "node-3", Name: "SG 1", Protocol: "trojan", Server: "sg1.com", ListenPort: 443},
+	}
+	err = db.UpdateExternalSubscriptionSyncResult("sub-prune", 100, 200, 1000, "2027-01-01", newNodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotAfterSync, err := db.ExternalSubscription("sub-prune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "node-1" is no longer in newNodes, so SelectedNodeIDs should now have 0 matching IDs
+	if len(gotAfterSync.SelectedNodeIDs) != 0 {
+		t.Fatalf("expected all obsolete selected IDs pruned, got %+v", gotAfterSync.SelectedNodeIDs)
+	}
+}
