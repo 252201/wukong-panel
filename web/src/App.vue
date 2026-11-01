@@ -723,7 +723,7 @@ async function refreshFleetStatus() {
     selectedHostId.value = 'local'
     setFleetHost('local')
   }
-  void loadExternalSubscriptions()
+  void loadExternalSubscriptions(true)
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
@@ -887,6 +887,7 @@ async function openSubscriptionQR(format?: string) {
 // External Subscriptions State & Methods
 const externalSubs = ref<ExternalSubscription[]>([])
 const loadingExternalSubs = ref(false)
+const externalSubsLoaded = ref(false)
 const externalSubDraft = ref<{
   id?: string
   name: string
@@ -903,10 +904,13 @@ const externalSubDraft = ref<{
 })
 const syncingExternalSubId = ref<string | null>(null)
 
-async function loadExternalSubscriptions() {
-  loadingExternalSubs.value = true
+async function loadExternalSubscriptions(silent = false) {
+  if (!silent && !externalSubsLoaded.value) {
+    loadingExternalSubs.value = true
+  }
   try {
     externalSubs.value = await api.externalSubscriptions()
+    externalSubsLoaded.value = true
   } catch {
     // ignore
   } finally {
@@ -3342,7 +3346,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </div>
           </header>
           
-          <div v-if="loadingExternalSubs && !externalSubs.length" class="external-sub-loading">
+          <div v-if="loadingExternalSubs && !externalSubsLoaded" class="external-sub-loading">
             <span>正在加载外部订阅…</span>
           </div>
 
