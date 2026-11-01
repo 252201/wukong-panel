@@ -147,7 +147,7 @@ func (s *Server) respondWithFallbackRelease(w http.ResponseWriter) {
 
 	cleanVer := strings.TrimPrefix(s.version, "v")
 	if cleanVer == "" || cleanVer == "dev" {
-		cleanVer = "2.4.6"
+		cleanVer = "2.4.7"
 	}
 	fallback := latestReleaseResult{
 		OK:             true,
