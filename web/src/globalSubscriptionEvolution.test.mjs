@@ -191,3 +191,27 @@ test('formatExternalExpiry avoids UTC timezone day shift for date-only strings',
   const formattedUtcIso = formatExternalExpiry('2027-02-18T00:00:00Z', 'zh-CN')
   assert.equal(formattedUtcIso, '2027/2/18')
 })
+
+test('App.vue integrates automatic country flag formatting and Cloudflare Worker relay guide', () => {
+  const vueSource = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
+
+  // Flag auto-formatting
+  assert.ok(vueSource.includes('formatNodeNameWithFlag'), 'App.vue must import formatNodeNameWithFlag')
+  assert.ok(vueSource.includes('formatExternalNodeName'), 'App.vue must declare formatExternalNodeName')
+  assert.ok(vueSource.includes('formatExternalNodeName(node.name)'), 'App.vue must render node names using formatExternalNodeName')
+
+  // CF Worker Guide state & methods
+  assert.ok(vueSource.includes("'cf-worker-guide'"), 'App.vue must support cf-worker-guide modal')
+  assert.ok(vueSource.includes('openCfWorkerGuideModal'), 'App.vue must define openCfWorkerGuideModal')
+  assert.ok(vueSource.includes('openCfWorkerGuideModalForSub'), 'App.vue must define openCfWorkerGuideModalForSub')
+  assert.ok(vueSource.includes('copyCfWorkerCode'), 'App.vue must define copyCfWorkerCode')
+  assert.ok(vueSource.includes('builtCfWorkerUrl'), 'App.vue must define builtCfWorkerUrl helper')
+  assert.ok(vueSource.includes('applyBuiltRelayUrlToDraft'), 'App.vue must define applyBuiltRelayUrlToDraft')
+
+  // UI Template elements
+  assert.ok(vueSource.includes('cf-worker-guide-tip'), 'App.vue must render cf-worker-guide-tip banner')
+  assert.ok(vueSource.includes('cf-worker-guide-modal'), 'App.vue must render cf-worker-guide-modal')
+  assert.ok(vueSource.includes('cf-code-preview'), 'App.vue must render cf-code-preview code block')
+  assert.ok(vueSource.includes('cf-builder-box'), 'App.vue must render cf-builder-box interactive URL helper')
+})
+
