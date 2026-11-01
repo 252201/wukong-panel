@@ -52,7 +52,7 @@ export class Navbar {
             </svg>
           </div>
           <span class="brand-title">${isZh ? '悟空面板' : 'Wukong Panel'}</span>
-          <span class="brand-badge">v2.3.9</span>
+          <span class="brand-badge">v2.3.10</span>
         </a>
 
         <nav class="nav-links" aria-label="Main Navigation">
