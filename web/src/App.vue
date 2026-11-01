@@ -15,6 +15,7 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
+import { formatNodeNameWithFlag } from './nodeFlags'
 import {
   fleetHostRateHint,
   networkGroupFrom,
@@ -128,7 +129,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'external-sub-delete' | 'subscription-qr' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'external-sub-delete' | 'subscription-qr' | 'cf-worker-guide' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -1073,11 +1074,120 @@ function filteredExternalNodes(sub?: ExternalSubscription | null): NodeItem[] {
   if (!sub) return all
   const q = (externalNodeFilter.value[sub.id] || '').trim().toLowerCase()
   if (!q) return all
-  return all.filter(n =>
-    n.name.toLowerCase().includes(q) ||
-    n.protocol.toLowerCase().includes(q) ||
-    n.server.toLowerCase().includes(q)
-  )
+  return all.filter(n => {
+    const formatted = formatExternalNodeName(n.name).toLowerCase()
+    return n.name.toLowerCase().includes(q) ||
+      formatted.includes(q) ||
+      n.protocol.toLowerCase().includes(q) ||
+      n.server.toLowerCase().includes(q)
+  })
+}
+
+function formatExternalNodeName(name?: string): string {
+  if (!name) return ''
+  return formatNodeNameWithFlag(name)
+}
+
+const cfWorkerBuilder = ref({
+  workerDomain: '',
+  subUrl: '',
+})
+const cfWorkerCodeCopied = ref(false)
+let cfWorkerCopyTimer: ReturnType<typeof setTimeout> | undefined
+
+const CF_WORKER_RELAY_CODE = `export default {
+  async fetch(request, env, ctx) {
+    if (request.method !== "GET") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    const rawUrl = request.url;
+    // 智能提取 ?url= 后面的所有完整内容，不被内部的 & 符号切断
+    const prefix = "?url=";
+    const idx = rawUrl.indexOf(prefix);
+    if (idx === -1) {
+      return new Response("Missing ?url= parameter", { status: 400 });
+    }
+
+    let targetUrl = rawUrl.slice(idx + prefix.length);
+    if (targetUrl.startsWith("http%3A") || targetUrl.startsWith("https%3A")) {
+      targetUrl = decodeURIComponent(targetUrl);
+    }
+
+    try {
+      const clientUA = request.headers.get("User-Agent") || "ClashMeta/v1.18.0";
+      const forwardReq = new Request(targetUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": clientUA,
+          "Accept": "*/*",
+          "Accept-Encoding": "gzip, deflate, br",
+        },
+        redirect: "follow",
+      });
+
+      const response = await fetch(forwardReq);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("Access-Control-Allow-Origin", "*");
+      newHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders,
+      });
+    } catch (err) {
+      return new Response(\`Relay Error: \${err.message}\`, { status: 502 });
+    }
+  },
+};`
+
+function copyCfWorkerCode() {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(CF_WORKER_RELAY_CODE).then(() => {
+      cfWorkerCodeCopied.value = true
+      notify('Cloudflare Worker 部署代码已成功复制到剪贴板！')
+      clearTimeout(cfWorkerCopyTimer)
+      cfWorkerCopyTimer = setTimeout(() => {
+        cfWorkerCodeCopied.value = false
+      }, 3000)
+    }).catch(() => {
+      copy(CF_WORKER_RELAY_CODE)
+    })
+  } else {
+    copy(CF_WORKER_RELAY_CODE)
+  }
+}
+
+const builtCfWorkerUrl = computed(() => {
+  let worker = cfWorkerBuilder.value.workerDomain.trim()
+  const target = cfWorkerBuilder.value.subUrl.trim()
+  if (!worker || !target) return ''
+  if (!worker.startsWith('http://') && !worker.startsWith('https://')) {
+    worker = 'https://' + worker
+  }
+  worker = worker.replace(/\/+$/, '')
+  return `${worker}/?url=${target}`
+})
+
+function openCfWorkerGuideModal() {
+  cfWorkerBuilder.value.subUrl = externalSubDraft.value.url === 'manual' ? '' : externalSubDraft.value.url
+  modal.value = 'cf-worker-guide'
+}
+
+function openCfWorkerGuideModalForSub(sub: ExternalSubscription) {
+  openEditExternalSubModal(sub)
+  cfWorkerBuilder.value.subUrl = sub.url === 'manual' ? '' : sub.url
+  modal.value = 'cf-worker-guide'
+}
+
+function applyBuiltRelayUrlToDraft() {
+  if (!builtCfWorkerUrl.value) return
+  externalSubDraft.value.url = builtCfWorkerUrl.value
+  externalSubDraft.value.proxyUrl = ''
+  externalSubImportMode.value = 'url'
+  modal.value = 'external-sub'
+  notify('中继链接已成功填入订阅链接！拉取代理已清空。')
 }
 
 function externalSubSelectedIds(sub?: ExternalSubscription | null): string[] {
@@ -3550,7 +3660,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     v-for="node in filteredExternalNodes(sub)"
                     :key="node.id"
                     class="external-node-chip"
-                    :title="`${node.name} (${node.protocol.toUpperCase()} · ${node.server}:${node.listenPort || ''})`"
+                    :title="`${formatExternalNodeName(node.name)} (${node.protocol.toUpperCase()} · ${node.server}:${node.listenPort || ''})`"
                   >
                     <input
                       type="checkbox"
@@ -3558,7 +3668,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                       @change="toggleExternalNodeSelected(sub, node.id, ($event.target as HTMLInputElement).checked)"
                     >
                     <span class="external-node-tag">{{ node.protocol }}</span>
-                    <span class="external-node-name">{{ node.name }}</span>
+                    <span class="external-node-name">{{ formatExternalNodeName(node.name) }}</span>
                   </label>
                 </div>
                 <div v-else-if="externalSubNodes(sub).length > 0" class="external-nodes-empty">
@@ -3566,6 +3676,14 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </div>
                 <div v-else class="external-nodes-empty">
                   <small>{{ sub.lastError ? `同步报错: ${sub.lastError}` : '尚无解析到的节点，请点击「立即同步」获取。' }}</small>
+                  <button
+                    v-if="sub.lastError && (sub.lastError.includes('403') || sub.lastError.includes('Forbidden') || sub.lastError.includes('connection refused') || sub.lastError.includes('timeout'))"
+                    type="button"
+                    class="cf-worker-card-action"
+                    @click="openCfWorkerGuideModalForSub(sub)"
+                  >
+                    ☁️ 遇到机房 IP 拦截？查看《Cloudflare Worker 订阅中继教程》
+                  </button>
                 </div>
               </div>
             </article>
@@ -5662,6 +5780,16 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <input v-model="externalSubDraft.proxyUrl" type="text" placeholder="例如: http://127.0.0.1:2080 或 socks5://127.0.0.1:1080">
           <small>当机场开启 Cloudflare WAF 质询并阻断 VPS 机房 IP（报 403 Forbidden）时，可指定本地或外部出站代理拉取</small>
         </label>
+
+        <div class="cf-worker-guide-tip">
+          <div class="cf-worker-tip-main">
+            <span class="cf-worker-tip-badge">防 403 阻断秘籍</span>
+            <span>机场开启 Cloudflare 盾并拦截 VPS 机房 IP？推荐使用免费 Worker 中继，100% 官方放行且全自动更新。</span>
+          </div>
+          <button type="button" class="btn-subtle cf-worker-open-btn" @click="openCfWorkerGuideModal">
+            ☁️ 查看 1 分钟配置教程与一键代码
+          </button>
+        </div>
       </template>
 
       <!-- Raw Content Mode Fields -->
@@ -5724,6 +5852,139 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       
       <div class="modal-actions">
         <button type="button" class="primary wide" @click="modal = null">完成</button>
+      </div>
+    </section>
+    <!-- Cloudflare Worker Subscription Relay Guide Modal -->
+    <section
+      v-else-if="modal === 'cf-worker-guide'"
+      class="modal-card cf-worker-guide-modal"
+      role="dialog"
+      aria-modal="true"
+      @keydown.esc.prevent="modal = 'external-sub'"
+    >
+      <button type="button" class="modal-close" @click="modal = 'external-sub'">×</button>
+      <span class="modal-seal blue">云</span>
+      <p class="eyebrow">CLOUDFLARE WORKER SUBSCRIPTION RELAY</p>
+      <h2>Cloudflare Worker 订阅中继指南</h2>
+      <p class="modal-lead">
+        利用 Cloudflare 全球边缘网络透明中转拉取机场订阅，彻底解决 VPS 机房 IP 被拦截与 <code>403 Forbidden</code> 报错，实现 100% 官方放行与全自动定时更新。
+      </p>
+
+      <div class="cf-guide-features">
+        <div class="cf-guide-feat-item">
+          <span class="cf-feat-icon">🛡️</span>
+          <div>
+            <b>100% 官方放行</b>
+            <small>走 Cloudflare 官方节点 IP 出站，无视任何机场 WAF 盾对机房 IP 的拦截</small>
+          </div>
+        </div>
+        <div class="cf-guide-feat-item">
+          <span class="cf-feat-icon">💰</span>
+          <div>
+            <b>永久免费额度</b>
+            <small>Cloudflare 免费版提供每日 100,000 次请求，个人及团队订阅更新绰绰有余</small>
+          </div>
+        </div>
+        <div class="cf-guide-feat-item">
+          <span class="cf-feat-icon">🔒</span>
+          <div>
+            <b>纯净无状态透传</b>
+            <small>内存实时流式转发，不记录、不持久化任何节点配置或 Token 凭据，绝对安全</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="cf-guide-steps">
+        <div class="cf-step-item">
+          <div class="cf-step-num">1</div>
+          <div class="cf-step-body">
+            <b>登录 Cloudflare 创建 Worker</b>
+            <p>
+              访问 <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">Cloudflare 控制台 ↗</a>，点击左侧导航栏 <b>Workers 和 Pages</b> ➔ <b>创建应用程序</b> ➔ 选择 <b>「从 Hello World! 开始」</b>。
+            </p>
+          </div>
+        </div>
+
+        <div class="cf-step-item">
+          <div class="cf-step-num">2</div>
+          <div class="cf-step-body">
+            <b>输入应用名称并部署</b>
+            <p>
+              自定义输入 Worker 名称（例如 <code>wukong-sub-relay</code>），直接点击右下角的 <b>部署</b>（Deploy）按钮。
+            </p>
+          </div>
+        </div>
+
+        <div class="cf-step-item">
+          <div class="cf-step-num">3</div>
+          <div class="cf-step-body">
+            <div class="cf-step-header">
+              <b>替换为悟空专属增强代码</b>
+              <button type="button" class="btn-copy-code" @click="copyCfWorkerCode">
+                {{ cfWorkerCodeCopied ? '✓ 代码已复制' : '📋 一键复制 Worker 脚本' }}
+              </button>
+            </div>
+            <p>部署完成后点击 <b>编辑代码</b>，清空原有模板，粘贴下方增强版 Worker 脚本并点击右上角 <b>保存并部署</b>：</p>
+            <div class="cf-code-preview">
+              <pre><code>{{ CF_WORKER_RELAY_CODE }}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="cf-step-item">
+          <div class="cf-step-num">4</div>
+          <div class="cf-step-body">
+            <b>一键拼接并填入外部订阅</b>
+            <p>填入 Cloudflare 分配给你的 Worker 域名（或自定义域名），以及原始机场订阅链接，系统将自动生成中继链接：</p>
+            
+            <div class="cf-builder-box">
+              <label>
+                Worker 域名
+                <input
+                  v-model="cfWorkerBuilder.workerDomain"
+                  type="text"
+                  placeholder="例如: https://wukong-sub-relay.xxxx.workers.dev"
+                >
+              </label>
+              <label>
+                原始机场订阅链接
+                <input
+                  v-model="cfWorkerBuilder.subUrl"
+                  type="text"
+                  placeholder="例如: https://airport.example.com/api/v1/client/subscribe?token=..."
+                >
+              </label>
+
+              <div v-if="builtCfWorkerUrl" class="cf-builder-result">
+                <small>拼接后的中继订阅链接：</small>
+                <code>{{ builtCfWorkerUrl }}</code>
+              </div>
+
+              <div class="cf-builder-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  :disabled="!builtCfWorkerUrl"
+                  @click="applyBuiltRelayUrlToDraft"
+                >
+                  🚀 一键填入外部订阅表单
+                </button>
+                <button
+                  v-if="builtCfWorkerUrl"
+                  type="button"
+                  class="secondary"
+                  @click="copy(builtCfWorkerUrl)"
+                >
+                  复制中继链接
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" @click="modal = 'external-sub'">返回订阅编辑</button>
       </div>
     </section>
     <!-- External Subscription Delete Confirmation Modal -->

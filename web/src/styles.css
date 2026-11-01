@@ -4958,4 +4958,322 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border-color: rgba(196, 70, 53, 0.2);
 }
 
+/* Cloudflare Worker Subscription Relay Guide */
+.cf-worker-guide-tip {
+  background: rgba(82, 156, 253, 0.06);
+  border: 1px dashed rgba(82, 156, 253, 0.35);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 10px 0 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cf-worker-tip-main {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.cf-worker-tip-badge {
+  display: inline-block;
+  background: rgba(82, 156, 253, 0.18);
+  color: #70b3ff;
+  border: 1px solid rgba(82, 156, 253, 0.4);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.cf-worker-open-btn {
+  align-self: flex-start;
+  background: rgba(82, 156, 253, 0.12);
+  color: #70b3ff;
+  border: 1px solid rgba(82, 156, 253, 0.3);
+  cursor: pointer;
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.cf-worker-open-btn:hover {
+  background: rgba(82, 156, 253, 0.22);
+  color: #ffffff;
+  border-color: rgba(82, 156, 253, 0.5);
+}
+
+.cf-worker-card-action {
+  display: inline-block;
+  margin-top: 8px;
+  background: rgba(82, 156, 253, 0.1);
+  border: 1px solid rgba(82, 156, 253, 0.3);
+  color: #70b3ff;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.cf-worker-card-action:hover {
+  background: rgba(82, 156, 253, 0.2);
+  color: #ffffff;
+}
+
+.cf-worker-guide-modal {
+  max-width: 680px;
+  width: 100%;
+}
+.modal-seal.blue {
+  background: rgba(82, 156, 253, 0.15);
+  color: #70b3ff;
+  border-color: rgba(82, 156, 253, 0.35);
+}
+.modal-lead {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 6px 0 14px 0;
+}
+.cf-guide-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.cf-guide-feat-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.cf-feat-icon {
+  font-size: 16px;
+  line-height: 1.2;
+}
+.cf-guide-feat-item b {
+  display: block;
+  font-size: 13px;
+  color: var(--gold);
+  margin-bottom: 2px;
+}
+.cf-guide-feat-item small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+  display: block;
+}
+.cf-guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 12px 0 16px 0;
+  max-height: calc(85vh - 310px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.cf-step-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cf-step-num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(212, 163, 89, 0.25), rgba(82, 156, 253, 0.25));
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  border: 1px solid rgba(212, 163, 89, 0.4);
+}
+.cf-step-body {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+}
+.cf-step-body b {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.cf-step-body p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.cf-step-body a {
+  color: #70b3ff;
+  text-decoration: none;
+}
+.cf-step-body a:hover {
+  text-decoration: underline;
+}
+.cf-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.btn-copy-code {
+  background: rgba(212, 163, 89, 0.15);
+  border: 1px solid rgba(212, 163, 89, 0.35);
+  color: var(--gold);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-copy-code:hover {
+  background: rgba(212, 163, 89, 0.3);
+  color: #ffffff;
+}
+.cf-code-preview {
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  max-height: 130px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 8px 12px;
+}
+.cf-code-preview pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #a5d6ff;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.cf-builder-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(212, 163, 89, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cf-builder-box label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cf-builder-box input {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  outline: none;
+}
+.cf-builder-box input:focus {
+  border-color: var(--gold);
+}
+.cf-builder-result {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(82, 156, 253, 0.3);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cf-builder-result small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.cf-builder-result code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  color: #70b3ff;
+  word-break: break-all;
+}
+.cf-builder-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Light Theme Styling for CF Worker Guide */
+:root[data-effective-theme="light"] .cf-worker-guide-tip {
+  background: rgba(30, 110, 230, 0.05);
+  border-color: rgba(30, 110, 230, 0.3);
+}
+:root[data-effective-theme="light"] .cf-worker-tip-badge {
+  background: rgba(30, 110, 230, 0.12);
+  color: #1a62d0;
+  border-color: rgba(30, 110, 230, 0.3);
+}
+:root[data-effective-theme="light"] .cf-worker-open-btn {
+  background: rgba(30, 110, 230, 0.08);
+  color: #1a62d0;
+  border-color: rgba(30, 110, 230, 0.25);
+}
+:root[data-effective-theme="light"] .cf-worker-open-btn:hover {
+  background: rgba(30, 110, 230, 0.18);
+  color: #0b4ab0;
+}
+:root[data-effective-theme="light"] .cf-worker-card-action {
+  background: rgba(30, 110, 230, 0.08);
+  color: #1a62d0;
+  border-color: rgba(30, 110, 230, 0.25);
+}
+:root[data-effective-theme="light"] .modal-seal.blue {
+  background: rgba(30, 110, 230, 0.1);
+  color: #1a62d0;
+  border-color: rgba(30, 110, 230, 0.3);
+}
+:root[data-effective-theme="light"] .cf-guide-feat-item {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.1);
+}
+:root[data-effective-theme="light"] .cf-step-item {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.1);
+}
+:root[data-effective-theme="light"] .cf-code-preview {
+  background: #f3f5f8;
+  border-color: rgba(24, 32, 45, 0.15);
+}
+:root[data-effective-theme="light"] .cf-code-preview pre {
+  color: #093c8a;
+}
+:root[data-effective-theme="light"] .cf-builder-box {
+  background: #ffffff;
+  border-color: rgba(242, 138, 11, 0.25);
+}
+:root[data-effective-theme="light"] .cf-builder-box input {
+  background: #f8faf9;
+  border-color: rgba(24, 32, 45, 0.15);
+  color: var(--ink);
+}
+:root[data-effective-theme="light"] .cf-builder-result {
+  background: #f0f4fa;
+  border-color: rgba(30, 110, 230, 0.3);
+}
+:root[data-effective-theme="light"] .cf-builder-result code {
+  color: #1a62d0;
+}
+
+
 
