@@ -4937,7 +4937,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 500;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
   border-radius: 6px;
@@ -4945,7 +4945,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   transition: all 0.2s ease;
 }
 .sub-mode-tab-btn:hover {
-  color: var(--text);
+  color: var(--paper);
   background: rgba(255, 255, 255, 0.06);
 }
 .sub-mode-tab-btn.active {
@@ -4998,6 +4998,23 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .external-nodes-filter-input::placeholder {
   color: var(--muted) !important;
+}
+:root[data-effective-theme="light"] .sub-mode-tabs {
+  background: #f4f6f5;
+  border: 1px solid rgba(24, 32, 45, 0.12);
+}
+:root[data-effective-theme="light"] .sub-mode-tab-btn {
+  color: var(--muted);
+}
+:root[data-effective-theme="light"] .sub-mode-tab-btn:hover {
+  color: var(--paper);
+  background: rgba(24, 32, 45, 0.05);
+}
+:root[data-effective-theme="light"] .sub-mode-tab-btn.active {
+  background: #ffffff;
+  color: #bd6804;
+  border: 1px solid rgba(242, 138, 11, 0.35);
+  box-shadow: 0 1px 3px rgba(24, 32, 45, 0.06);
 }
 :root[data-effective-theme="light"] .external-sub-delete-target {
   background: rgba(196, 70, 53, 0.04);
