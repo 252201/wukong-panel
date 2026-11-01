@@ -52,6 +52,12 @@ func (s *Store) ExternalSubscriptions() ([]model.ExternalSubscription, error) {
 		}
 		_ = json.Unmarshal([]byte(nodesJSON), &sub.Nodes)
 		_ = json.Unmarshal([]byte(selectedNodesJSON), &sub.SelectedNodeIDs)
+		if sub.Nodes == nil {
+			sub.Nodes = []model.Node{}
+		}
+		if sub.SelectedNodeIDs == nil {
+			sub.SelectedNodeIDs = []string{}
+		}
 
 		subs = append(subs, sub)
 	}
@@ -100,6 +106,12 @@ func (s *Store) ExternalSubscription(id string) (model.ExternalSubscription, err
 	}
 	_ = json.Unmarshal([]byte(nodesJSON), &sub.Nodes)
 	_ = json.Unmarshal([]byte(selectedNodesJSON), &sub.SelectedNodeIDs)
+	if sub.Nodes == nil {
+		sub.Nodes = []model.Node{}
+	}
+	if sub.SelectedNodeIDs == nil {
+		sub.SelectedNodeIDs = []string{}
+	}
 
 	return sub, nil
 }
@@ -124,12 +136,19 @@ func (s *Store) SaveExternalSubscription(sub model.ExternalSubscription) error {
 		autoSyncInt = 1
 	}
 
+	if sub.Nodes == nil {
+		sub.Nodes = []model.Node{}
+	}
+	if sub.SelectedNodeIDs == nil {
+		sub.SelectedNodeIDs = []string{}
+	}
+
 	nodesJSON, err := json.Marshal(sub.Nodes)
-	if err != nil {
+	if err != nil || string(nodesJSON) == "null" {
 		nodesJSON = []byte("[]")
 	}
 	selectedNodesJSON, err := json.Marshal(sub.SelectedNodeIDs)
-	if err != nil {
+	if err != nil || string(selectedNodesJSON) == "null" {
 		selectedNodesJSON = []byte("[]")
 	}
 
@@ -192,8 +211,11 @@ func (s *Store) UpdateExternalSubscriptionSyncResult(id string, upload, download
 		return err
 	}
 
+	if nodes == nil {
+		nodes = []model.Node{}
+	}
 	nodesJSON, err := json.Marshal(nodes)
-	if err != nil {
+	if err != nil || string(nodesJSON) == "null" {
 		nodesJSON = []byte("[]")
 	}
 

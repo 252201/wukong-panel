@@ -1,8 +1,10 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/252201/wukong-panel/internal/model"
@@ -135,5 +137,52 @@ func TestExternalSubscriptionCRUD(t *testing.T) {
 	_, err = db.ExternalSubscription("sub-1")
 	if err == nil {
 		t.Fatal("expected error after delete, got nil")
+	}
+}
+
+func TestExternalSubscriptionNilNodesSafe(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Sub with nil Nodes and SelectedNodeIDs
+	sub := model.ExternalSubscription{
+		ID:   "sub-nil-nodes",
+		Name: "Empty Airport",
+		URL:  "https://airport.invalid/sub",
+	}
+	if err := db.SaveExternalSubscription(sub); err != nil {
+		t.Fatalf("SaveExternalSubscription failed: %v", err)
+	}
+
+	got, err := db.ExternalSubscription("sub-nil-nodes")
+	if err != nil {
+		t.Fatalf("ExternalSubscription failed: %v", err)
+	}
+	if got.Nodes == nil {
+		t.Fatalf("expected got.Nodes to be non-nil empty slice, got nil")
+	}
+	if got.SelectedNodeIDs == nil {
+		t.Fatalf("expected got.SelectedNodeIDs to be non-nil empty slice, got nil")
+	}
+
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"nodes":[]`) {
+		t.Fatalf("expected serialized JSON to contain \"nodes\":[], got: %s", string(data))
+	}
+
+	// Also verify ExternalSubscriptions() list
+	list, err := db.ExternalSubscriptions()
+	if err != nil {
+		t.Fatalf("ExternalSubscriptions failed: %v", err)
+	}
+	if len(list) != 1 || list[0].Nodes == nil {
+		t.Fatalf("expected 1 sub with non-nil nodes in list, got %+v", list)
 	}
 }
