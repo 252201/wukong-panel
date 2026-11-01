@@ -948,3 +948,126 @@ func TestFleetHostCustomOrder(t *testing.T) {
 		t.Fatalf("unexpected saved setting: %s", saved)
 	}
 }
+
+func enrollFleetProbe(t *testing.T, server *Server, database *store.Store, enrollment, name string) model.FleetEnrollmentResponse {
+	t.Helper()
+	if err := database.CreateFleetEnrollmentToken(enrollment, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(model.FleetEnrollmentRequest{
+		Token:           enrollment,
+		Name:            name,
+		Hostname:        strings.ToLower(name),
+		OS:              "debian",
+		Arch:            "amd64",
+		PanelVersion:    "0.9.0",
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/fleet/agent/enroll", bytes.NewReader(body))
+	request.RemoteAddr = "192.0.2.10:1234"
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("enroll probe status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result model.FleetEnrollmentResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestProbeFleetSubscriptionIPv6AndCFTunnelFixup(t *testing.T) {
+	server, db := fleetWebTestServer(t)
+	defer db.Close()
+
+	if err := db.SetSetting("fleet_global_token", "test-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	enrolled := enrollFleetProbe(t, server, db, "probe_one_time", "Taiwan-Host")
+
+	hb := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Location: &model.HostLocation{
+				PublicIP: "61.228.116.63",
+				IPv4:     "61.228.116.63",
+				IPv6:     "2001:b030:112d:711:1165::",
+			},
+		},
+	}
+	if err := db.SaveFleetHeartbeat(context.Background(), enrolled.HostID, hb); err != nil {
+		t.Fatal(err)
+	}
+
+	pNodes := []model.FleetProbeNode{
+		{
+			ID:       "tw_reality_v6",
+			HostID:   enrolled.HostID,
+			Name:     "TW-REALITY-V6",
+			Protocol: "vless",
+			Server:   "61.228.116.63",
+			Port:     57832,
+			Domain:   "d1.awsstatic.com",
+			ShareURI: "vless://939fdd8d-dad1-488a-8639-199d2509717e@61.228.116.63:57832?security=reality&pbk=BGcIcPCAu6Q3SwYNhKBAWlU0cPlDcZcVd01eJpvGSC0&sid=ce7c5293131775d9&sni=d1.awsstatic.com&type=tcp",
+		},
+		{
+			ID:       "tw_vless_cf",
+			HostID:   enrolled.HostID,
+			Name:     "TW-VLESS-CF-V6",
+			Protocol: "vless",
+			Server:   "61.228.116.63",
+			Port:     41967,
+			Domain:   "cftw.cnmd.xx.kg",
+			ShareURI: "vless://aba61062-0216-4d8e-b556-783bd067508f@61.228.116.63:41967?security=tls&type=ws&path=%2FP2lFCJZhR2GC5eo0OvztaTZXtb4&host=61.228.116.63&sni=61.228.116.63",
+		},
+	}
+	for _, pn := range pNodes {
+		if err := db.SaveFleetProbeNode(context.Background(), pn); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/fleet-sub/test-token/clash.yaml?template=smart", nil)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	content := rec.Body.String()
+
+	// Verify TW-REALITY-V6 is upgraded to IPv6 literal and udp: false
+	for _, want := range []string{
+		`name: "TW-REALITY-V6"`,
+		`server: "2001:b030:112d:711:1165::"`,
+		`port: 57832`,
+		`udp: false`,
+		`servername: "d1.awsstatic.com"`,
+		`sni: "d1.awsstatic.com"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("TW-REALITY-V6 missing %q in subscription:\n%s", want, content)
+		}
+	}
+
+	// Verify TW-VLESS-CF-V6 is mapped to Cloudflare Tunnel public 443 with udp: false
+	for _, want := range []string{
+		`name: "TW-VLESS-CF-V6"`,
+		`server: "cf.877774.xyz"`,
+		`port: 443`,
+		`udp: false`,
+		`servername: "cftw.cnmd.xx.kg"`,
+		`sni: "cftw.cnmd.xx.kg"`,
+		`path: "/P2lFCJZhR2GC5eo0OvztaTZXtb4"`,
+		`Host: "cftw.cnmd.xx.kg"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("TW-VLESS-CF-V6 missing %q in subscription:\n%s", want, content)
+		}
+	}
+}

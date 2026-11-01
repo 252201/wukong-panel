@@ -91,7 +91,7 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	fmt.Fprintf(&builder, "  - name: %q\n    server: %q\n    port: %d\n", node.Name, server, port)
 	switch strings.ToLower(node.Protocol) {
 	case "hysteria2":
-		fmt.Fprintf(&builder, "    type: hysteria2\n    password: %q\n    sni: %q\n    alpn: [h3]\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, insecure)
+		fmt.Fprintf(&builder, "    type: hysteria2\n    password: %q\n    servername: %q\n    sni: %q\n    udp: true\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, sni, insecure)
 	case "vless":
 		if query.Get("pbk") != "" || query.Get("security") == "reality" {
 			flow := query.Get("flow")
@@ -105,7 +105,7 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 			pbk := strings.TrimSpace(query.Get("pbk"))
 			sid := SanitizeRealityShortID(query.Get("sid"))
 
-			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: true\n    udp: true\n    flow: %s\n    servername: %q\n    client-fingerprint: %s\n    reality-opts:\n      public-key: %q\n", parsed.User.Username(), flow, sni, fp, pbk)
+			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: true\n    udp: false\n    flow: %s\n    servername: %q\n    sni: %q\n    client-fingerprint: %s\n    reality-opts:\n      public-key: %q\n", parsed.User.Username(), flow, sni, sni, fp, pbk)
 			if sid != "" {
 				fmt.Fprintf(&builder, "      short-id: %q\n", sid)
 			}
@@ -119,13 +119,13 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 				hostHdr = sni
 			}
 			tls := query.Get("security") == "tls"
-			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: %t\n    udp: true\n    servername: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), tls, sni, path, hostHdr)
+			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: %t\n    udp: false\n    servername: %q\n    sni: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), tls, sni, sni, path, hostHdr)
 			if insecure {
 				fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
 			}
 		} else {
 			tls := query.Get("security") == "tls"
-			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: %t\n    udp: true\n    servername: %q\n", parsed.User.Username(), tls, sni)
+			fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: tcp\n    tls: %t\n    udp: false\n    servername: %q\n    sni: %q\n", parsed.User.Username(), tls, sni, sni)
 			if insecure {
 				fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
 			}
@@ -135,7 +135,11 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 		if serverName == "" {
 			serverName = sni
 		}
-		fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: true\n    udp: true\n    servername: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), serverName, query.Get("path"), serverName)
+		path := query.Get("path")
+		if path == "" {
+			path = "/"
+		}
+		fmt.Fprintf(&builder, "    type: vless\n    uuid: %q\n    network: ws\n    tls: true\n    udp: false\n    servername: %q\n    sni: %q\n    client-fingerprint: chrome\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", parsed.User.Username(), serverName, serverName, path, serverName)
 		if insecure {
 			fmt.Fprintf(&builder, "    skip-cert-verify: true\n")
 		}
@@ -163,11 +167,11 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 		fmt.Fprintf(&builder, "    type: ss\n    cipher: %q\n    password: %q\n    udp: true\n", cipher, password)
 	case "tuic":
 		password, _ := parsed.User.Password()
-		fmt.Fprintf(&builder, "    type: tuic\n    uuid: %q\n    password: %q\n    sni: %q\n    alpn: [h3]\n    udp-relay-mode: native\n    congestion-controller: bbr\n    reduce-rtt: false\n    skip-cert-verify: %t\n", parsed.User.Username(), password, sni, insecure)
+		fmt.Fprintf(&builder, "    type: tuic\n    uuid: %q\n    password: %q\n    servername: %q\n    sni: %q\n    alpn: [h3]\n    udp-relay-mode: native\n    congestion-controller: bbr\n    reduce-rtt: false\n    skip-cert-verify: %t\n", parsed.User.Username(), password, sni, sni, insecure)
 	case "trojan":
-		fmt.Fprintf(&builder, "    type: trojan\n    password: %q\n    sni: %q\n    network: tcp\n    udp: true\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, insecure)
+		fmt.Fprintf(&builder, "    type: trojan\n    password: %q\n    servername: %q\n    sni: %q\n    network: tcp\n    udp: true\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, sni, insecure)
 	case "anytls":
-		fmt.Fprintf(&builder, "    type: anytls\n    password: %q\n    sni: %q\n    client-fingerprint: chrome\n    udp: true\n    idle-session-check-interval: 30\n    idle-session-timeout: 30\n    min-idle-session: 0\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, insecure)
+		fmt.Fprintf(&builder, "    type: anytls\n    password: %q\n    servername: %q\n    sni: %q\n    client-fingerprint: chrome\n    udp: true\n    idle-session-check-interval: 30\n    idle-session-timeout: 30\n    min-idle-session: 0\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, sni, insecure)
 	default:
 		return "", fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}
@@ -448,9 +452,6 @@ func renderStandardDNS(sb *strings.Builder) {
 	sb.WriteString("    - \"*.msftconnecttest.com\"\n")
 	sb.WriteString("    - \"dns.alidns.com\"\n")
 	sb.WriteString("    - \"doh.pub\"\n")
-	sb.WriteString("    - \"+.252202.xyz\"\n")
-	sb.WriteString("    - \"+.877774.xyz\"\n")
-	sb.WriteString("    - \"+.cnmd.xx.kg\"\n")
 	sb.WriteString("  default-nameserver:\n")
 	sb.WriteString("    - 223.5.5.5\n")
 	sb.WriteString("    - 119.29.29.29\n")
