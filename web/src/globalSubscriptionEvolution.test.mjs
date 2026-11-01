@@ -213,5 +213,11 @@ test('App.vue integrates automatic country flag formatting and Cloudflare Worker
   assert.ok(vueSource.includes('cf-worker-guide-modal'), 'App.vue must render cf-worker-guide-modal')
   assert.ok(vueSource.includes('cf-code-preview'), 'App.vue must render cf-code-preview code block')
   assert.ok(vueSource.includes('cf-builder-box'), 'App.vue must render cf-builder-box interactive URL helper')
+
+  // Collapsible Advanced Proxy section
+  assert.ok(vueSource.includes('showExternalSubAdvanced'), 'App.vue must declare showExternalSubAdvanced ref')
+  assert.ok(vueSource.includes('external-sub-advanced-section'), 'App.vue must render external-sub-advanced-section')
+  assert.ok(vueSource.includes('advanced-toggle-btn'), 'App.vue must render advanced-toggle-btn')
+  assert.ok(vueSource.includes('proxy-warning-text'), 'App.vue must include proxy-warning-text hint')
 })
 

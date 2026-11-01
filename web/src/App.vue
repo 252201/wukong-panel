@@ -910,6 +910,7 @@ const externalSubDraft = ref<{
 })
 const syncingExternalSubId = ref<string | null>(null)
 const externalSubDeleteTarget = ref<ExternalSubscription | null>(null)
+const showExternalSubAdvanced = ref(false)
 
 function formatExternalSyncTime(isoStr?: string | null): string {
   if (!isoStr) return '从未同步'
@@ -945,6 +946,7 @@ function openCreateExternalSubModal() {
     autoSync: false,
     syncIntervalHours: 12,
   }
+  showExternalSubAdvanced.value = false
   modal.value = 'external-sub'
 }
 
@@ -960,6 +962,7 @@ function openEditExternalSubModal(sub: ExternalSubscription) {
     autoSync: sub.autoSync,
     syncIntervalHours: sub.syncIntervalHours || 12,
   }
+  showExternalSubAdvanced.value = !!(sub.proxyUrl && sub.proxyUrl.trim())
   modal.value = 'external-sub'
 }
 
@@ -1185,6 +1188,7 @@ function applyBuiltRelayUrlToDraft() {
   if (!builtCfWorkerUrl.value) return
   externalSubDraft.value.url = builtCfWorkerUrl.value
   externalSubDraft.value.proxyUrl = ''
+  showExternalSubAdvanced.value = false
   externalSubImportMode.value = 'url'
   modal.value = 'external-sub'
   notify('中继链接已成功填入订阅链接！拉取代理已清空。')
@@ -5775,20 +5779,41 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <small>支持标准 HTTP/HTTPS Clash YAML 或 Base64 格式订阅源（已启用内网 IP 与私有地址 SSRF 防护）</small>
         </label>
 
-        <label>
-          拉取代理 Proxy URL（可选，绕过 Cloudflare 盾 / 机房 IP 拦截）
-          <input v-model="externalSubDraft.proxyUrl" type="text" placeholder="例如: http://127.0.0.1:2080 或 socks5://127.0.0.1:1080">
-          <small>当机场开启 Cloudflare WAF 质询并阻断 VPS 机房 IP（报 403 Forbidden）时，可指定本地或外部出站代理拉取</small>
-        </label>
-
+        <!-- Cloudflare Worker Relay Recommendation Banner -->
         <div class="cf-worker-guide-tip">
           <div class="cf-worker-tip-main">
-            <span class="cf-worker-tip-badge">防 403 阻断秘籍</span>
+            <span class="cf-worker-tip-badge">防 403 阻断推荐</span>
             <span>机场开启 Cloudflare 盾并拦截 VPS 机房 IP？推荐使用免费 Worker 中继，100% 官方放行且全自动更新。</span>
           </div>
           <button type="button" class="btn-subtle cf-worker-open-btn" @click="openCfWorkerGuideModal">
             ☁️ 查看 1 分钟配置教程与一键代码
           </button>
+        </div>
+
+        <!-- Advanced Collapsible Section for Custom Outbound Proxy -->
+        <div class="external-sub-advanced-section">
+          <button
+            type="button"
+            class="advanced-toggle-btn"
+            @click="showExternalSubAdvanced = !showExternalSubAdvanced"
+          >
+            <span class="advanced-toggle-label">
+              <i>{{ showExternalSubAdvanced ? '▾' : '▸' }}</i>
+              <b>高级选项：指定出站代理 Proxy URL</b>
+            </span>
+            <span v-if="externalSubDraft.proxyUrl" class="proxy-configured-pill">已配置代理</span>
+          </button>
+
+          <div v-if="showExternalSubAdvanced" class="advanced-collapse-content">
+            <label>
+              拉取代理 Proxy URL（可选）
+              <input v-model="externalSubDraft.proxyUrl" type="text" placeholder="例如: http://proxy.example.com:8080 或 socks5://127.0.0.1:10808">
+              <small>
+                仅适用于拥有独立中转代理服务器的高级用户。
+                <span class="proxy-warning-text">注：若面板部署在远端 VPS，127.0.0.1 指的是 VPS 服务器本机而非个人电脑。</span>
+              </small>
+            </label>
+          </div>
         </div>
       </template>
 
