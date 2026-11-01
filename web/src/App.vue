@@ -1081,11 +1081,31 @@ function externalSubSelectedIds(sub?: ExternalSubscription | null): string[] {
   return nodes.map(n => n.id)
 }
 
+function bytesBinary(value = 0) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let size = value
+  let index = 0
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index++
+  }
+  const formatted = size.toFixed(index < 2 ? 0 : 2)
+  const clean = formatted.replace(/\.00$/, '')
+  return `${clean} ${units[index]}`
+}
+
 function formatExternalExpiry(expiresAt?: string) {
   if (!expiresAt || expiresAt === '0' || expiresAt === 'null' || expiresAt === 'undefined') return ''
-  const num = Number(expiresAt)
-  const date = !Number.isNaN(num) && num > 0 ? new Date(num > 1e11 ? num : num * 1000) : new Date(expiresAt)
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(language.value)
+  const trimmed = expiresAt.trim()
+  const dateMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T ]00:00:00(?:\.000)?Z?)?$/)
+  if (dateMatch) {
+    const localDate = new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]))
+    return Number.isNaN(localDate.getTime()) ? trimmed : localDate.toLocaleDateString(language.value)
+  }
+  const num = Number(trimmed)
+  const date = !Number.isNaN(num) && num > 0 ? new Date(num > 1e11 ? num : num * 1000) : new Date(trimmed)
+  return Number.isNaN(date.getTime()) ? trimmed : date.toLocaleDateString(language.value)
 }
 
 async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
@@ -3479,7 +3499,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <!-- Traffic Quota Bar if available -->
               <div v-if="sub.totalBytes > 0 || sub.uploadBytes > 0 || sub.downloadBytes > 0 || formatExternalExpiry(sub.expiresAt)" class="external-sub-quota">
                 <div class="external-quota-meta">
-                  <span>流量已用: <b>{{ bytes(sub.uploadBytes + sub.downloadBytes) }}</b> / {{ sub.totalBytes > 0 ? bytes(sub.totalBytes) : '不限量' }}</span>
+                  <span>流量已用: <b>{{ bytesBinary(sub.uploadBytes + sub.downloadBytes) }}</b> / {{ sub.totalBytes > 0 ? bytesBinary(sub.totalBytes) : '不限量' }}</span>
                   <span v-if="formatExternalExpiry(sub.expiresAt)">到期: <b>{{ formatExternalExpiry(sub.expiresAt) }}</b></span>
                 </div>
                 <div v-if="sub.totalBytes > 0" class="external-quota-bar">
