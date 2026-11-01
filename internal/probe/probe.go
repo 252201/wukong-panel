@@ -212,14 +212,25 @@ func Load(directory string) (*Client, error) {
 func (c *Client) Heartbeat(ctx context.Context) error {
 	now := c.Sampler.Sample()
 	var serverHost string
+	var ipv6Host string
 	if loc := c.Location.Current(); loc != nil {
 		serverHost = loc.PublicIP
+		ipv6Host = loc.IPv6
 	}
 	if serverHost == "" {
 		serverHost = c.Config.HostName
 	}
-	scannedNodes := ScanDirectories(serverHost)
 	v4, v6 := hostlocation.GetInterfaceAddresses()
+	if ipv6Host == "" && len(v6) > 0 {
+		for _, addr := range v6 {
+			clean := strings.TrimSpace(addr.Address)
+			if clean != "" && clean != "::" && clean != "::1" && !strings.HasPrefix(clean, "fe80:") {
+				ipv6Host = clean
+				break
+			}
+		}
+	}
+	scannedNodes := ScanDirectoriesWithIPv6(serverHost, ipv6Host)
 	snapshot := model.FleetSnapshot{
 		Full:     true,
 		Overview: model.Overview{Now: now, Network: c.Network.Current()},

@@ -36,10 +36,19 @@ var defaultScanDirs = []string{
 
 // ScanDirectories scans config directories and active process cmdlines for proxy inbounds.
 func ScanDirectories(serverHost string, dirs ...string) []model.FleetProbeNode {
+	return ScanDirectoriesWithIPv6(serverHost, "", dirs...)
+}
+
+// ScanDirectoriesWithIPv6 scans config directories and active process cmdlines for proxy inbounds,
+// routing v6-tagged or v6-bound inbounds to ipv6Host and detecting Cloudflare Tunnel ingress configurations.
+func ScanDirectoriesWithIPv6(serverHost, ipv6Host string, dirs ...string) []model.FleetProbeNode {
 	serverHost = strings.TrimSpace(serverHost)
 	if serverHost == "" {
 		serverHost = "127.0.0.1"
 	}
+	ipv6Host = strings.TrimSpace(ipv6Host)
+
+	cfMap := scanCloudflaredIngress()
 
 	var allTargets []string
 	if len(dirs) == 0 {
@@ -75,9 +84,9 @@ func ScanDirectories(serverHost string, dirs ...string) []model.FleetProbeNode {
 			ext := strings.ToLower(filepath.Ext(file))
 			var parsedNodes []model.FleetProbeNode
 			if ext == ".yaml" || ext == ".yml" {
-				parsedNodes = parseYAMLConfigFile(file, serverHost)
+				parsedNodes = parseYAMLConfigFile(file, serverHost, ipv6Host)
 			} else {
-				parsedNodes = parseConfigFile(file, serverHost)
+				parsedNodes = parseConfigFile(file, serverHost, ipv6Host, cfMap)
 			}
 
 			for _, node := range parsedNodes {
@@ -99,6 +108,46 @@ func ScanDirectories(serverHost string, dirs ...string) []model.FleetProbeNode {
 	})
 
 	return nodes
+}
+
+func scanCloudflaredIngress() map[int]string {
+	portToDomain := make(map[int]string)
+	cfDirs := []string{
+		"/etc/cloudflared",
+		"/usr/local/etc/cloudflared",
+		"/root/.cloudflared",
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		cfDirs = append(cfDirs, filepath.Join(home, ".cloudflared"))
+	}
+
+	ingressHostRe := regexp.MustCompile(`(?i)^\s*-\s*hostname\s*:\s*"?([^"\s]+)"?`)
+	ingressServiceRe := regexp.MustCompile(`(?i)^\s*service\s*:\s*(?:https?://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)`)
+
+	for _, dir := range cfDirs {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*.y*ml"))
+		for _, file := range matches {
+			f, err := os.Open(file)
+			if err != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(f)
+			currentHost := ""
+			for scanner.Scan() {
+				line := scanner.Text()
+				if m := ingressHostRe.FindStringSubmatch(line); len(m) > 1 {
+					currentHost = strings.TrimSpace(m[1])
+				} else if m := ingressServiceRe.FindStringSubmatch(line); len(m) > 1 && currentHost != "" {
+					if p, err := strconv.Atoi(m[1]); err == nil && p > 0 {
+						portToDomain[p] = currentHost
+					}
+					currentHost = ""
+				}
+			}
+			f.Close()
+		}
+	}
+	return portToDomain
 }
 
 func findProcessConfigs() []string {
@@ -151,7 +200,14 @@ func isProxyExecutable(name string) bool {
 		strings.Contains(lower, "tuic")
 }
 
-func parseConfigFile(path, serverHost string) []model.FleetProbeNode {
+func formatHostPort(host string, port int) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return fmt.Sprintf("[%s]:%d", host, port)
+	}
+	return fmt.Sprintf("%s:%d", host, port)
+}
+
+func parseConfigFile(path, serverHost, ipv6Host string, cfMap map[int]string) []model.FleetProbeNode {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
 		return nil
@@ -173,7 +229,7 @@ func parseConfigFile(path, serverHost string) []model.FleetProbeNode {
 		if !ok {
 			continue
 		}
-		node, ok := convertInboundToNode(inbound, serverHost)
+		node, ok := convertInboundToNode(inbound, serverHost, ipv6Host, cfMap)
 		if ok {
 			nodes = append(nodes, node)
 		}
@@ -187,7 +243,7 @@ var (
 	yamlSniRe      = regexp.MustCompile(`(?i)^\s*sni\s*:\s*"?([^"\s]+)"?`)
 )
 
-func parseYAMLConfigFile(path, serverHost string) []model.FleetProbeNode {
+func parseYAMLConfigFile(path, serverHost, ipv6Host string) []model.FleetProbeNode {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -227,21 +283,26 @@ func parseYAMLConfigFile(path, serverHost string) []model.FleetProbeNode {
 		return nil
 	}
 
+	nodeHost := serverHost
+	if ipv6Host != "" && strings.Contains(listenStr, ":") && !strings.HasPrefix(listenStr, ":") {
+		nodeHost = ipv6Host
+	}
+
 	if sni == "" {
-		sni = serverHost
+		sni = nodeHost
 	}
 
 	name := fmt.Sprintf("HY2-%d", port)
 	tagEscaped := url.QueryEscape(name)
-	uri := fmt.Sprintf("hysteria2://%s@%s:%d/?sni=%s&insecure=0#%s",
-		url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+	uri := fmt.Sprintf("hysteria2://%s@%s/?sni=%s&insecure=0#%s",
+		url.QueryEscape(password), formatHostPort(nodeHost, port), url.QueryEscape(sni), tagEscaped)
 
 	return []model.FleetProbeNode{
 		{
 			ID:       fmt.Sprintf("scan_hysteria2_%d", port),
 			Name:     name,
 			Protocol: "hysteria2",
-			Server:   serverHost,
+			Server:   nodeHost,
 			Port:     port,
 			Domain:   sni,
 			ShareURI: uri,
@@ -251,7 +312,7 @@ func parseYAMLConfigFile(path, serverHost string) []model.FleetProbeNode {
 	}
 }
 
-func convertInboundToNode(inbound map[string]any, serverHost string) (model.FleetProbeNode, bool) {
+func convertInboundToNode(inbound map[string]any, serverHost, ipv6Host string, cfMap map[int]string) (model.FleetProbeNode, bool) {
 	protocol := strings.ToLower(getString(inbound, "type"))
 	if protocol == "" {
 		protocol = strings.ToLower(getString(inbound, "protocol"))
@@ -276,20 +337,52 @@ func convertInboundToNode(inbound map[string]any, serverHost string) (model.Flee
 
 	id := fmt.Sprintf("scan_%s_%d", protocol, port)
 
-	shareURI, domain := buildInboundShareURI(protocol, name, serverHost, port, inbound)
+	nodeHost := serverHost
+	lowerTag := strings.ToLower(tag)
+	if ipv6Host != "" && (strings.Contains(lowerTag, "v6") || strings.Contains(lowerTag, "ipv6") || strings.Contains(getString(inbound, "listen"), ":")) {
+		nodeHost = ipv6Host
+	}
+
+	// Cloudflare Tunnel ingress check
+	if cfDomain, ok := cfMap[port]; ok && cfDomain != "" {
+		uuid := extractUUID(inbound)
+		wsPath, _ := extractWSTransport(inbound)
+		if wsPath == "" {
+			wsPath = "/"
+		}
+		cfServer := "cf.877774.xyz"
+		cfPort := 443
+		tagEscaped := url.QueryEscape(name)
+		shareURI := fmt.Sprintf("vless://%s@%s:%d?security=tls&encryption=none&type=ws&path=%s&host=%s&sni=%s#%s",
+			uuid, cfServer, cfPort, url.QueryEscape(wsPath), url.QueryEscape(cfDomain), url.QueryEscape(cfDomain), tagEscaped)
+
+		return model.FleetProbeNode{
+			ID:       id,
+			Name:     name,
+			Protocol: protocol,
+			Server:   cfServer,
+			Port:     cfPort,
+			Domain:   cfDomain,
+			ShareURI: shareURI,
+			Source:   "scan",
+			RawName:  name,
+		}, true
+	}
+
+	shareURI, domain := buildInboundShareURI(protocol, name, nodeHost, port, inbound)
 	if shareURI == "" {
 		return model.FleetProbeNode{}, false
 	}
 
 	if domain == "" {
-		domain = serverHost
+		domain = nodeHost
 	}
 
 	return model.FleetProbeNode{
 		ID:       id,
 		Name:     name,
 		Protocol: protocol,
-		Server:   serverHost,
+		Server:   nodeHost,
 		Port:     port,
 		Domain:   domain,
 		ShareURI: shareURI,
@@ -311,8 +404,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 		if sni == "" {
 			sni = serverHost
 		}
-		uri := fmt.Sprintf("hysteria2://%s@%s:%d/?sni=%s&insecure=0#%s",
-			url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+		uri := fmt.Sprintf("hysteria2://%s@%s/?sni=%s&insecure=0#%s",
+			url.QueryEscape(password), formatHostPort(serverHost, port), url.QueryEscape(sni), tagEscaped)
 		return uri, sni
 
 	case "vless":
@@ -326,8 +419,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 			if sni == "" {
 				sni = serverHost
 			}
-			uri := fmt.Sprintf("vless://%s@%s:%d?security=reality&encryption=none&pbk=%s&sid=%s&sni=%s&fp=chrome&type=tcp&flow=xtls-rprx-vision#%s",
-				uuid, serverHost, port, url.QueryEscape(pbk), url.QueryEscape(sid), url.QueryEscape(sni), tagEscaped)
+			uri := fmt.Sprintf("vless://%s@%s?security=reality&encryption=none&pbk=%s&sid=%s&sni=%s&fp=chrome&type=tcp&flow=xtls-rprx-vision#%s",
+				uuid, formatHostPort(serverHost, port), url.QueryEscape(pbk), url.QueryEscape(sid), url.QueryEscape(sni), tagEscaped)
 			return uri, sni
 		}
 		// Check ws transport
@@ -340,8 +433,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 			if tlsSNI == "" {
 				tlsSNI = serverHost
 			}
-			uri := fmt.Sprintf("vless://%s@%s:%d?security=tls&encryption=none&type=ws&path=%s&host=%s&sni=%s#%s",
-				uuid, serverHost, port, url.QueryEscape(wsPath), url.QueryEscape(wsHost), url.QueryEscape(tlsSNI), tagEscaped)
+			uri := fmt.Sprintf("vless://%s@%s?security=tls&encryption=none&type=ws&path=%s&host=%s&sni=%s#%s",
+				uuid, formatHostPort(serverHost, port), url.QueryEscape(wsPath), url.QueryEscape(wsHost), url.QueryEscape(tlsSNI), tagEscaped)
 			return uri, tlsSNI
 		}
 		// Standard TLS or TCP
@@ -349,8 +442,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 		if sni == "" {
 			sni = serverHost
 		}
-		uri := fmt.Sprintf("vless://%s@%s:%d?security=tls&encryption=none&sni=%s#%s",
-			uuid, serverHost, port, url.QueryEscape(sni), tagEscaped)
+		uri := fmt.Sprintf("vless://%s@%s?security=tls&encryption=none&sni=%s#%s",
+			uuid, formatHostPort(serverHost, port), url.QueryEscape(sni), tagEscaped)
 		return uri, sni
 
 	case "shadowsocks", "ss":
@@ -359,7 +452,7 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 			return "", ""
 		}
 		auth := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + password))
-		uri := fmt.Sprintf("ss://%s@%s:%d#%s", auth, serverHost, port, tagEscaped)
+		uri := fmt.Sprintf("ss://%s@%s#%s", auth, formatHostPort(serverHost, port), tagEscaped)
 		return uri, serverHost
 
 	case "tuic":
@@ -372,8 +465,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 		if sni == "" {
 			sni = serverHost
 		}
-		uri := fmt.Sprintf("tuic://%s:%s@%s:%d?sni=%s&alpn=h3&congestion_controller=bbr#%s",
-			url.QueryEscape(uuid), url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+		uri := fmt.Sprintf("tuic://%s:%s@%s?sni=%s&alpn=h3&congestion_controller=bbr#%s",
+			url.QueryEscape(uuid), url.QueryEscape(password), formatHostPort(serverHost, port), url.QueryEscape(sni), tagEscaped)
 		return uri, sni
 
 	case "trojan":
@@ -385,8 +478,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 		if sni == "" {
 			sni = serverHost
 		}
-		uri := fmt.Sprintf("trojan://%s@%s:%d?security=tls&sni=%s#%s",
-			url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+		uri := fmt.Sprintf("trojan://%s@%s?security=tls&sni=%s#%s",
+			url.QueryEscape(password), formatHostPort(serverHost, port), url.QueryEscape(sni), tagEscaped)
 		return uri, sni
 
 	case "anytls":
@@ -398,8 +491,8 @@ func buildInboundShareURI(protocol, name, serverHost string, port int, inbound m
 		if sni == "" {
 			sni = serverHost
 		}
-		uri := fmt.Sprintf("anytls://%s@%s:%d?sni=%s#%s",
-			url.QueryEscape(password), serverHost, port, url.QueryEscape(sni), tagEscaped)
+		uri := fmt.Sprintf("anytls://%s@%s?sni=%s#%s",
+			url.QueryEscape(password), formatHostPort(serverHost, port), url.QueryEscape(sni), tagEscaped)
 		return uri, sni
 
 	case "vmess":

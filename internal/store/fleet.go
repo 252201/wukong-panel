@@ -605,6 +605,9 @@ func syncScannedProbeNodesTx(ctx context.Context, tx *sql.Tx, hostID string, sca
 	for _, sc := range scanned {
 		activeIDs[sc.ID] = true
 		if en, ok := existing[sc.ID]; ok {
+			if en.source == "manual" {
+				continue
+			}
 			nameToKeep := en.name
 			if strings.TrimSpace(nameToKeep) == "" {
 				nameToKeep = sc.Name

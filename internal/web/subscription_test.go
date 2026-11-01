@@ -569,3 +569,89 @@ func TestClashRealityShortIDFormatting(t *testing.T) {
 		t.Fatalf("short-id should be omitted for empty sid, got:\n%s", entry)
 	}
 }
+
+func TestClashProxyYAMLSpecificHardening(t *testing.T) {
+	// 1. VLESS WS must emit udp: false and both servername and sni
+	wsNode := model.Node{
+		Name:       "FL-CF-V6",
+		Protocol:   "vless",
+		Server:     "cf.877774.xyz",
+		Domain:     "qw.cnmd.xx.kg",
+		ListenPort: 443,
+	}
+	wsShare := "vless://122fdfed-8397-450e-92a0-a29b5bc1afe9@cf.877774.xyz:443?security=tls&type=ws&path=%2Fwukong-test&host=qw.cnmd.xx.kg&sni=qw.cnmd.xx.kg"
+	wsYAML, err := clashProxyYAML(wsNode, wsShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`type: vless`,
+		`network: ws`,
+		`udp: false`,
+		`servername: "qw.cnmd.xx.kg"`,
+		`sni: "qw.cnmd.xx.kg"`,
+	} {
+		if !strings.Contains(wsYAML, want) {
+			t.Fatalf("VLESS WS missing %q in YAML:\n%s", want, wsYAML)
+		}
+	}
+	if strings.Contains(wsYAML, "udp: true") {
+		t.Fatalf("VLESS WS must not emit udp: true (causes XUDP failure):\n%s", wsYAML)
+	}
+
+	// 2. REALITY must emit udp: false and both servername and sni
+	realityNode := model.Node{
+		Name:       "TW-REALITY-V6",
+		Protocol:   "vless",
+		Server:     "2001:b030:112d:711:1165::",
+		Domain:     "d1.awsstatic.com",
+		ListenPort: 57832,
+	}
+	realityShare := "vless://939fdd8d-dad1-488a-8639-199d2509717e@[2001:b030:112d:711:1165::]:57832?security=reality&pbk=BGcIcPCAu6Q3SwYNhKBAWlU0cPlDcZcVd01eJpvGSC0&sid=ce7c5293131775d9&sni=d1.awsstatic.com&type=tcp&flow=xtls-rprx-vision"
+	realityYAML, err := clashProxyYAML(realityNode, realityShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`server: "2001:b030:112d:711:1165::"`,
+		`port: 57832`,
+		`udp: false`,
+		`flow: xtls-rprx-vision`,
+		`servername: "d1.awsstatic.com"`,
+		`sni: "d1.awsstatic.com"`,
+		`short-id: "ce7c5293131775d9"`,
+	} {
+		if !strings.Contains(realityYAML, want) {
+			t.Fatalf("REALITY missing %q in YAML:\n%s", want, realityYAML)
+		}
+	}
+
+	// 3. Hysteria 2 must emit both servername and sni and udp: true without forced alpn: [h3]
+	hy2Node := model.Node{
+		Name:       "US-旧金山-V6优先",
+		Protocol:   "hysteria2",
+		Server:     "ac.252202.xyz",
+		Domain:     "ac.252202.xyz",
+		ListenPort: 52246,
+	}
+	hy2Share := "hysteria2://password@ac.252202.xyz:52246/?sni=ac.252202.xyz"
+	hy2YAML, err := clashProxyYAML(hy2Node, hy2Share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`type: hysteria2`,
+		`server: "ac.252202.xyz"`,
+		`port: 52246`,
+		`servername: "ac.252202.xyz"`,
+		`sni: "ac.252202.xyz"`,
+		`udp: true`,
+	} {
+		if !strings.Contains(hy2YAML, want) {
+			t.Fatalf("Hysteria 2 missing %q in YAML:\n%s", want, hy2YAML)
+		}
+	}
+	if strings.Contains(hy2YAML, "alpn: [h3]") {
+		t.Fatalf("Hysteria 2 should not force alpn: [h3], got:\n%s", hy2YAML)
+	}
+}

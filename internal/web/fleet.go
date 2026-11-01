@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1336,18 +1337,68 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 				if hasNodeSelection && !wantedNodes[pn.ID] {
 					continue
 				}
+
+				nodeServer := pn.Server
+				nodePort := pn.Port
+				nodeDomain := pn.Domain
+				shareURI := pn.ShareURI
+
+				lowerName := strings.ToLower(pn.Name)
+				isV6 := strings.Contains(lowerName, "v6") || strings.Contains(lowerName, "ipv6")
+				if isV6 {
+					hostV6 := ""
+					if host.Snapshot.Location != nil && host.Snapshot.Location.IPv6 != "" {
+						hostV6 = strings.TrimSpace(host.Snapshot.Location.IPv6)
+					}
+					if hostV6 == "" {
+						for _, bind := range host.Snapshot.DeploymentDefaults.IPv6 {
+							addr := strings.TrimSpace(bind.Address)
+							if addr != "" && addr != "::" && addr != "::1" && !strings.HasPrefix(addr, "fe80:") {
+								hostV6 = addr
+								break
+							}
+						}
+					}
+					if hostV6 != "" {
+						ip := net.ParseIP(nodeServer)
+						if ip == nil || ip.To4() != nil {
+							nodeServer = hostV6
+							shareURI = replaceHostInShareURI(shareURI, hostV6)
+						}
+					}
+				}
+
+				isCF := strings.Contains(lowerName, "-cf-") || strings.Contains(lowerName, "-cf") || strings.Contains(lowerName, "cf-") || strings.Contains(lowerName, "tunnel") || strings.Contains(lowerName, "argo") || strings.Contains(strings.ToLower(pn.Domain), "cnmd.xx.kg") || strings.Contains(strings.ToLower(shareURI), "cnmd.xx.kg")
+				if isCF {
+					nodePort = 443
+					cfServer := "cf.877774.xyz"
+					cfDomain := nodeDomain
+					if cfDomain == "" || net.ParseIP(cfDomain) != nil {
+						if extracted := extractDomainFromShareURI(shareURI); extracted != "" && net.ParseIP(extracted) == nil {
+							cfDomain = extracted
+						} else if strings.Contains(lowerName, "tw") {
+							cfDomain = "cftw.cnmd.xx.kg"
+						}
+					}
+					if cfDomain != "" {
+						nodeDomain = cfDomain
+						nodeServer = cfServer
+						shareURI = rebuildCFTunnelShareURI(shareURI, cfServer, nodePort, cfDomain)
+					}
+				}
+
 				entries = append(entries, fleetSubscriptionEntry{
 					Node: model.Node{
 						ID:         pn.ID,
 						Name:       pn.Name,
 						Protocol:   pn.Protocol,
-						Domain:     pn.Domain,
-						Server:     pn.Server,
-						ListenPort: pn.Port,
+						Domain:     nodeDomain,
+						Server:     nodeServer,
+						ListenPort: nodePort,
 						Status:     "active",
 					},
 					Share: model.Share{
-						URI: pn.ShareURI,
+						URI: shareURI,
 					},
 				})
 			}
@@ -1431,4 +1482,60 @@ func fleetSubscriptionRevision(host model.FleetHost) string {
 	}
 	sort.Strings(parts)
 	return security.HashToken(strings.Join(parts, "|"))
+}
+
+func replaceHostInShareURI(rawURI, newHost string) string {
+	parsed, err := url.Parse(rawURI)
+	if err != nil || parsed.Host == "" {
+		return rawURI
+	}
+	port := parsed.Port()
+	if port != "" {
+		if strings.Contains(newHost, ":") && !strings.HasPrefix(newHost, "[") {
+			parsed.Host = "[" + newHost + "]:" + port
+		} else {
+			parsed.Host = newHost + ":" + port
+		}
+	} else {
+		if strings.Contains(newHost, ":") && !strings.HasPrefix(newHost, "[") {
+			parsed.Host = "[" + newHost + "]"
+		} else {
+			parsed.Host = newHost
+		}
+	}
+	return parsed.String()
+}
+
+func extractDomainFromShareURI(rawURI string) string {
+	parsed, err := url.Parse(rawURI)
+	if err != nil {
+		return ""
+	}
+	q := parsed.Query()
+	for _, key := range []string{"sni", "host", "peer"} {
+		val := strings.TrimSpace(q.Get(key))
+		if val != "" && net.ParseIP(val) == nil {
+			return val
+		}
+	}
+	if host := parsed.Hostname(); host != "" && net.ParseIP(host) == nil {
+		return host
+	}
+	return ""
+}
+
+func rebuildCFTunnelShareURI(rawURI, server string, port int, domain string) string {
+	parsed, err := url.Parse(rawURI)
+	if err != nil || parsed.User == nil {
+		return rawURI
+	}
+	q := parsed.Query()
+	q.Set("security", "tls")
+	q.Set("sni", domain)
+	q.Set("host", domain)
+	q.Del("pbk")
+	q.Del("sid")
+	parsed.Host = fmt.Sprintf("%s:%d", server, port)
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
