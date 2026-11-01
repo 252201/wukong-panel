@@ -232,6 +232,25 @@ export interface FleetStatus {
   enabled: boolean; publicUrl: string; subscriptionPublicUrl: string; localHostId: string; hosts: FleetHost[]; archivedHosts?: FleetHost[]; hostOrder?: string[]; selectedHostIds?: string[]; selectedNodeIds?: Record<string, string[]>
   globalSubscription?: string; subscriptionUpdated?: string
 }
+export interface ExternalSubscription {
+  id: string
+  name: string
+  url: string
+  userAgent?: string
+  enabled: boolean
+  autoSync: boolean
+  syncIntervalHours: number
+  lastSyncAt?: string
+  lastError?: string
+  uploadBytes: number
+  downloadBytes: number
+  totalBytes: number
+  expiresAt?: string
+  nodes: NodeItem[]
+  selectedNodeIds?: string[]
+  createdAt: string
+  updatedAt: string
+}
 export interface FleetSubscriptionProbe { ok: boolean; status: number; nodeCount: number; latencyMs: number }
 
 function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPlan {
@@ -316,6 +335,11 @@ export const api = {
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   ipReputation: (ip: string) => getIPReputation(ip),
+  externalSubscriptions: () => request<ExternalSubscription[]>('external-subscriptions', {}, false),
+  createExternalSubscription: (data: Partial<ExternalSubscription>) => request<ExternalSubscription>('external-subscriptions', { method: 'POST', body: JSON.stringify(data) }, false),
+  updateExternalSubscription: (id: string, data: Partial<ExternalSubscription>) => request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }, false),
+  deleteExternalSubscription: (id: string) => request<{ok: boolean}>(`external-subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }, false),
+  syncExternalSubscription: (id: string) => request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' }, false),
 }
 
 export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'|'tcp+udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
