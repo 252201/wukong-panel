@@ -1285,6 +1285,11 @@ func (s *Server) waitFleetCommand(ctx context.Context, id string, timeout time.D
 
 func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 	providedToken := r.PathValue("token")
+	if queryToken := r.URL.Query().Get("token"); queryToken != "" {
+		if providedToken == "" || strings.Contains(providedToken, ".") {
+			providedToken = queryToken
+		}
+	}
 	wantedToken := mustSetting(s.store, "fleet_global_token")
 	providedHash := []byte(security.HashToken(providedToken))
 	wantedHash := []byte(security.HashToken(wantedToken))
@@ -1441,6 +1446,37 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 			entries = append(entries, cached[index])
 		}
 	}
+
+	// Ingest enabled external subscription nodes
+	extSubs, _ := s.store.ExternalSubscriptions()
+	var extUpload, extDownload, extTotal int64
+	for _, extSub := range extSubs {
+		if !extSub.Enabled {
+			continue
+		}
+		extUpload += extSub.UploadBytes
+		extDownload += extSub.DownloadBytes
+		extTotal += extSub.TotalBytes
+
+		selectedNodeSet := make(map[string]bool)
+		hasNodeSelection := len(extSub.SelectedNodeIDs) > 0
+		for _, id := range extSub.SelectedNodeIDs {
+			selectedNodeSet[id] = true
+		}
+		for _, node := range extSub.Nodes {
+			if hasNodeSelection && !selectedNodeSet[node.ID] {
+				continue
+			}
+			if node.Status != "" && node.Status != "active" {
+				continue
+			}
+			entries = append(entries, fleetSubscriptionEntry{
+				Node: node,
+				Share: model.Share{URI: node.ShareURI},
+			})
+		}
+	}
+
 	templateParam := r.URL.Query().Get("template")
 	if templateParam == "" {
 		templateParam, _ = s.store.Setting("subscription_template")
@@ -1455,7 +1491,8 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	content, err := RenderClashSubscription(RenderSubscriptionOptions{
+	format := DetectClientFormat(r)
+	content, contentType, err := RenderSubscription(format, RenderSubscriptionOptions{
 		Title:              "Wukong Fleet",
 		GroupName:          "Wukong Fleet",
 		Template:           tpl,
@@ -1468,9 +1505,37 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Profile-Update-Interval", "10")
 	w.Header().Set("Profile-Title", "Wukong Fleet")
+
+	settings, _ := s.store.Settings()
+	billingStart, billingEnd := billingPeriod(time.Now(), settings.BillingResetDay, settings.Timezone)
+	trafficUsed := int64(0)
+	if rx, tx, trafficErr := s.store.TrafficBetween(billingStart.Format("2006-01-02"), billingEnd.Format("2006-01-02")); trafficErr == nil {
+		trafficUsed = rx + tx
+	}
+	totalQuota := settings.TrafficQuotaBytes
+	totalUpload := trafficUsed/2 + extUpload
+	totalDownload := trafficUsed - trafficUsed/2 + extDownload
+	grandTotal := totalQuota + extTotal
+	expire := time.Now().AddDate(0, 1, 0).Unix()
+	if settings.ExpiresAt != "" {
+		if t, err := time.Parse("2006-01-02", settings.ExpiresAt); err == nil && !t.IsZero() {
+			expire = t.Unix()
+		}
+	}
+
+	w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", totalUpload, totalDownload, grandTotal, expire))
+
+	filename := "subscription.yaml"
+	switch format {
+	case FormatBase64:
+		filename = "subscription.txt"
+	case FormatSingbox:
+		filename = "subscription.json"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
 	fmt.Fprint(w, content)
 }
 

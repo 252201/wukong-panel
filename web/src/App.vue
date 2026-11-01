@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, componentUpdateAPI, getIPReputation, hostSecurityAPI, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type FirewallState, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, componentUpdateAPI, getIPReputation, hostSecurityAPI, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type ExternalSubscription, type FirewallState, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import { startComponentUpdateJob, refreshComponentUpdateJob, pendingComponentUpdateJob } from './componentUpdateJobs'
 import { formatRelativeTime, formatFullDateTime } from './timeFormat'
 import { securityRuleMatchesProtocol } from './securityRules'
@@ -128,7 +128,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'subscription-qr' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -723,6 +723,7 @@ async function refreshFleetStatus() {
     selectedHostId.value = 'local'
     setFleetHost('local')
   }
+  void loadExternalSubscriptions()
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
@@ -829,6 +830,200 @@ function fleetSubscriptionUrlWithTemplate(tpl?: string): string {
 function copyFleetSubscriptionWithTemplate(tpl?: string) {
   const target = fleetSubscriptionUrlWithTemplate(tpl)
   if (target) copy(target)
+}
+
+const selectedSubFormat = ref<'auto' | 'clash' | 'base64' | 'singbox'>('auto')
+const subscriptionQRDataUrl = ref('')
+
+function fleetSubscriptionUrl(fmt?: string, tpl?: string): string {
+  const base = fleetStatus.value?.globalSubscription || ''
+  if (!base) return ''
+  const chosenFormat = fmt || selectedSubFormat.value || 'auto'
+  const chosenTpl = tpl || selectedFleetTemplate.value || 'standard'
+  try {
+    const url = new URL(base, window.location.origin)
+    const basePath = url.pathname.replace(/\/clash\.(yaml|yml)$/, '').replace(/\/(sub\.txt|singbox\.json)$/, '')
+    switch (chosenFormat) {
+      case 'clash':
+        url.pathname = `${basePath}/clash.yaml`
+        url.searchParams.delete('format')
+        break
+      case 'base64':
+        url.pathname = `${basePath}/sub.txt`
+        url.searchParams.delete('format')
+        break
+      case 'singbox':
+        url.pathname = `${basePath}/singbox.json`
+        url.searchParams.delete('format')
+        break
+      case 'auto':
+      default:
+        url.pathname = basePath
+        url.searchParams.delete('format')
+        break
+    }
+    if (chosenTpl && chosenTpl !== 'standard') {
+      url.searchParams.set('template', chosenTpl)
+    } else {
+      url.searchParams.delete('template')
+    }
+    return url.toString()
+  } catch {
+    return base
+  }
+}
+
+async function openSubscriptionQR(format?: string) {
+  const url = fleetSubscriptionUrl(format)
+  if (!url) return
+  try {
+    subscriptionQRDataUrl.value = await QRCode.toDataURL(url, { margin: 1, width: 256, color: { dark: '#15120b', light: '#f5e9c8' } })
+    modal.value = 'subscription-qr'
+  } catch {
+    notify('生成二维码失败')
+  }
+}
+
+// External Subscriptions State & Methods
+const externalSubs = ref<ExternalSubscription[]>([])
+const loadingExternalSubs = ref(false)
+const externalSubDraft = ref<{
+  id?: string
+  name: string
+  url: string
+  userAgent: string
+  autoSync: boolean
+  syncIntervalHours: number
+}>({
+  name: '',
+  url: '',
+  userAgent: '',
+  autoSync: true,
+  syncIntervalHours: 12,
+})
+const syncingExternalSubId = ref<string | null>(null)
+
+async function loadExternalSubscriptions() {
+  loadingExternalSubs.value = true
+  try {
+    externalSubs.value = await api.externalSubscriptions()
+  } catch {
+    // ignore
+  } finally {
+    loadingExternalSubs.value = false
+  }
+}
+
+function openCreateExternalSubModal() {
+  externalSubDraft.value = {
+    name: '',
+    url: '',
+    userAgent: '',
+    autoSync: true,
+    syncIntervalHours: 12,
+  }
+  modal.value = 'external-sub'
+}
+
+function openEditExternalSubModal(sub: ExternalSubscription) {
+  externalSubDraft.value = {
+    id: sub.id,
+    name: sub.name,
+    url: sub.url,
+    userAgent: sub.userAgent || '',
+    autoSync: sub.autoSync,
+    syncIntervalHours: sub.syncIntervalHours || 12,
+  }
+  modal.value = 'external-sub'
+}
+
+async function submitExternalSubModal() {
+  if (!externalSubDraft.value.name.trim() || !externalSubDraft.value.url.trim()) {
+    notify('请填写订阅名称和链接')
+    return
+  }
+  busy.value = true
+  try {
+    if (!externalSubDraft.value.id) {
+      await api.createExternalSubscription(externalSubDraft.value)
+      notify('外部订阅已添加并开始同步')
+    } else {
+      await api.updateExternalSubscription(externalSubDraft.value.id, externalSubDraft.value)
+      notify('外部订阅已更新')
+    }
+    modal.value = null
+    await loadExternalSubscriptions()
+    await refreshFleetStatus()
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '保存失败')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function deleteExternalSubscription(sub: ExternalSubscription) {
+  if (!confirm(`确认删除外部订阅「${sub.name}」吗？`)) return
+  busy.value = true
+  try {
+    await api.deleteExternalSubscription(sub.id)
+    notify('外部订阅已删除')
+    await loadExternalSubscriptions()
+    await refreshFleetStatus()
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '删除失败')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function syncExternalSubscription(sub: ExternalSubscription) {
+  syncingExternalSubId.value = sub.id
+  try {
+    await api.syncExternalSubscription(sub.id)
+    notify(`外部订阅「${sub.name}」同步完成`)
+    await loadExternalSubscriptions()
+    await refreshFleetStatus()
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '同步失败')
+  } finally {
+    syncingExternalSubId.value = null
+  }
+}
+
+async function toggleExternalSubEnabled(sub: ExternalSubscription, enabled: boolean) {
+  try {
+    await api.updateExternalSubscription(sub.id, { enabled })
+    sub.enabled = enabled
+    notify(enabled ? `已启用「${sub.name}」混流` : `已暂停「${sub.name}」混流`)
+    await refreshFleetStatus()
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '切换状态失败')
+  }
+}
+
+async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
+  let selected = sub.selectedNodeIds ? [...sub.selectedNodeIds] : sub.nodes.map(n => n.id)
+  if (checked) {
+    if (!selected.includes(nodeId)) selected.push(nodeId)
+  } else {
+    selected = selected.filter(id => id !== nodeId)
+  }
+  try {
+    await api.updateExternalSubscription(sub.id, { selectedNodeIds: selected })
+    sub.selectedNodeIds = selected
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '选择节点失败')
+  }
+}
+
+async function toggleAllExternalNodes(sub: ExternalSubscription, selectAll: boolean) {
+  const selected = selectAll ? sub.nodes.map(n => n.id) : []
+  try {
+    await api.updateExternalSubscription(sub.id, { selectedNodeIds: selected })
+    sub.selectedNodeIds = selected
+  } catch (err) {
+    notify(err instanceof Error ? err.message : '选择节点失败')
+  }
 }
 
 async function probeFleetSubscription() {
@@ -3133,6 +3328,99 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <button class="primary" :disabled="!fleetSelectedHosts.length" @click="saveFleetSubscriptionSelection">保存范围</button>
             </div>
           </header><div class="fleet-scope-hosts"><article v-for="host in fleetHosts.filter(item => !isProbeHost(item) || (item.snapshot?.nodes || []).length > 0)" :key="`scope-${host.id}`"><label><input v-model="fleetSelectedHosts" type="checkbox" :value="host.id"><span><b>{{ host.name }}</b><small>{{ host.online ? '在线' : host.subscriptionCachedAt ? `离线 · 缓存 ${new Date(host.subscriptionCachedAt).toLocaleString(language)}` : isProbeHost(host) ? '离线 · 节点已就绪' : '离线 · 尚无缓存' }}</small></span></label><div v-if="fleetSelectedHosts.includes(host.id)"><label v-for="node in (host.snapshot?.nodes || []).filter(item => item.status === 'active')" :key="node.id"><input type="checkbox" :checked="(fleetSelectedNodes[host.id] || []).includes(node.id)" @change="toggleFleetNode(host.id, node.id, ($event.target as HTMLInputElement).checked)"><span>{{ node.name }}</span></label><small v-if="!(host.snapshot?.nodes || []).some(item => item.status === 'active')">暂无 active 节点</small></div></article></div></section>
+        <section class="panel-card external-subscriptions-section">
+          <header>
+            <div>
+              <span class="section-mark amber">源</span>
+              <div>
+                <h3>外部订阅与机场混流</h3>
+                <p>导入外部机场或第三方订阅，节点与自建节点无缝融合，按需勾选纳入全局聚合</p>
+              </div>
+            </div>
+            <div class="external-sub-header-actions">
+              <button type="button" class="primary" @click="openCreateExternalSubModal">添加外部订阅</button>
+            </div>
+          </header>
+          
+          <div v-if="loadingExternalSubs && !externalSubs.length" class="external-sub-loading">
+            <span>正在加载外部订阅…</span>
+          </div>
+
+          <div v-else-if="!externalSubs.length" class="external-sub-empty">
+            <p>暂无外部机场订阅。点击上方「添加外部订阅」导入外部 Clash / Base64 订阅源，实现自建与机场节点统一管理。</p>
+          </div>
+
+          <div v-else class="external-subs-list">
+            <article v-for="sub in externalSubs" :key="sub.id" class="external-sub-card">
+              <div class="external-sub-card-header">
+                <div class="external-sub-info">
+                  <div class="external-sub-title-row">
+                    <h4>{{ sub.name }}</h4>
+                    <span class="external-sub-badge" :class="sub.enabled ? 'active' : 'inactive'">
+                      {{ sub.enabled ? '混流已启用' : '已暂停混流' }}
+                    </span>
+                    <span v-if="syncingExternalSubId === sub.id" class="external-sub-badge syncing">同步中…</span>
+                    <span v-else-if="sub.lastError" class="external-sub-badge error" :title="sub.lastError">同步失败</span>
+                    <span v-else-if="sub.lastSyncAt" class="external-sub-badge success">同步正常</span>
+                  </div>
+                  <div class="external-sub-url-row">
+                    <code>{{ sub.url }}</code>
+                  </div>
+                </div>
+
+                <div class="external-sub-actions">
+                  <button type="button" class="secondary mini-action" :disabled="syncingExternalSubId === sub.id" @click="syncExternalSubscription(sub)">
+                    {{ syncingExternalSubId === sub.id ? '同步中…' : '立即同步' }}
+                  </button>
+                  <button type="button" class="secondary mini-action" @click="toggleExternalSubEnabled(sub, !sub.enabled)">
+                    {{ sub.enabled ? '暂停混流' : '启用混流' }}
+                  </button>
+                  <button type="button" class="secondary mini-action" @click="openEditExternalSubModal(sub)">编辑</button>
+                  <button type="button" class="danger-mini-btn" @click="deleteExternalSubscription(sub)">删除</button>
+                </div>
+              </div>
+
+              <!-- Traffic Quota Bar if available -->
+              <div v-if="sub.totalBytes > 0 || sub.uploadBytes > 0 || sub.downloadBytes > 0 || sub.expiresAt" class="external-sub-quota">
+                <div class="external-quota-meta">
+                  <span>流量已用: <b>{{ bytes(sub.uploadBytes + sub.downloadBytes) }}</b> / {{ sub.totalBytes > 0 ? bytes(sub.totalBytes) : '不限量' }}</span>
+                  <span v-if="sub.expiresAt">到期: <b>{{ new Date(sub.expiresAt).toLocaleDateString(language) }}</b></span>
+                </div>
+                <div v-if="sub.totalBytes > 0" class="external-quota-bar">
+                  <div
+                    class="external-quota-bar-fill"
+                    :style="{ width: `${Math.min(100, ((sub.uploadBytes + sub.downloadBytes) / sub.totalBytes) * 100)}%` }"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Synced Nodes Selection -->
+              <div class="external-sub-nodes">
+                <div class="external-nodes-header">
+                  <span>节点选择 ({{ (sub.selectedNodeIds || sub.nodes.map(n => n.id)).length }}/{{ sub.nodes.length }}) · 同步于 {{ sub.lastSyncAt ? new Date(sub.lastSyncAt).toLocaleString(language) : '从未同步' }}</span>
+                  <div class="external-nodes-actions">
+                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">全选</button>
+                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">全不选</button>
+                  </div>
+                </div>
+                <div v-if="sub.nodes && sub.nodes.length" class="external-nodes-grid">
+                  <label v-for="node in sub.nodes" :key="node.id" class="external-node-chip">
+                    <input
+                      type="checkbox"
+                      :checked="(sub.selectedNodeIds || sub.nodes.map(n => n.id)).includes(node.id)"
+                      @change="toggleExternalNodeSelected(sub, node.id, ($event.target as HTMLInputElement).checked)"
+                    >
+                    <span class="external-node-tag">{{ node.protocol }}</span>
+                    <span class="external-node-name" :title="node.name">{{ node.name }}</span>
+                  </label>
+                </div>
+                <div v-else class="external-nodes-empty">
+                  <small>{{ sub.lastError ? `同步报错: ${sub.lastError}` : '尚无解析到的节点，请点击「立即同步」获取。' }}</small>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
         <section v-if="enrollmentCommand" id="fleet-enrollment" class="panel-card enrollment-card"><div class="enrollment-col enrollment-join"><div class="enrollment-col-head"><div class="enrollment-col-title"><span class="section-mark">令</span><div><h3>{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div></div><button type="button" @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>{{ enrollmentMode === 'probe' ? '在远端 VPS 以 root 执行；仅安装探针，不安装面板、Nginx 或 sing-box。探针只主动连接可信 HTTPS 主控。' : '在远端 VPS 以 root 执行；将安装完整面板、Nginx 与 sing-box，Agent 主动连接可信 HTTPS 主控。' }}</small></div><div class="enrollment-col enrollment-leave"><div class="enrollment-leave-head enrollment-col-head"><div class="enrollment-leave-title enrollment-col-title"><span class="section-mark red">撤</span><div><h4>{{ enrollmentMode === 'probe' ? '卸载轻量探针' : '取消中央接入' }}</h4><p>{{ enrollmentMode === 'probe' ? '停止服务并删除探针文件；中央记录需在舰队卡片中另行移除。' : '仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。' }}</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
       </div>
 
@@ -3510,9 +3798,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             <div class="fleet-sub-box-head">
               <div class="fleet-sub-box-title">
                 <b>全局聚合订阅入口</b>
-                <span class="settings-scope-tag jade">Clash / Mihomo</span>
+                <span class="settings-scope-tag jade">多客户端自适应</span>
               </div>
               <div class="fleet-sub-box-actions">
+                <button type="button" class="secondary mini-action" :disabled="!fleetSubscriptionUrl()" @click="openSubscriptionQR()">扫码导入</button>
                 <button type="button" class="secondary mini-action probe" :disabled="fleetSubscriptionProbeBusy" @click="probeFleetSubscription">{{ fleetSubscriptionProbeBusy ? '正在检测…' : '检测订阅入口' }}</button>
                 <button v-if="!confirmRotateGlobalToken" type="button" class="secondary mini-action warn-hover" :disabled="busy" @click="confirmRotateGlobalToken = true">轮换全局订阅 Token</button>
                 <span v-else class="inline-confirm-bar">
@@ -3522,10 +3811,19 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                 </span>
               </div>
             </div>
+            <div class="sub-format-row">
+              <span class="sub-format-label">客户端格式:</span>
+              <div class="sub-format-chips">
+                <button type="button" class="sub-format-chip" :class="{ active: selectedSubFormat === 'auto' }" @click="selectedSubFormat = 'auto'">自动检测 (UA)</button>
+                <button type="button" class="sub-format-chip" :class="{ active: selectedSubFormat === 'clash' }" @click="selectedSubFormat = 'clash'">Clash / Mihomo</button>
+                <button type="button" class="sub-format-chip" :class="{ active: selectedSubFormat === 'base64' }" @click="selectedSubFormat = 'base64'">Base64 (通用)</button>
+                <button type="button" class="sub-format-chip" :class="{ active: selectedSubFormat === 'singbox' }" @click="selectedSubFormat = 'singbox'">Sing-box 1.8+</button>
+              </div>
+            </div>
             <div v-if="fleetSubscriptionProbeBusy || fleetSubscriptionProbe || fleetSubscriptionProbeError" class="fleet-probe-result" :class="fleetSubscriptionProbeError ? 'error' : fleetSubscriptionProbe ? 'success' : 'running'">
               <i></i><span v-if="fleetSubscriptionProbeBusy">正从主控服务器验证 TLS、HTTP 状态与订阅内容…</span><span v-else-if="fleetSubscriptionProbe"><b>入口可用</b> · HTTP {{ fleetSubscriptionProbe.status }} · {{ fleetSubscriptionProbe.nodeCount }} 个节点 · {{ fleetSubscriptionProbe.latencyMs }} ms</span><span v-else>{{ fleetSubscriptionProbeError }}</span>
             </div>
-            <div class="token-box"><code>{{ fleetStatus.globalSubscription }}</code><button type="button" @click="copy(fleetStatus?.globalSubscription || '')">复制全局订阅</button></div>
+            <div class="token-box"><code>{{ fleetSubscriptionUrl() }}</code><button type="button" @click="copy(fleetSubscriptionUrl())">复制全局订阅</button></div>
           </div>
           <div class="fleet-setting-actions">
             <button class="primary" :disabled="busy" @click="saveFleetController(false)">保存中央设置</button>
@@ -5160,6 +5458,71 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         </button>
       </div>
     </div>
+    <form v-else-if="modal === 'external-sub'" class="modal-card external-sub-modal" role="dialog" aria-modal="true" @submit.prevent="submitExternalSubModal">
+      <button type="button" class="modal-close" :disabled="busy" @click="modal = null">×</button>
+      <span class="modal-seal amber">源</span>
+      <p class="eyebrow">EXTERNAL SUBSCRIPTION</p>
+      <h2>{{ externalSubDraft.id ? '编辑外部机场订阅' : '导入外部机场订阅' }}</h2>
+      <p>导入外部 Clash / Base64 订阅链接。系统将自动解析节点并提取流量账期，与自建节点混流分发。</p>
+      
+      <div class="form-grid">
+        <label>
+          订阅名称
+          <input v-model="externalSubDraft.name" type="text" placeholder="例如：FastCloud 香港专线" required autofocus>
+        </label>
+        <label>
+          自定义 User-Agent（可选）
+          <input v-model="externalSubDraft.userAgent" type="text" placeholder="留空默认使用 clash.meta / v2rayN">
+        </label>
+      </div>
+
+      <label>
+        订阅链接 URL
+        <input v-model="externalSubDraft.url" type="url" placeholder="https://airport.example.com/api/v1/client/subscribe?token=..." required>
+        <small>支持标准 HTTP/HTTPS Clash YAML 或 Base64 格式订阅源（已启用内网 IP 与私有地址 SSRF 防护）</small>
+      </label>
+
+      <div class="form-grid">
+        <label class="checkbox-label inline-checkbox">
+          <input v-model="externalSubDraft.autoSync" type="checkbox">
+          <span>启用后台定时自动更新</span>
+        </label>
+        <label v-if="externalSubDraft.autoSync">
+          同步间隔（小时）
+          <input v-model.number="externalSubDraft.syncIntervalHours" type="number" min="1" max="168" required>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" :disabled="busy" @click="modal = null">取消</button>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? '保存中…' : (externalSubDraft.id ? '保存修改' : '立即导入并同步') }}</button>
+      </div>
+    </form>
+    <section v-else-if="modal === 'subscription-qr'" class="modal-card subscription-qr-modal" role="dialog" aria-modal="true">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal jade">码</span>
+      <p class="eyebrow">SCAN QR CODE</p>
+      <h2>扫码导入全局订阅</h2>
+      <p>使用手机客户端（Clash Verge / Mihomo Party / Sing-box / Shadowrocket / Quantumult X）扫描二维码直接导入。</p>
+      
+      <div class="subscription-qr-content">
+        <div class="subscription-qr-box">
+          <img v-if="subscriptionQRDataUrl" :src="subscriptionQRDataUrl" alt="全局订阅二维码" class="subscription-qr-image">
+        </div>
+        <div class="subscription-qr-format">
+          <span>当前导出格式：</span>
+          <b>{{ selectedSubFormat === 'auto' ? '自动检测 (UA)' : selectedSubFormat === 'clash' ? 'Clash / Mihomo' : selectedSubFormat === 'base64' ? 'Base64 纯文本' : 'Sing-box 1.8+' }}</b>
+        </div>
+        <div class="token-box">
+          <code>{{ fleetSubscriptionUrl() }}</code>
+          <button type="button" @click="copy(fleetSubscriptionUrl())">复制链接</button>
+        </div>
+      </div>
+      
+      <div class="modal-actions">
+        <button type="button" class="primary wide" @click="modal = null">完成</button>
+      </div>
+    </section>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast">

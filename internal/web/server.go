@@ -167,8 +167,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}", s.auth(s.archiveFleetHost, true))
 	mux.HandleFunc("DELETE /api/v1/fleet/hosts/{hostId}/purge", s.auth(s.purgeFleetHost, true))
 	mux.HandleFunc("/api/v1/fleet/hosts/{hostId}/{resource...}", s.fleetAuth(s.fleetHostGateway))
-	mux.HandleFunc("GET /sub/{token}/clash.yaml", s.subscription)
-	mux.HandleFunc("GET /fleet-sub/{token}/clash.yaml", s.fleetSubscription)
+	mux.HandleFunc("GET /api/v1/external-subscriptions", s.auth(s.listExternalSubscriptions, false))
+	mux.HandleFunc("POST /api/v1/external-subscriptions", s.auth(s.createExternalSubscription, true))
+	mux.HandleFunc("PUT /api/v1/external-subscriptions/{id}", s.auth(s.updateExternalSubscription, true))
+	mux.HandleFunc("DELETE /api/v1/external-subscriptions/{id}", s.auth(s.deleteExternalSubscription, true))
+	mux.HandleFunc("POST /api/v1/external-subscriptions/{id}/sync", s.auth(s.syncExternalSubscription, true))
+	mux.HandleFunc("GET /sub/{token}", s.subscription)
+	mux.HandleFunc("GET /sub/{token}/{filename...}", s.subscription)
+	mux.HandleFunc("GET /fleet-sub/{token}", s.fleetSubscription)
+	mux.HandleFunc("GET /fleet-sub/{token}/{filename...}", s.fleetSubscription)
+	mux.HandleFunc("GET /fleet/subscription", s.fleetSubscription)
+	mux.HandleFunc("GET /fleet/subscription/{token}", s.fleetSubscription)
+	mux.HandleFunc("GET /fleet/subscription/{token}/{filename...}", s.fleetSubscription)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "version": s.version})
 	})
@@ -177,6 +187,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	s.StartExternalSubscriptionBackgroundSync(ctx)
 	server := &http.Server{Addr: s.cfg.Listen, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 70 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -711,7 +722,13 @@ func (s *Server) rotateSubscriptionToken(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	token, err := s.store.Setting("subscription_token")
-	if err != nil || token == "" || r.PathValue("token") != token {
+	reqToken := r.PathValue("token")
+	if queryToken := r.URL.Query().Get("token"); queryToken != "" {
+		if reqToken == "" || strings.Contains(reqToken, ".") {
+			reqToken = queryToken
+		}
+	}
+	if err != nil || token == "" || reqToken != token {
 		http.NotFound(w, r)
 		return
 	}
@@ -727,6 +744,11 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		used = max64(0, metrics[len(metrics)-1].RXBytes-metrics[0].RXBytes) + max64(0, metrics[len(metrics)-1].TXBytes-metrics[0].TXBytes)
 	}
 	expire := time.Now().AddDate(0, 1, 0).Unix()
+	if settings.ExpiresAt != "" {
+		if t, err := time.Parse("2006-01-02", settings.ExpiresAt); err == nil && !t.IsZero() {
+			expire = t.Unix()
+		}
+	}
 
 	templateParam := r.URL.Query().Get("template")
 	if templateParam == "" {
@@ -752,7 +774,8 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	content, err := RenderClashSubscription(RenderSubscriptionOptions{
+	format := DetectClientFormat(r)
+	content, contentType, err := RenderSubscription(format, RenderSubscriptionOptions{
 		Title:              "Wukong Panel",
 		GroupName:          "Wukong",
 		Template:           tpl,
@@ -764,10 +787,18 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", used/2, used-used/2, settings.TrafficQuotaBytes, expire))
 	w.Header().Set("Profile-Update-Interval", "10")
 	w.Header().Set("Profile-Title", "Wukong Panel")
+	filename := "subscription.yaml"
+	switch format {
+	case FormatBase64:
+		filename = "subscription.txt"
+	case FormatSingbox:
+		filename = "subscription.json"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
 	fmt.Fprint(w, content)
 }
 

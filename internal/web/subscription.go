@@ -92,7 +92,7 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "  - name: %q\n    server: %q\n    port: %d\n", node.Name, server, port)
 	switch strings.ToLower(node.Protocol) {
-	case "hysteria2":
+	case "hysteria2", "hy2":
 		fmt.Fprintf(&builder, "    type: hysteria2\n    password: %q\n    servername: %q\n    sni: %q\n    udp: true\n    skip-cert-verify: %t\n", parsed.User.Username(), sni, sni, insecure)
 	case "vless":
 		if query.Get("pbk") != "" || query.Get("security") == "reality" {

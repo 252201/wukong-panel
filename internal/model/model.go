@@ -38,9 +38,10 @@ type Node struct {
 	ProbeCheckedAt  time.Time `json:"probeCheckedAt,omitempty"`
 	TrafficBytes      int64     `json:"trafficBytes"`
 	TotalTrafficBytes int64     `json:"totalTrafficBytes,omitempty"`
-	Secret          string    `json:"-"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ShareURI          string    `json:"shareUri,omitempty"`
+	Secret            string    `json:"-"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 type NodeCandidate struct {
@@ -495,6 +496,26 @@ type FleetStatus struct {
 	SelectedNodeIDs       map[string][]string `json:"selectedNodeIds,omitempty"`
 	GlobalSubscription    string              `json:"globalSubscription,omitempty"`
 	SubscriptionUpdated   time.Time           `json:"subscriptionUpdated,omitempty"`
+}
+
+type ExternalSubscription struct {
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	URL               string       `json:"url"`
+	UserAgent         string       `json:"userAgent,omitempty"`
+	Enabled           bool         `json:"enabled"`
+	AutoSync          bool         `json:"autoSync"`
+	SyncIntervalHours int          `json:"syncIntervalHours"`
+	LastSyncAt        time.Time    `json:"lastSyncAt,omitempty"`
+	LastError         string       `json:"lastError,omitempty"`
+	UploadBytes       int64        `json:"uploadBytes"`
+	DownloadBytes     int64        `json:"downloadBytes"`
+	TotalBytes        int64        `json:"totalBytes"`
+	ExpiresAt         string       `json:"expiresAt,omitempty"`
+	Nodes             []Node       `json:"nodes"`
+	SelectedNodeIDs   []string     `json:"selectedNodeIds,omitempty"`
+	CreatedAt         time.Time    `json:"createdAt"`
+	UpdatedAt         time.Time    `json:"updatedAt"`
 }
 
 type progressReporterKey struct{}

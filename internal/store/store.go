@@ -176,6 +176,25 @@ CREATE TABLE IF NOT EXISTS fleet_probe_nodes (
   FOREIGN KEY(host_id) REFERENCES fleet_hosts(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_fleet_probe_nodes_host ON fleet_probe_nodes(host_id);
+CREATE TABLE IF NOT EXISTS external_subscriptions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  user_agent TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  auto_sync INTEGER NOT NULL DEFAULT 1,
+  sync_interval_hours INTEGER NOT NULL DEFAULT 12,
+  last_sync_at INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT '',
+  upload_bytes INTEGER NOT NULL DEFAULT 0,
+  download_bytes INTEGER NOT NULL DEFAULT 0,
+  total_bytes INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL DEFAULT '',
+  nodes_json TEXT NOT NULL DEFAULT '[]',
+  selected_node_ids_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
