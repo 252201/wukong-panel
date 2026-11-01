@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { matchCountryFlag, formatNodeNameWithFlag, FLAG_EMOJI_REGEX } from './nodeFlags.ts'
+import { matchCountryFlag, formatNodeNameWithFlag, FLAG_EMOJI_REGEX, normalizeProtocolClass, formatExternalProtocolBadge } from './nodeFlags.ts'
 
 test('FLAG_EMOJI_REGEX correctly detects emoji flags', () => {
   assert.equal(FLAG_EMOJI_REGEX.test('🇭🇰 Hong Kong'), true)
@@ -43,3 +43,34 @@ test('formatNodeNameWithFlag prepends flag correctly', () => {
   assert.equal(formatNodeNameWithFlag('🇭🇰 Hong Kong | 01'), '🇭🇰 Hong Kong | 01')
   assert.equal(formatNodeNameWithFlag('Custom Node Without Country'), 'Custom Node Without Country')
 })
+
+test('normalizeProtocolClass maps all protocols to deployment badge classes', () => {
+  assert.equal(normalizeProtocolClass('trojan'), 'trojan')
+  assert.equal(normalizeProtocolClass('TROJAN'), 'trojan')
+  assert.equal(normalizeProtocolClass('hysteria2'), 'hysteria2')
+  assert.equal(normalizeProtocolClass('hy2'), 'hysteria2')
+  assert.equal(normalizeProtocolClass('vless'), 'vless')
+  assert.equal(normalizeProtocolClass('vless-ws-tunnel'), 'vless-ws-tunnel')
+  assert.equal(normalizeProtocolClass('shadowsocks'), 'shadowsocks')
+  assert.equal(normalizeProtocolClass('ss'), 'shadowsocks')
+  assert.equal(normalizeProtocolClass('ss2022'), 'shadowsocks')
+  assert.equal(normalizeProtocolClass('tuic'), 'tuic')
+  assert.equal(normalizeProtocolClass('anytls'), 'anytls')
+  assert.equal(normalizeProtocolClass('vmess'), 'vmess')
+  assert.equal(normalizeProtocolClass(''), '')
+})
+
+test('formatExternalProtocolBadge formats concise uppercase badges', () => {
+  assert.equal(formatExternalProtocolBadge('trojan'), 'TROJAN')
+  assert.equal(formatExternalProtocolBadge('vless'), 'VLESS')
+  assert.equal(formatExternalProtocolBadge('hysteria2'), 'HY2')
+  assert.equal(formatExternalProtocolBadge('hy2'), 'HY2')
+  assert.equal(formatExternalProtocolBadge('shadowsocks'), 'SS')
+  assert.equal(formatExternalProtocolBadge('ss'), 'SS')
+  assert.equal(formatExternalProtocolBadge('ss2022'), 'SS2022')
+  assert.equal(formatExternalProtocolBadge('tuic'), 'TUIC')
+  assert.equal(formatExternalProtocolBadge('anytls'), 'ANYTLS')
+  assert.equal(formatExternalProtocolBadge('vmess'), 'VMESS')
+  assert.equal(formatExternalProtocolBadge('vless-ws-tunnel'), 'VLESS · CF')
+})
+

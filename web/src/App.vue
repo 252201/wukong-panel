@@ -15,7 +15,7 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { formatNodeNameWithFlag } from './nodeFlags'
+import { formatNodeNameWithFlag, normalizeProtocolClass, formatExternalProtocolBadge } from './nodeFlags'
 import {
   fleetHostRateHint,
   networkGroupFrom,
@@ -3671,7 +3671,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                       :checked="externalSubSelectedIds(sub).includes(node.id)"
                       @change="toggleExternalNodeSelected(sub, node.id, ($event.target as HTMLInputElement).checked)"
                     >
-                    <span class="external-node-tag">{{ node.protocol }}</span>
+                    <span class="external-node-tag" :class="normalizeProtocolClass(node.protocol)">{{ formatExternalProtocolBadge(node.protocol) }}</span>
                     <span class="external-node-name">{{ formatExternalNodeName(node.name) }}</span>
                   </label>
                 </div>
@@ -3746,7 +3746,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <article v-for="node in nodes" :key="node.id" class="node-card" :class="[node.status, { tunnel: node.protocol === 'vless-ws-tunnel', preferred: !!node.preferredServer }]">
             <div class="node-top">
               <div class="node-top-left">
-                <span class="protocol-badge">{{ protocolInfo(node.protocol).badge }}</span>
+                <span class="protocol-badge" :class="normalizeProtocolClass(node.protocol)">{{ protocolInfo(node.protocol).badge }}</span>
                 <span
                   v-if="node.status === 'active'"
                   class="node-rate-badge"
@@ -4830,7 +4830,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <article v-for="node in probeNodesList" :key="node.id" class="probe-node-item">
             <div class="probe-node-info">
               <div class="probe-node-title-row">
-                <span class="protocol-badge" :class="node.protocol">{{ node.protocol.toUpperCase() }}</span>
+                <span class="protocol-badge" :class="normalizeProtocolClass(node.protocol)">{{ node.protocol.toUpperCase() }}</span>
                 <div v-if="probeNodeRenameId === node.id" class="inline-rename-wrap">
                   <input v-model="probeNodeRenameDraft" type="text" class="inline-rename-input" maxlength="60" @keyup.enter="submitRenameProbeNode(node)" @keyup.esc="cancelRenameProbeNode" autofocus />
                   <button type="button" class="mini-btn primary" @click="submitRenameProbeNode(node)">保存</button>
@@ -5600,7 +5600,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
           <p class="eyebrow">NODE PROXY LOOPBACK DIAGNOSTIC</p>
           <h2>{{ diagnosticNode.name }} 代理闭环诊断</h2>
           <div class="diagnostic-head-tags">
-            <span class="protocol-badge">{{ protocolInfo(diagnosticNode.protocol).badge }}</span>
+            <span class="protocol-badge" :class="normalizeProtocolClass(diagnosticNode.protocol)">{{ protocolInfo(diagnosticNode.protocol).badge }}</span>
             <span class="diag-status-pill" :class="probeState(diagnosticNode)">
               <i class="diag-dot"></i>
               {{ probeState(diagnosticNode) === 'running' ? '闭环检测中' : probeState(diagnosticNode) === 'success' ? '闭环正常' : probeState(diagnosticNode) === 'failed' ? '检测异常' : '未检测' }}

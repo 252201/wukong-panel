@@ -1683,6 +1683,8 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .protocol-badge.tuic{background:rgba(234,179,8,.15);color:#facc15;border-color:rgba(234,179,8,.35)}
 .protocol-badge.trojan{background:rgba(244,63,94,.15);color:#fb7185;border-color:rgba(244,63,94,.35)}
 .protocol-badge.vmess{background:rgba(14,165,233,.15);color:#38bdf8;border-color:rgba(14,165,233,.35)}
+.protocol-badge.anytls{background:rgba(45,212,191,.15);color:#2dd4bf;border-color:rgba(45,212,191,.35)}
+.protocol-badge.vless-ws-tunnel{background:rgba(249,115,22,.15);color:#fb923c;border-color:rgba(249,115,22,.35)}
 .source-tag{font-size:9px;padding:1px 5px;border-radius:2px}
 .source-tag.source-scan{background:rgba(74,172,130,.12);color:var(--jade);border:1px solid rgba(74,172,130,.25)}
 .source-tag.source-manual{background:rgba(211,169,77,.12);color:var(--gold);border:1px solid rgba(211,169,77,.25)}
@@ -4761,14 +4763,52 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 .external-node-tag {
   font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+  padding: 1.5px 5.5px;
+  border-radius: 2px;
   background: rgba(211, 169, 77, 0.15);
   color: var(--gold);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: .05em;
   text-transform: uppercase;
   flex: 0 0 auto;
   white-space: nowrap;
+  line-height: 1.2;
+}
+.external-node-tag.hysteria2,
+.external-node-tag.hy2 {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+.external-node-tag.vless {
+  background: rgba(74, 172, 130, 0.15);
+  color: var(--jade);
+}
+.external-node-tag.vless-ws-tunnel {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
+}
+.external-node-tag.shadowsocks,
+.external-node-tag.ss,
+.external-node-tag.ss2022 {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+.external-node-tag.tuic {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+}
+.external-node-tag.trojan {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+}
+.external-node-tag.anytls {
+  background: rgba(45, 212, 191, 0.15);
+  color: #2dd4bf;
+}
+.external-node-tag.vmess {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
 }
 .external-node-name {
   white-space: nowrap;
@@ -4956,6 +4996,84 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .external-sub-delete-target {
   background: rgba(196, 70, 53, 0.04);
   border-color: rgba(196, 70, 53, 0.2);
+}
+:root[data-effective-theme="light"] .external-node-tag.hysteria2,
+:root[data-effective-theme="light"] .external-node-tag.hy2 {
+  background: rgba(56, 189, 248, 0.12);
+  color: #0284c7;
+}
+:root[data-effective-theme="light"] .external-node-tag.vless {
+  background: rgba(74, 172, 130, 0.12);
+  color: #059669;
+}
+:root[data-effective-theme="light"] .external-node-tag.vless-ws-tunnel {
+  background: rgba(249, 115, 22, 0.12);
+  color: #d97706;
+}
+:root[data-effective-theme="light"] .external-node-tag.shadowsocks,
+:root[data-effective-theme="light"] .external-node-tag.ss,
+:root[data-effective-theme="light"] .external-node-tag.ss2022 {
+  background: rgba(168, 85, 247, 0.12);
+  color: #7c3aed;
+}
+:root[data-effective-theme="light"] .external-node-tag.tuic {
+  background: rgba(234, 179, 8, 0.12);
+  color: #b45309;
+}
+:root[data-effective-theme="light"] .external-node-tag.trojan {
+  background: rgba(244, 63, 94, 0.12);
+  color: #e11d48;
+}
+:root[data-effective-theme="light"] .external-node-tag.anytls {
+  background: rgba(45, 212, 191, 0.12);
+  color: #0d9488;
+}
+:root[data-effective-theme="light"] .external-node-tag.vmess {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+}
+:root[data-effective-theme="light"] .protocol-badge.hysteria2,
+:root[data-effective-theme="light"] .protocol-badge.hy2 {
+  background: rgba(56, 189, 248, 0.12);
+  color: #0284c7;
+  border-color: rgba(56, 189, 248, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.vless {
+  background: rgba(74, 172, 130, 0.12);
+  color: #059669;
+  border-color: rgba(74, 172, 130, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.vless-ws-tunnel {
+  background: rgba(249, 115, 22, 0.12);
+  color: #d97706;
+  border-color: rgba(249, 115, 22, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.shadowsocks,
+:root[data-effective-theme="light"] .protocol-badge.ss,
+:root[data-effective-theme="light"] .protocol-badge.ss2022 {
+  background: rgba(168, 85, 247, 0.12);
+  color: #7c3aed;
+  border-color: rgba(168, 85, 247, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.tuic {
+  background: rgba(234, 179, 8, 0.12);
+  color: #b45309;
+  border-color: rgba(234, 179, 8, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.trojan {
+  background: rgba(244, 63, 94, 0.12);
+  color: #e11d48;
+  border-color: rgba(244, 63, 94, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.anytls {
+  background: rgba(45, 212, 191, 0.12);
+  color: #0d9488;
+  border-color: rgba(45, 212, 191, 0.35);
+}
+:root[data-effective-theme="light"] .protocol-badge.vmess {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+  border-color: rgba(14, 165, 233, 0.35);
 }
 
 /* Cloudflare Worker Subscription Relay Guide */
