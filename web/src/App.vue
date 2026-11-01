@@ -1054,7 +1054,10 @@ async function createFleetEnrollment(mode: 'panel' | 'probe' = 'panel') {
     enrollmentMode.value = mode
     enrollmentCommand.value = result.command
     enrollmentExpiresAt.value = result.expiresAt
-    navigateTo('fleet')
+    deployMenuOpen.value = false
+    if (page.value !== 'fleet') {
+      page.value = 'fleet'
+    }
     await nextTick()
     document.getElementById('fleet-enrollment')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     notify('已生成 10 分钟一次性接入命令')
