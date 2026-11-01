@@ -5,6 +5,7 @@
  */
 
 import { audioHaptics } from './AudioHaptics';
+import { versionService } from '../services/versionService';
 
 export interface NavState {
   lang: 'zh' | 'en';
@@ -16,6 +17,7 @@ export class Navbar {
   private element: HTMLElement;
   private state: NavState;
   private onStateChange: (state: NavState) => void;
+  private version: string = versionService.getVersion().version;
 
   constructor(initialState: NavState, onStateChange: (state: NavState) => void) {
     this.state = { ...initialState };
@@ -24,6 +26,14 @@ export class Navbar {
     this.element.className = 'nav-header';
     this.render();
     this.bindEvents();
+
+    versionService.subscribe((info) => {
+      this.version = info.version;
+      const badge = this.element.querySelector('.brand-badge');
+      if (badge) {
+        badge.textContent = info.version;
+      }
+    });
   }
 
   public getElement(): HTMLElement {
@@ -52,7 +62,7 @@ export class Navbar {
             </svg>
           </div>
           <span class="brand-title">${isZh ? '悟空面板' : 'Wukong Panel'}</span>
-          <span class="brand-badge">v2.3.10</span>
+          <span class="brand-badge">${this.version}</span>
         </a>
 
         <nav class="nav-links" aria-label="Main Navigation">

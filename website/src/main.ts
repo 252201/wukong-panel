@@ -17,6 +17,7 @@ import { InteractiveSandbox } from './components/InteractiveSandbox';
 import { Scrollytelling } from './components/Scrollytelling';
 import { PerformanceMatrix } from './components/PerformanceMatrix';
 import { Footer } from './components/Footer';
+import { versionService } from './services/versionService';
 
 function initApp() {
   const root = document.getElementById('app');
@@ -120,6 +121,11 @@ function initApp() {
       }, { passive: true });
     }
   }
+
+  // 7. Background version synchronization with GitHub Releases
+  versionService.fetchLatest().catch((err) => {
+    console.warn('[VersionService] background fetch fallback:', err);
+  });
 
   // Sync with audio haptic engine state change
   audioHaptics.onStateChange((muted) => {

@@ -3,15 +3,26 @@
  * Brand seal, release notes, license, open-source community links, and copyright.
  */
 
+import { versionService } from '../services/versionService';
+
 export class Footer {
   private element: HTMLElement;
   private lang: 'zh' | 'en' = 'zh';
+  private version: string = versionService.getVersion().version;
 
   constructor(lang: 'zh' | 'en') {
     this.lang = lang;
     this.element = document.createElement('footer');
     this.element.className = 'site-footer';
     this.render();
+
+    versionService.subscribe((info) => {
+      this.version = info.version;
+      const badge = this.element.querySelector('.brand-badge');
+      if (badge) {
+        badge.textContent = info.version;
+      }
+    });
   }
 
   public getElement(): HTMLElement {
@@ -36,7 +47,7 @@ export class Footer {
               <span style="font-family: var(--font-kaiti); font-size: 1.35rem; font-weight: 700;">
                 ${isZh ? '悟空面板' : 'Wukong Panel'}
               </span>
-              <span class="brand-badge">v2.3.10</span>
+              <span class="brand-badge">${this.version}</span>
             </div>
             <p class="text-caption" style="max-width: 320px; line-height: 1.7;">
               ${isZh
