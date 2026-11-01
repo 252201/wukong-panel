@@ -59,6 +59,8 @@ test('App.vue renders external subscriptions card, sync actions, and node select
   assert.ok(vueSource.includes('externalSubImportMode'), 'App.vue must define externalSubImportMode')
   assert.ok(vueSource.includes('class="sub-mode-tabs"'), 'App.vue must render sub-mode-tabs in modal')
   assert.ok(vueSource.includes('class="external-raw-textarea"'), 'App.vue must render raw textarea in modal')
+  assert.ok(vueSource.includes('filteredExternalNodes'), 'App.vue must define filteredExternalNodes helper')
+  assert.ok(vueSource.includes('externalNodeFilter'), 'App.vue must define externalNodeFilter state')
 
   // Template section
   assert.ok(vueSource.includes('class="panel-card external-subscriptions-section"'), 'App.vue must render external-subscriptions-section')
@@ -84,5 +86,6 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-raw-textarea'), 'styles.css must style .external-raw-textarea')
   assert.ok(cssSource.includes('.external-quota-bar'), 'styles.css must style .external-quota-bar')
   assert.ok(cssSource.includes('.external-node-chip'), 'styles.css must style .external-node-chip')
+  assert.ok(cssSource.includes('.external-nodes-filter-input'), 'styles.css must style .external-nodes-filter-input')
   assert.ok(cssSource.includes('.subscription-qr-modal'), 'styles.css must style .subscription-qr-modal')
 })

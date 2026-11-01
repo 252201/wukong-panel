@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -290,25 +291,120 @@ func ParseSubscriptionUserinfo(header http.Header) ExternalUserinfo {
 	return info
 }
 
+var (
+	trafficPairRegex   = regexp.MustCompile(`(?i)(?:traffic|流量|剩余流量|已用流量)[\s:：]+([0-9.]+\s*[KMGT]?B)\s*[/／]\s*([0-9.]+\s*[KMGT]?B)`)
+	trafficSingleRegex = regexp.MustCompile(`(?i)(?:traffic|流量|剩余流量|已用流量)[\s:：]+([0-9.]+\s*[KMGT]?B)`)
+	expireRegex        = regexp.MustCompile(`(?i)(?:expire|expires|expired|到期|到期时间|过期时间|套餐到期)[\s:：]+(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)`)
+)
+
+func parseBytesFromString(s string) int64 {
+	s = strings.TrimSpace(strings.ToUpper(s))
+	multiplier := int64(1)
+	if strings.HasSuffix(s, "TB") {
+		multiplier = 1024 * 1024 * 1024 * 1024
+		s = strings.TrimSpace(strings.TrimSuffix(s, "TB"))
+	} else if strings.HasSuffix(s, "GB") {
+		multiplier = 1024 * 1024 * 1024
+		s = strings.TrimSpace(strings.TrimSuffix(s, "GB"))
+	} else if strings.HasSuffix(s, "MB") {
+		multiplier = 1024 * 1024
+		s = strings.TrimSpace(strings.TrimSuffix(s, "MB"))
+	} else if strings.HasSuffix(s, "KB") {
+		multiplier = 1024
+		s = strings.TrimSpace(strings.TrimSuffix(s, "KB"))
+	} else if strings.HasSuffix(s, "B") {
+		s = strings.TrimSpace(strings.TrimSuffix(s, "B"))
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f < 0 {
+		return 0
+	}
+	return int64(f * float64(multiplier))
+}
+
+func isDummyAnnouncementNode(name string) (bool, ExternalUserinfo) {
+	nameTrimmed := strings.TrimSpace(name)
+	nameLower := strings.ToLower(nameTrimmed)
+	info := ExternalUserinfo{}
+
+	if m := trafficPairRegex.FindStringSubmatch(nameTrimmed); len(m) == 3 {
+		info.DownloadBytes = parseBytesFromString(m[1])
+		info.TotalBytes = parseBytesFromString(m[2])
+		return true, info
+	}
+	if m := trafficSingleRegex.FindStringSubmatch(nameTrimmed); len(m) == 2 {
+		info.TotalBytes = parseBytesFromString(m[1])
+		return true, info
+	}
+	if m := expireRegex.FindStringSubmatch(nameTrimmed); len(m) == 2 {
+		info.ExpiresAt = strings.ReplaceAll(m[1], "/", "-")
+		return true, info
+	}
+
+	announcementPrefixes := []string{
+		"traffic:", "traffic：", "expire:", "expire：", "expires:", "expired:",
+		"剩余流量", "到期时间", "过期时间", "套餐到期", "官网", "群组", "重置日",
+		"距离重置", "下次重置", "公告", "通知", "提示", "tg群", "telegram",
+		"防失联", "客服", "发布页", "网站", "更新时间",
+	}
+	for _, prefix := range announcementPrefixes {
+		if strings.HasPrefix(nameLower, prefix) || strings.HasPrefix(nameTrimmed, prefix) {
+			return true, info
+		}
+	}
+
+	if strings.Contains(nameLower, "expire date") || strings.Contains(nameLower, "traffic info") ||
+		strings.Contains(nameLower, "reset day") || strings.Contains(nameLower, "剩余天数") {
+		return true, info
+	}
+
+	return false, info
+}
+
 func ParseExternalSubscription(raw []byte, header http.Header, subID string) ([]model.Node, ExternalUserinfo, error) {
 	userinfo := ParseSubscriptionUserinfo(header)
 	content := string(raw)
 
+	var rawNodes []model.Node
 	// 1. Try Clash YAML first if content contains proxies:
 	if strings.Contains(content, "proxies:") || strings.Contains(content, "Proxy:") {
-		nodes := parseClashProxiesYAML(content, subID)
-		if len(nodes) > 0 {
-			return nodes, userinfo, nil
-		}
+		rawNodes = parseClashProxiesYAML(content, subID)
 	}
 
 	// 2. Try Base64 or URI list
-	nodes := parseBase64OrURIList(content, subID)
-	if len(nodes) > 0 {
-		return nodes, userinfo, nil
+	if len(rawNodes) == 0 {
+		rawNodes = parseBase64OrURIList(content, subID)
 	}
 
-	return nil, userinfo, errors.New("unable to parse any valid proxy nodes from subscription content")
+	if len(rawNodes) == 0 {
+		return nil, userinfo, errors.New("unable to parse any valid proxy nodes from subscription content")
+	}
+
+	var validNodes []model.Node
+	for _, node := range rawNodes {
+		isDummy, extracted := isDummyAnnouncementNode(node.Name)
+		if isDummy {
+			if userinfo.TotalBytes == 0 && extracted.TotalBytes > 0 {
+				userinfo.TotalBytes = extracted.TotalBytes
+				userinfo.DownloadBytes = extracted.DownloadBytes
+				userinfo.UploadBytes = extracted.UploadBytes
+			}
+			if userinfo.ExpiresAt == "" && extracted.ExpiresAt != "" {
+				userinfo.ExpiresAt = extracted.ExpiresAt
+			}
+			continue
+		}
+		if node.Server == "127.0.0.1" || node.Server == "0.0.0.0" || strings.EqualFold(node.Server, "localhost") {
+			continue
+		}
+		validNodes = append(validNodes, node)
+	}
+
+	if len(validNodes) == 0 {
+		return nil, userinfo, errors.New("subscription only contained announcement or dummy nodes")
+	}
+
+	return validNodes, userinfo, nil
 }
 
 func parseFlowMapping(line string) map[string]string {
