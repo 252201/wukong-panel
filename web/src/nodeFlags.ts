@@ -445,3 +445,35 @@ export function formatNodeNameWithFlag(name: string): string {
   const flag = matchCountryFlag(name)
   return flag ? `${flag} ${name}` : name
 }
+
+/**
+ * Normalizes protocol strings (including aliases like hy2, ss, shadowsocks)
+ * into standard CSS modifier class names matching the panel's theme colors.
+ */
+export function normalizeProtocolClass(protocol?: string): string {
+  if (!protocol) return ''
+  const p = protocol.toLowerCase().trim()
+  if (p === 'ss' || p === 'shadowsocks' || p === 'ss2022') return 'shadowsocks'
+  if (p === 'hy2' || p === 'hysteria2') return 'hysteria2'
+  if (p === 'vless-ws-tunnel') return 'vless-ws-tunnel'
+  if (p === 'vless') return 'vless'
+  if (p === 'trojan') return 'trojan'
+  if (p === 'tuic') return 'tuic'
+  if (p === 'anytls') return 'anytls'
+  if (p === 'vmess') return 'vmess'
+  return p
+}
+
+/**
+ * Formats a protocol into a concise uppercase badge label matching the deployment node cards.
+ */
+export function formatExternalProtocolBadge(protocol?: string): string {
+  if (!protocol) return ''
+  const p = protocol.toLowerCase().trim()
+  if (p === 'hysteria2' || p === 'hy2') return 'HY2'
+  if (p === 'shadowsocks' || p === 'ss') return 'SS'
+  if (p === 'ss2022') return 'SS2022'
+  if (p === 'vless-ws-tunnel') return 'VLESS · CF'
+  return p.toUpperCase()
+}
+
