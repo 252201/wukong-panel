@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs'
 test('api.ts includes ExternalSubscription interface and API methods', () => {
   const apiSource = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
   assert.ok(apiSource.includes('export interface ExternalSubscription'), 'api.ts must export ExternalSubscription interface')
+  assert.ok(apiSource.includes('proxyUrl?: string'), 'ExternalSubscription must support proxyUrl')
+  assert.ok(apiSource.includes('rawContent?: string'), 'ExternalSubscription must support rawContent')
   assert.ok(apiSource.includes('normalizeExternalSubscription'), 'api.ts must define normalizeExternalSubscription helper')
   assert.ok(apiSource.includes('externalSubscriptions:'), 'api.ts must define externalSubscriptions method')
   assert.ok(apiSource.includes('createExternalSubscription:'), 'api.ts must define createExternalSubscription method')
@@ -52,6 +54,12 @@ test('App.vue renders external subscriptions card, sync actions, and node select
   assert.ok(!vueSource.includes('sub.nodes.map'), 'App.vue must not directly call sub.nodes.map without null guard')
   assert.ok(!vueSource.includes('sub.nodes.length'), 'App.vue must not directly call sub.nodes.length without null guard')
 
+  // Support direct paste & proxy URL & formatExternalSyncTime
+  assert.ok(vueSource.includes('formatExternalSyncTime'), 'App.vue must define formatExternalSyncTime helper')
+  assert.ok(vueSource.includes('externalSubImportMode'), 'App.vue must define externalSubImportMode')
+  assert.ok(vueSource.includes('class="sub-mode-tabs"'), 'App.vue must render sub-mode-tabs in modal')
+  assert.ok(vueSource.includes('class="external-raw-textarea"'), 'App.vue must render raw textarea in modal')
+
   // Template section
   assert.ok(vueSource.includes('class="panel-card external-subscriptions-section"'), 'App.vue must render external-subscriptions-section')
   assert.ok(vueSource.includes('外部订阅与机场混流'), 'App.vue must render section title')
@@ -72,6 +80,8 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-subscriptions-section'), 'styles.css must style .external-subscriptions-section')
   assert.ok(cssSource.includes('.external-sub-card'), 'styles.css must style .external-sub-card')
   assert.ok(cssSource.includes('.external-sub-badge'), 'styles.css must style .external-sub-badge')
+  assert.ok(cssSource.includes('.sub-mode-tabs'), 'styles.css must style .sub-mode-tabs')
+  assert.ok(cssSource.includes('.external-raw-textarea'), 'styles.css must style .external-raw-textarea')
   assert.ok(cssSource.includes('.external-quota-bar'), 'styles.css must style .external-quota-bar')
   assert.ok(cssSource.includes('.external-node-chip'), 'styles.css must style .external-node-chip')
   assert.ok(cssSource.includes('.subscription-qr-modal'), 'styles.css must style .subscription-qr-modal')

@@ -502,6 +502,8 @@ type ExternalSubscription struct {
 	ID                string       `json:"id"`
 	Name              string       `json:"name"`
 	URL               string       `json:"url"`
+	ProxyURL          string       `json:"proxyUrl,omitempty"`
+	RawContent        string       `json:"rawContent,omitempty"`
 	UserAgent         string       `json:"userAgent,omitempty"`
 	Enabled           bool         `json:"enabled"`
 	AutoSync          bool         `json:"autoSync"`

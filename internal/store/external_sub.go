@@ -11,7 +11,7 @@ import (
 
 func (s *Store) ExternalSubscriptions() ([]model.ExternalSubscription, error) {
 	rows, err := s.DB.Query(`
-		SELECT id, name, url, user_agent, enabled, auto_sync, sync_interval_hours,
+		SELECT id, name, url, proxy_url, raw_content, user_agent, enabled, auto_sync, sync_interval_hours,
 		       last_sync_at, last_error, upload_bytes, download_bytes, total_bytes,
 		       expires_at, nodes_json, selected_node_ids_json, created_at, updated_at
 		FROM external_subscriptions
@@ -30,7 +30,7 @@ func (s *Store) ExternalSubscriptions() ([]model.ExternalSubscription, error) {
 		var nodesJSON, selectedNodesJSON string
 
 		err := rows.Scan(
-			&sub.ID, &sub.Name, &sub.URL, &sub.UserAgent, &enabledInt, &autoSyncInt,
+			&sub.ID, &sub.Name, &sub.URL, &sub.ProxyURL, &sub.RawContent, &sub.UserAgent, &enabledInt, &autoSyncInt,
 			&sub.SyncIntervalHours, &lastSyncAtUnix, &sub.LastError, &sub.UploadBytes,
 			&sub.DownloadBytes, &sub.TotalBytes, &sub.ExpiresAt, &nodesJSON,
 			&selectedNodesJSON, &createdAtUnix, &updatedAtUnix,
@@ -75,13 +75,13 @@ func (s *Store) ExternalSubscription(id string) (model.ExternalSubscription, err
 	var nodesJSON, selectedNodesJSON string
 
 	err := s.DB.QueryRow(`
-		SELECT id, name, url, user_agent, enabled, auto_sync, sync_interval_hours,
+		SELECT id, name, url, proxy_url, raw_content, user_agent, enabled, auto_sync, sync_interval_hours,
 		       last_sync_at, last_error, upload_bytes, download_bytes, total_bytes,
 		       expires_at, nodes_json, selected_node_ids_json, created_at, updated_at
 		FROM external_subscriptions
 		WHERE id = ?
 	`, id).Scan(
-		&sub.ID, &sub.Name, &sub.URL, &sub.UserAgent, &enabledInt, &autoSyncInt,
+		&sub.ID, &sub.Name, &sub.URL, &sub.ProxyURL, &sub.RawContent, &sub.UserAgent, &enabledInt, &autoSyncInt,
 		&sub.SyncIntervalHours, &lastSyncAtUnix, &sub.LastError, &sub.UploadBytes,
 		&sub.DownloadBytes, &sub.TotalBytes, &sub.ExpiresAt, &nodesJSON,
 		&selectedNodesJSON, &createdAtUnix, &updatedAtUnix,
@@ -159,13 +159,15 @@ func (s *Store) SaveExternalSubscription(sub model.ExternalSubscription) error {
 
 	_, err = s.DB.Exec(`
 		INSERT INTO external_subscriptions (
-			id, name, url, user_agent, enabled, auto_sync, sync_interval_hours,
+			id, name, url, proxy_url, raw_content, user_agent, enabled, auto_sync, sync_interval_hours,
 			last_sync_at, last_error, upload_bytes, download_bytes, total_bytes,
 			expires_at, nodes_json, selected_node_ids_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			url = excluded.url,
+			proxy_url = excluded.proxy_url,
+			raw_content = excluded.raw_content,
 			user_agent = excluded.user_agent,
 			enabled = excluded.enabled,
 			auto_sync = excluded.auto_sync,
@@ -180,7 +182,7 @@ func (s *Store) SaveExternalSubscription(sub model.ExternalSubscription) error {
 			selected_node_ids_json = excluded.selected_node_ids_json,
 			updated_at = excluded.updated_at
 	`,
-		sub.ID, sub.Name, sub.URL, sub.UserAgent, enabledInt, autoSyncInt,
+		sub.ID, sub.Name, sub.URL, sub.ProxyURL, sub.RawContent, sub.UserAgent, enabledInt, autoSyncInt,
 		sub.SyncIntervalHours, lastSyncUnix, sub.LastError, sub.UploadBytes,
 		sub.DownloadBytes, sub.TotalBytes, sub.ExpiresAt, string(nodesJSON),
 		string(selectedNodesJSON), sub.CreatedAt.Unix(), sub.UpdatedAt.Unix(),

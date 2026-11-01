@@ -67,12 +67,33 @@ func isPrivateOrLocalIP(ip net.IP) bool {
 	return false
 }
 
+func isBlockedHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return isPrivateOrLocalIP(ip)
+	}
+	ips, err := net.LookupIP(host)
+	if err == nil {
+		for _, ip := range ips {
+			if isPrivateOrLocalIP(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type ExternalSubscriptionFetcher struct {
 	AllowLoopback bool
 	Timeout       time.Duration
 }
 
-func (f *ExternalSubscriptionFetcher) safeClient() *http.Client {
+func (f *ExternalSubscriptionFetcher) safeClient(proxyURL string) (*http.Client, error) {
 	timeout := f.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -83,12 +104,38 @@ func (f *ExternalSubscriptionFetcher) safeClient() *http.Client {
 		KeepAlive: 30 * time.Second,
 	}
 
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	var hasProxy bool
+	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
+		if !strings.Contains(trimmed, "://") {
+			trimmed = "http://" + trimmed
+		}
+		p, err := url.Parse(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL: %w", err)
+		}
+		scheme := strings.ToLower(p.Scheme)
+		if scheme != "http" && scheme != "https" && scheme != "socks5" && scheme != "socks5h" {
+			return nil, fmt.Errorf("unsupported proxy scheme %q: must be http, https, socks5, or socks5h", p.Scheme)
+		}
+		proxyFunc = http.ProxyURL(p)
+		hasProxy = true
+	}
+
 	transport := &http.Transport{
+		Proxy: proxyFunc,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
 			}
+
+			// If connecting via an outbound proxy, addr is the proxy server itself.
+			// Local proxies (127.0.0.1 / localhost) on the panel host are valid egress paths.
+			if hasProxy {
+				return dialer.DialContext(ctx, network, addr)
+			}
+
 			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 			if err != nil {
 				return nil, err
@@ -134,15 +181,37 @@ func (f *ExternalSubscriptionFetcher) safeClient() *http.Client {
 			if scheme != "http" && scheme != "https" {
 				return fmt.Errorf("SSRF blocked: unsupported redirect scheme %q", req.URL.Scheme)
 			}
+			if !f.AllowLoopback && isBlockedHost(req.URL.Hostname()) {
+				return fmt.Errorf("SSRF blocked: redirect target %s is private or loopback", req.URL.Hostname())
+			}
 			return nil
 		},
-	}
+	}, nil
 }
 
 func (f *ExternalSubscriptionFetcher) Fetch(ctx context.Context, sub model.ExternalSubscription) ([]byte, http.Header, error) {
 	subURL := strings.TrimSpace(sub.URL)
-	if !strings.HasPrefix(subURL, "http://") && !strings.HasPrefix(subURL, "https://") {
+	rawContent := strings.TrimSpace(sub.RawContent)
+
+	// Direct Paste / Raw Content Mode:
+	if subURL == "manual" || subURL == "" {
+		if rawContent == "" {
+			return nil, nil, errors.New("配置内容为空，请直接粘贴节点链接或订阅配置")
+		}
+		return []byte(rawContent), make(http.Header), nil
+	}
+
+	parsedTarget, err := url.Parse(subURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid subscription URL: %w", err)
+	}
+	scheme := strings.ToLower(parsedTarget.Scheme)
+	if scheme != "http" && scheme != "https" {
 		return nil, nil, errors.New("invalid subscription URL scheme: must be http or https")
+	}
+
+	if !f.AllowLoopback && isBlockedHost(parsedTarget.Hostname()) {
+		return nil, nil, fmt.Errorf("SSRF blocked: host %s resolves to private/loopback IP", parsedTarget.Hostname())
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil)
@@ -157,7 +226,10 @@ func (f *ExternalSubscriptionFetcher) Fetch(ctx context.Context, sub model.Exter
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "*/*")
 
-	client := f.safeClient()
+	client, err := f.safeClient(sub.ProxyURL)
+	if err != nil {
+		return nil, nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -721,9 +793,19 @@ func (s *Server) createExternalSubscription(w http.ResponseWriter, r *http.Reque
 
 	input.Name = strings.TrimSpace(input.Name)
 	input.URL = strings.TrimSpace(input.URL)
-	if input.Name == "" || input.URL == "" {
-		writeError(w, http.StatusBadRequest, "订阅名称与订阅链接不能为空")
+	input.ProxyURL = strings.TrimSpace(input.ProxyURL)
+	input.RawContent = strings.TrimSpace(input.RawContent)
+
+	if input.Name == "" {
+		writeError(w, http.StatusBadRequest, "订阅名称不能为空")
 		return
+	}
+	if input.URL == "" && input.RawContent == "" {
+		writeError(w, http.StatusBadRequest, "订阅链接与直接粘贴内容至少需填写一项")
+		return
+	}
+	if input.URL == "" {
+		input.URL = "manual"
 	}
 
 	if input.ID == "" {
@@ -779,6 +861,8 @@ func (s *Server) updateExternalSubscription(w http.ResponseWriter, r *http.Reque
 	var input struct {
 		Name              *string   `json:"name"`
 		URL               *string   `json:"url"`
+		ProxyURL          *string   `json:"proxyUrl"`
+		RawContent        *string   `json:"rawContent"`
 		UserAgent         *string   `json:"userAgent"`
 		Enabled           *bool     `json:"enabled"`
 		AutoSync          *bool     `json:"autoSync"`
@@ -792,12 +876,31 @@ func (s *Server) updateExternalSubscription(w http.ResponseWriter, r *http.Reque
 	if input.Name != nil && strings.TrimSpace(*input.Name) != "" {
 		existing.Name = strings.TrimSpace(*input.Name)
 	}
-	urlChanged := false
-	if input.URL != nil && strings.TrimSpace(*input.URL) != "" {
+	shouldResync := false
+	if input.URL != nil {
 		newURL := strings.TrimSpace(*input.URL)
+		if newURL == "" && existing.RawContent != "" {
+			newURL = "manual"
+		}
 		if newURL != existing.URL {
 			existing.URL = newURL
-			urlChanged = true
+			shouldResync = true
+		}
+	}
+	if input.ProxyURL != nil {
+		newProxy := strings.TrimSpace(*input.ProxyURL)
+		if newProxy != existing.ProxyURL {
+			existing.ProxyURL = newProxy
+			shouldResync = true
+		}
+	}
+	if input.RawContent != nil {
+		newRaw := strings.TrimSpace(*input.RawContent)
+		if newRaw != existing.RawContent {
+			existing.RawContent = newRaw
+			if existing.URL == "manual" || existing.URL == "" {
+				shouldResync = true
+			}
 		}
 	}
 	if input.UserAgent != nil {
@@ -821,7 +924,7 @@ func (s *Server) updateExternalSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if urlChanged {
+	if shouldResync {
 		fetcher := &ExternalSubscriptionFetcher{Timeout: 15 * time.Second}
 		body, header, fetchErr := fetcher.Fetch(r.Context(), existing)
 		var nodes []model.Node

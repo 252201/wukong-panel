@@ -421,3 +421,98 @@ func TestExternalSubscriptionWebAPIEndpoints(t *testing.T) {
 	}
 }
 
+func TestExternalSubscriptionDirectPasteAndProxyMode(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	srv := New(config.Config{DataDir: dir, BasePath: "/", SecureCookie: false}, db, subMockAgent{}, "1.0.0")
+	if _, _, err := db.EnsureAdmin(); err != nil {
+		t.Fatal(err)
+	}
+	db.DB.Exec("UPDATE users SET must_change=0")
+	var id int64
+	db.DB.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&id)
+	session, err := db.CreateSession(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create a subscription with direct paste rawContent (Clash YAML format)
+	clashYAML := `proxies:
+  - name: "Direct Paste Trojan"
+    type: trojan
+    server: direct.example.com
+    port: 443
+    password: mypassword
+    sni: direct.example.com`
+	createBody, _ := json.Marshal(map[string]any{
+		"name":       "Pasted Airport",
+		"rawContent": clashYAML,
+		"proxyUrl":   "http://127.0.0.1:2080",
+	})
+
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/external-subscriptions", strings.NewReader(string(createBody)))
+	reqCreate.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
+	reqCreate.Header.Set("X-CSRF-Token", session.CSRF)
+	recCreate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusOK {
+		t.Fatalf("create expected 200, got %d: %s", recCreate.Code, recCreate.Body.String())
+	}
+
+	var created model.ExternalSubscription
+	if err := json.Unmarshal(recCreate.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if created.URL != "manual" || created.ProxyURL != "http://127.0.0.1:2080" {
+		t.Fatalf("unexpected created sub: %+v", created)
+	}
+	if len(created.Nodes) != 1 || created.Nodes[0].Name != "Direct Paste Trojan" {
+		t.Fatalf("expected 1 parsed node, got %+v", created.Nodes)
+	}
+
+	// 2. Sync again should re-parse successfully
+	reqSync := httptest.NewRequest(http.MethodPost, "/api/v1/external-subscriptions/"+created.ID+"/sync", nil)
+	reqSync.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
+	reqSync.Header.Set("X-CSRF-Token", session.CSRF)
+	recSync := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recSync, reqSync)
+	if recSync.Code != http.StatusOK {
+		t.Fatalf("sync expected 200, got %d: %s", recSync.Code, recSync.Body.String())
+	}
+
+	var synced model.ExternalSubscription
+	if err := json.Unmarshal(recSync.Body.Bytes(), &synced); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if len(synced.Nodes) != 1 || synced.LastError != "" {
+		t.Fatalf("expected successful sync with 1 node, got nodes=%+v, err=%s", synced.Nodes, synced.LastError)
+	}
+
+	// 3. Update rawContent with multiple Trojan links
+	linkList := "trojan://pass1@node1.example.com:443?sni=node1.example.com#Node01\ntrojan://pass2@node2.example.com:443?sni=node2.example.com#Node02"
+	updateBody, _ := json.Marshal(map[string]any{
+		"rawContent": linkList,
+	})
+	reqUpdate := httptest.NewRequest(http.MethodPut, "/api/v1/external-subscriptions/"+created.ID, strings.NewReader(string(updateBody)))
+	reqUpdate.AddCookie(&http.Cookie{Name: "wukong_session", Value: session.Token})
+	reqUpdate.Header.Set("X-CSRF-Token", session.CSRF)
+	recUpdate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recUpdate, reqUpdate)
+	if recUpdate.Code != http.StatusOK {
+		t.Fatalf("update expected 200, got %d: %s", recUpdate.Code, recUpdate.Body.String())
+	}
+
+	var updated model.ExternalSubscription
+	if err := json.Unmarshal(recUpdate.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if len(updated.Nodes) != 2 {
+		t.Fatalf("expected 2 parsed nodes from updated URI list, got %d: %+v", len(updated.Nodes), updated.Nodes)
+	}
+}
+

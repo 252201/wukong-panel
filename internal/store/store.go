@@ -180,6 +180,8 @@ CREATE TABLE IF NOT EXISTS external_subscriptions (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   url TEXT NOT NULL,
+  proxy_url TEXT NOT NULL DEFAULT '',
+  raw_content TEXT NOT NULL DEFAULT '',
   user_agent TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   auto_sync INTEGER NOT NULL DEFAULT 1,
@@ -245,6 +247,14 @@ CREATE TABLE IF NOT EXISTS external_subscriptions (
 	}
 	if err := s.ensureColumn("fleet_commands", "actor", "TEXT NOT NULL DEFAULT 'admin'"); err != nil {
 		return err
+	}
+	for name, definition := range map[string]string{
+		"proxy_url":   "TEXT NOT NULL DEFAULT ''",
+		"raw_content": "TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := s.ensureColumn("external_subscriptions", name, definition); err != nil {
+			return err
+		}
 	}
 	defaults := map[string]string{
 		"language": "zh-CN", "timezone": "Asia/Shanghai", "interface": "auto",

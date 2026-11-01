@@ -4577,6 +4577,22 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border: 1px solid rgba(202, 93, 70, 0.4);
   color: var(--danger-text);
 }
+.external-sub-badge.manual {
+  background: rgba(147, 112, 219, 0.15);
+  border: 1px solid rgba(147, 112, 219, 0.35);
+  color: #b197fc;
+}
+.external-sub-badge.proxy {
+  background: rgba(212, 163, 89, 0.12);
+  border: 1px solid rgba(212, 163, 89, 0.3);
+  color: var(--gold);
+}
+.external-sub-url-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .external-sub-url-row code {
   display: block;
   font-size: 11px;
@@ -4585,6 +4601,21 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 600px;
+}
+.external-proxy-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(212, 163, 89, 0.12);
+  color: var(--gold);
+  border: 1px solid rgba(212, 163, 89, 0.25);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.external-manual-tag {
+  font-size: 11px;
+  color: #b197fc;
+  font-weight: 500;
 }
 .external-sub-actions {
   display: flex;
@@ -4744,6 +4775,49 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 .external-sub-interval-label {
   margin-top: 16px !important;
+}
+
+/* Import Mode Tabs */
+.sub-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 16px 0;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sub-mode-tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.sub-mode-tab-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.sub-mode-tab-btn.active {
+  background: rgba(212, 163, 89, 0.15);
+  color: var(--gold);
+  border: 1px solid rgba(212, 163, 89, 0.35);
+  font-weight: 600;
+}
+.external-raw-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.readonly-hint {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 /* Light Theme Styling for External Subscriptions */
