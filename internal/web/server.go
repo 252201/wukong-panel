@@ -753,10 +753,11 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content, err := RenderClashSubscription(RenderSubscriptionOptions{
-		Title:     "Wukong Panel",
-		GroupName: "Wukong",
-		Template:  tpl,
-		Items:     subItems,
+		Title:              "Wukong Panel",
+		GroupName:          "Wukong",
+		Template:           tpl,
+		Items:              subItems,
+		ExtraFilterDomains: []string{r.Host},
 	})
 	if err != nil {
 		writeError(w, 500, err.Error())

@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -317,8 +323,23 @@ func TestFleetSubscriptionTemplateOverride(t *testing.T) {
 		t.Fatalf("status=%d", recMin.Code)
 	}
 	bodyMin := recMin.Body.String()
-	if strings.Contains(bodyMin, "dns:") || !strings.Contains(bodyMin, "MATCH,Wukong Fleet") {
-		t.Fatalf("expected minimal template:\n%s", bodyMin)
+	for _, want := range []string{
+		"dns:",
+		"enable: true",
+		"ipv6: true",
+		"default-nameserver:",
+		"proxy-server-nameserver:",
+		"nameserver:",
+		"223.5.5.5",
+		"119.29.29.29",
+		"MATCH,Wukong Fleet",
+	} {
+		if !strings.Contains(bodyMin, want) {
+			t.Fatalf("expected minimal template with %q:\n%s", want, bodyMin)
+		}
+	}
+	if strings.Contains(bodyMin, "enhanced-mode: fake-ip") || strings.Contains(bodyMin, "🚀 节点选择") {
+		t.Fatalf("expected bare minimal template:\n%s", bodyMin)
 	}
 }
 
@@ -1068,6 +1089,199 @@ func TestProbeFleetSubscriptionIPv6AndCFTunnelFixup(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("TW-VLESS-CF-V6 missing %q in subscription:\n%s", want, content)
+		}
+	}
+}
+
+func TestLiveMihomoMinimalSubscription9Nodes(t *testing.T) {
+	mihomoPath := findMihomoBinary()
+	if mihomoPath == "" {
+		t.Skip("mihomo binary not found on host, skipping kernel test")
+	}
+
+	items := []SubscriptionNode{
+		{
+			Node:     model.Node{Name: "FL-CF-V6", Protocol: "vless", Server: "cf.877774.xyz", Domain: "qw.cnmd.xx.kg", ListenPort: 443},
+			ShareURI: "vless://122fdfed-8397-450e-92a0-a29b5bc1afe9@cf.877774.xyz:443?security=tls&type=ws&path=%2Fwukong-wlwvkdqsgtgzdpke&host=qw.cnmd.xx.kg&sni=qw.cnmd.xx.kg",
+		},
+		{
+			Node:     model.Node{Name: "FL-CF-V4", Protocol: "vless", Server: "cf.877774.xyz", Domain: "qw1.cnmd.xx.kg", ListenPort: 443},
+			ShareURI: "vless://c211a94a-e76c-405b-a4ab-e1b8b21bbec4@cf.877774.xyz:443?security=tls&type=ws&path=%2Fwukong-jecln9hkrdw2qhrb&host=qw1.cnmd.xx.kg&sni=qw1.cnmd.xx.kg",
+		},
+		{
+			Node:     model.Node{Name: "TW-VLESS-CF-V6", Protocol: "vless", Server: "cf.877774.xyz", Domain: "cftw.cnmd.xx.kg", ListenPort: 443},
+			ShareURI: "vless://aba61062-0216-4d8e-b556-783bd067508f@cf.877774.xyz:443?security=tls&type=ws&path=%2FP2lFCJZhR2GC5eo0OvztaTZXtb4&host=cftw.cnmd.xx.kg&sni=cftw.cnmd.xx.kg",
+		},
+		{
+			Node:     model.Node{Name: "TW-REALITY-V6", Protocol: "vless", Server: "2001:b030:112d:711:1165::", Domain: "d1.awsstatic.com", ListenPort: 57832},
+			ShareURI: "vless://939fdd8d-dad1-488a-8639-199d2509717e@[2001:b030:112d:711:1165::]:57832?security=reality&pbk=BGcIcPCAu6Q3SwYNhKBAWlU0cPlDcZcVd01eJpvGSC0&sid=ce7c5293131775d9&sni=d1.awsstatic.com&type=tcp&flow=xtls-rprx-vision",
+		},
+		{
+			Node:     model.Node{Name: "US-旧金山-V6优先", Protocol: "hysteria2", Server: "ac.252202.xyz", Domain: "ac.252202.xyz", ListenPort: 52246},
+			ShareURI: "hysteria2://7gOcK0Ez5nooRUIxh-sl3B-A7Hu6UBxg@ac.252202.xyz:52246/?sni=ac.252202.xyz",
+		},
+		{
+			Node:     model.Node{Name: "US-洛杉矶-V4", Protocol: "hysteria2", Server: "23.246.167.100", Domain: "ac.252202.xyz", ListenPort: 58283},
+			ShareURI: "hysteria2://LHknGkjbSFiUOhWKENWrus7X-3dd4n75@23.246.167.100:58283/?sni=ac.252202.xyz",
+		},
+		{
+			Node:     model.Node{Name: "US-旧金山-V6", Protocol: "hysteria2", Server: "2602:faa8:502:5a::a", Domain: "ac.252202.xyz", ListenPort: 49707},
+			ShareURI: "hysteria2://-PZmuaxpnvuoh644Uv2o-At2WQ47gUjv@[2602:faa8:502:5a::a]:49707/?sni=ac.252202.xyz",
+		},
+		{
+			Node:     model.Node{Name: "US-洛杉矶-CF-V4", Protocol: "vless", Server: "cf.877774.xyz", Domain: "windowspc1.cnmd.xx.kg", ListenPort: 443},
+			ShareURI: "vless://f7a4eff4-40ac-4b1a-874c-6ef6dc25287e@cf.877774.xyz:443?security=tls&type=ws&path=%2Fwukong-1g0kch_mbiobr50b&host=windowspc1.cnmd.xx.kg&sni=windowspc1.cnmd.xx.kg",
+		},
+		{
+			Node:     model.Node{Name: "US-旧金山-CF-V6优先", Protocol: "vless", Server: "cf.877774.xyz", Domain: "windowspc2.cnmd.xx.kg", ListenPort: 443},
+			ShareURI: "vless://d5b29a36-d4ac-474f-bf92-05c48e6638cd@cf.877774.xyz:443?security=tls&type=ws&path=%2Fwukong-uxooqpdunmmt-shg&host=windowspc2.cnmd.xx.kg&sni=windowspc2.cnmd.xx.kg",
+		},
+	}
+
+	content, err := RenderClashSubscription(RenderSubscriptionOptions{
+		Title:     "Wukong Fleet Minimal",
+		GroupName: "Wukong Fleet",
+		Template:  TemplateMinimal,
+		Items:     items,
+	})
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	// 1. Verify bootstrap DNS configuration in minimal output
+	for _, want := range []string{
+		"dns:",
+		"enable: true",
+		"ipv6: true",
+		"default-nameserver:",
+		"proxy-server-nameserver:",
+		"nameserver:",
+		"223.5.5.5",
+		"119.29.29.29",
+		"MATCH,Wukong Fleet",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("minimal subscription missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "fake-ip") || strings.Contains(content, "enhanced-mode") {
+		t.Fatalf("minimal subscription must not contain fake-ip:\n%s", content)
+	}
+
+	// 2. Validate syntax with mihomo -t -f
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(mihomoPath, "-t", "-f", configFile)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mihomo -t -f failed (exit: %v):\n%s\nConfig:\n%s", err, string(out), content)
+	}
+
+	// 3. Live kernel delay test if RUN_LIVE_FLEET_TEST=1
+	if os.Getenv("RUN_LIVE_FLEET_TEST") != "1" {
+		t.Log("Skipping live delay probe. Set RUN_LIVE_FLEET_TEST=1 to test live connectivity.")
+		return
+	}
+
+	ctrlL, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrlPort := ctrlL.Addr().(*net.TCPAddr).Port
+	_ = ctrlL.Close()
+
+	mixedL, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixedPort := mixedL.Addr().(*net.TCPAddr).Port
+	_ = mixedL.Close()
+
+	header := fmt.Sprintf("mixed-port: %d\nallow-lan: false\nmode: rule\nlog-level: warning\nexternal-controller: 127.0.0.1:%d\nsecret: \"fleet-test-secret\"\n", mixedPort, ctrlPort)
+	fullConfig := header + content
+	if err := os.WriteFile(configFile, []byte(fullConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	proc := exec.Command(mihomoPath, "-d", dir, "-f", configFile)
+	if err := proc.Start(); err != nil {
+		t.Fatalf("failed to start mihomo: %v", err)
+	}
+	defer func() {
+		_ = proc.Process.Kill()
+		_ = proc.Wait()
+	}()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	ready := false
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/version", ctrlPort), nil)
+		req.Header.Set("Authorization", "Bearer fleet-test-secret")
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				ready = true
+				break
+			}
+		}
+	}
+	if !ready {
+		t.Fatal("mihomo core failed to start within 4 seconds")
+	}
+
+	type delayResult struct {
+		Name  string
+		Delay int
+		Err   error
+	}
+
+	results := make([]delayResult, len(items))
+	var wg sync.WaitGroup
+	for i, item := range items {
+		wg.Add(1)
+		go func(idx int, name string) {
+			defer wg.Done()
+			escaped := url.PathEscape(name)
+			reqURL := fmt.Sprintf("http://127.0.0.1:%d/proxies/%s/delay?timeout=8000&url=http://cp.cloudflare.com/generate_204", ctrlPort, escaped)
+			req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+			if err != nil {
+				results[idx] = delayResult{Name: name, Err: err}
+				return
+			}
+			req.Header.Set("Authorization", "Bearer fleet-test-secret")
+			resp, err := client.Do(req)
+			if err != nil {
+				results[idx] = delayResult{Name: name, Err: err}
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				results[idx] = delayResult{Name: name, Err: fmt.Errorf("status=%d", resp.StatusCode)}
+				return
+			}
+			var body struct {
+				Delay int `json:"delay"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				results[idx] = delayResult{Name: name, Err: err}
+				return
+			}
+			results[idx] = delayResult{Name: name, Delay: body.Delay}
+		}(i, item.Node.Name)
+	}
+	wg.Wait()
+
+	for _, res := range results {
+		if res.Err != nil || res.Delay <= 0 {
+			t.Errorf("Node %s failed: delay=%d, err=%v", res.Name, res.Delay, res.Err)
+		} else {
+			t.Logf("Node %s: %dms", res.Name, res.Delay)
 		}
 	}
 }
