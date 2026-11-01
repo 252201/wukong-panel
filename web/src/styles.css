@@ -4784,6 +4784,51 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   color: var(--muted);
 }
 
+/* External Subscription Delete Modal */
+.external-sub-delete-modal {
+  width: min(480px, 100%);
+}
+.external-sub-delete-target {
+  margin: 18px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(196, 70, 53, 0.25);
+  background: rgba(196, 70, 53, 0.05);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.external-sub-delete-target .delete-target-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.external-sub-delete-target small {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.external-sub-delete-target b {
+  color: var(--paper);
+  font-size: 13px;
+  text-align: right;
+  word-break: break-all;
+}
+.external-sub-delete-target span {
+  color: var(--gold);
+  font-size: 12px;
+}
+.external-sub-delete-target code {
+  color: var(--muted-2);
+  font-size: 11px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* QR Code Modal */
 .subscription-qr-modal {
   max-width: 440px;
@@ -4907,6 +4952,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: #ffffff !important;
   border-color: rgba(24, 32, 45, 0.15) !important;
   color: var(--ink) !important;
+}
+:root[data-effective-theme="light"] .external-sub-delete-target {
+  background: rgba(196, 70, 53, 0.04);
+  border-color: rgba(196, 70, 53, 0.2);
 }
 
 
