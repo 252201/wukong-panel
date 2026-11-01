@@ -1072,8 +1072,13 @@ function filteredExternalNodes(sub?: ExternalSubscription | null): NodeItem[] {
 }
 
 function externalSubSelectedIds(sub?: ExternalSubscription | null): string[] {
-  if (Array.isArray(sub?.selectedNodeIds)) return sub.selectedNodeIds
-  return externalSubNodes(sub).map(n => n.id)
+  const nodes = externalSubNodes(sub)
+  if (!nodes.length) return []
+  if (Array.isArray(sub?.selectedNodeIds)) {
+    const validIds = new Set(nodes.map(n => n.id))
+    return sub.selectedNodeIds.filter(id => validIds.has(id))
+  }
+  return nodes.map(n => n.id)
 }
 
 function formatExternalExpiry(expiresAt?: string) {
@@ -1084,7 +1089,7 @@ function formatExternalExpiry(expiresAt?: string) {
 }
 
 async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
-  let selected = sub.selectedNodeIds ? [...sub.selectedNodeIds] : externalSubNodes(sub).map(n => n.id)
+  let selected = [...externalSubSelectedIds(sub)]
   if (checked) {
     if (!selected.includes(nodeId)) selected.push(nodeId)
   } else {

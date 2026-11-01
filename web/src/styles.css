@@ -4727,6 +4727,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   gap: 8px;
   max-height: 260px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px 2px;
 }
 .external-node-chip {
@@ -4748,25 +4749,33 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: rgba(var(--wash-rgb), 0.08);
 }
 .external-node-chip input[type="checkbox"] {
-  cursor: pointer;
-  flex-shrink: 0;
+  width: 14px !important;
+  height: 14px !important;
+  max-width: 14px !important;
+  min-width: 14px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  flex: 0 0 14px !important;
+  accent-color: var(--gold);
 }
 .external-node-tag {
   font-size: 9px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 3px;
   background: rgba(211, 169, 77, 0.15);
   color: var(--gold);
   font-weight: 600;
   text-transform: uppercase;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .external-node-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--paper);
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 12px;
 }

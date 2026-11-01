@@ -58,6 +58,19 @@ func (s *Store) ExternalSubscriptions() ([]model.ExternalSubscription, error) {
 		if sub.SelectedNodeIDs == nil {
 			sub.SelectedNodeIDs = []string{}
 		}
+		if len(sub.SelectedNodeIDs) > 0 && len(sub.Nodes) > 0 {
+			validMap := make(map[string]bool, len(sub.Nodes))
+			for _, n := range sub.Nodes {
+				validMap[n.ID] = true
+			}
+			filtered := make([]string, 0, len(sub.SelectedNodeIDs))
+			for _, sid := range sub.SelectedNodeIDs {
+				if validMap[sid] {
+					filtered = append(filtered, sid)
+				}
+			}
+			sub.SelectedNodeIDs = filtered
+		}
 
 		subs = append(subs, sub)
 	}
@@ -111,6 +124,19 @@ func (s *Store) ExternalSubscription(id string) (model.ExternalSubscription, err
 	}
 	if sub.SelectedNodeIDs == nil {
 		sub.SelectedNodeIDs = []string{}
+	}
+	if len(sub.SelectedNodeIDs) > 0 && len(sub.Nodes) > 0 {
+		validMap := make(map[string]bool, len(sub.Nodes))
+		for _, n := range sub.Nodes {
+			validMap[n.ID] = true
+		}
+		filtered := make([]string, 0, len(sub.SelectedNodeIDs))
+		for _, sid := range sub.SelectedNodeIDs {
+			if validMap[sid] {
+				filtered = append(filtered, sid)
+			}
+		}
+		sub.SelectedNodeIDs = filtered
 	}
 
 	return sub, nil
@@ -221,6 +247,34 @@ func (s *Store) UpdateExternalSubscriptionSyncResult(id string, upload, download
 		nodesJSON = []byte("[]")
 	}
 
+	// Prune obsolete node IDs from selected_node_ids_json if nodes were updated
+	var currentSelectedJSON string
+	_ = s.DB.QueryRow(`SELECT selected_node_ids_json FROM external_subscriptions WHERE id = ?`, id).Scan(&currentSelectedJSON)
+	var currentSelected []string
+	if currentSelectedJSON != "" {
+		_ = json.Unmarshal([]byte(currentSelectedJSON), &currentSelected)
+	}
+	newSelectedJSON := currentSelectedJSON
+	if len(currentSelected) > 0 && len(nodes) > 0 {
+		validMap := make(map[string]bool, len(nodes))
+		for _, n := range nodes {
+			validMap[n.ID] = true
+		}
+		var pruned []string
+		for _, sid := range currentSelected {
+			if validMap[sid] {
+				pruned = append(pruned, sid)
+			}
+		}
+		if len(pruned) != len(currentSelected) {
+			marshaled, _ := json.Marshal(pruned)
+			newSelectedJSON = string(marshaled)
+		}
+	}
+	if newSelectedJSON == "" {
+		newSelectedJSON = "[]"
+	}
+
 	_, err = s.DB.Exec(`
 		UPDATE external_subscriptions SET
 			upload_bytes = ?,
@@ -228,10 +282,11 @@ func (s *Store) UpdateExternalSubscriptionSyncResult(id string, upload, download
 			total_bytes = ?,
 			expires_at = ?,
 			nodes_json = ?,
+			selected_node_ids_json = ?,
 			last_sync_at = ?,
 			last_error = ?,
 			updated_at = ?
 		WHERE id = ?
-	`, upload, download, total, expiresAt, string(nodesJSON), now.Unix(), errStr, now.Unix(), id)
+	`, upload, download, total, expiresAt, string(nodesJSON), newSelectedJSON, now.Unix(), errStr, now.Unix(), id)
 	return err
 }
