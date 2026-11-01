@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -84,36 +85,148 @@ func isProbeVersionWithUpdate(version string) bool {
 	return patch >= 30
 }
 
+func mergeNetworkSamples(existing, incoming []model.NetworkSample, cutoff time.Time) []model.NetworkSample {
+	if len(existing) == 0 && len(incoming) == 0 {
+		return nil
+	}
+
+	result := make([]model.NetworkSample, 0, len(existing)+len(incoming))
+	for _, s := range incoming {
+		if s.CheckedAt.After(cutoff) {
+			result = append(result, s)
+		}
+	}
+
+	for _, e := range existing {
+		if !e.CheckedAt.After(cutoff) {
+			continue
+		}
+		duplicate := false
+		for _, inc := range result {
+			diff := e.CheckedAt.Sub(inc.CheckedAt)
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff <= 40*time.Second {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			result = append(result, e)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CheckedAt.Before(result[j].CheckedAt)
+	})
+
+	if len(result) > 60 {
+		result = result[len(result)-60:]
+	}
+	return result
+}
+
+func mergeNetworkHealthHistory(existing, incoming *model.NetworkHealth, now time.Time) {
+	if incoming == nil || existing == nil {
+		return
+	}
+	cutoff := now.Add(-31 * time.Minute)
+
+	// International group history
+	var existingIntl []model.NetworkSample
+	if existing.International != nil && len(existing.International.History) > 0 {
+		existingIntl = existing.International.History
+	} else if len(existing.History) > 0 {
+		existingIntl = existing.History
+	}
+
+	var incomingIntl []model.NetworkSample
+	if incoming.International != nil && len(incoming.International.History) > 0 {
+		incomingIntl = incoming.International.History
+	} else if len(incoming.History) > 0 {
+		incomingIntl = incoming.History
+	}
+
+	mergedIntl := mergeNetworkSamples(existingIntl, incomingIntl, cutoff)
+	incoming.History = mergedIntl
+	if incoming.International != nil {
+		incoming.International.History = mergedIntl
+	} else if len(mergedIntl) > 0 {
+		incoming.International = &model.NetworkGroupHealth{
+			Status:          incoming.Status,
+			LatencyMS:       incoming.LatencyMS,
+			PacketLossPct:   incoming.PacketLossPct,
+			PacketsSent:     incoming.PacketsSent,
+			PacketsReceived: incoming.PacketsReceived,
+			Targets:         incoming.Targets,
+			TargetResults:   incoming.TargetResults,
+			CheckedAt:       incoming.CheckedAt,
+			Error:           incoming.Error,
+			History:         mergedIntl,
+		}
+	}
+
+	// Domestic group history
+	var existingDom []model.NetworkSample
+	if existing.Domestic != nil && len(existing.Domestic.History) > 0 {
+		existingDom = existing.Domestic.History
+	}
+
+	if incoming.Domestic != nil {
+		mergedDom := mergeNetworkSamples(existingDom, incoming.Domestic.History, cutoff)
+		incoming.Domestic.History = mergedDom
+	} else if existing.Domestic != nil {
+		incoming.Domestic = existing.Domestic
+	}
+}
+
 func (s *Store) SaveFleetHeartbeat(ctx context.Context, hostID string, heartbeat model.FleetHeartbeat) error {
-	if !heartbeat.Snapshot.Full {
-		var existingRaw string
-		if err := s.DB.QueryRowContext(ctx, `SELECT snapshot_json FROM fleet_hosts WHERE id=? AND archived_at=0`, hostID).Scan(&existingRaw); err == nil {
-			var existing model.FleetSnapshot
-			if json.Unmarshal([]byte(existingRaw), &existing) == nil {
-				existing.Overview = heartbeat.Snapshot.Overview
-				if heartbeat.Snapshot.Location != nil {
-					existing.Location = heartbeat.Snapshot.Location
+	var existingRaw string
+	var hasExisting bool
+	var existing model.FleetSnapshot
+	if err := s.DB.QueryRowContext(ctx, `SELECT snapshot_json FROM fleet_hosts WHERE id=? AND archived_at=0`, hostID).Scan(&existingRaw); err == nil {
+		if json.Unmarshal([]byte(existingRaw), &existing) == nil {
+			hasExisting = true
+		}
+	}
+
+	if hasExisting {
+		existingNetwork := existing.Overview.Network
+
+		if !heartbeat.Snapshot.Full {
+			existing.Overview = heartbeat.Snapshot.Overview
+			if heartbeat.Snapshot.Location != nil {
+				existing.Location = heartbeat.Snapshot.Location
+			}
+			states := make(map[string]model.Node, len(heartbeat.Snapshot.Nodes))
+			for _, node := range heartbeat.Snapshot.Nodes {
+				states[node.ID] = node
+			}
+			for index := range existing.Nodes {
+				if state, ok := states[existing.Nodes[index].ID]; ok {
+					existing.Nodes[index].Status = state.Status
+					existing.Nodes[index].ProbeStatus = state.ProbeStatus
+					existing.Nodes[index].ProbeLatencyMS = state.ProbeLatencyMS
+					existing.Nodes[index].ProbeExitIP = state.ProbeExitIP
+					existing.Nodes[index].ProbeError = state.ProbeError
+					existing.Nodes[index].ProbeCheckedAt = state.ProbeCheckedAt
+					existing.Nodes[index].TrafficBytes = state.TrafficBytes
+					existing.Nodes[index].TotalTrafficBytes = state.TotalTrafficBytes
 				}
-				states := make(map[string]model.Node, len(heartbeat.Snapshot.Nodes))
-				for _, node := range heartbeat.Snapshot.Nodes {
-					states[node.ID] = node
-				}
-				for index := range existing.Nodes {
-					if state, ok := states[existing.Nodes[index].ID]; ok {
-						existing.Nodes[index].Status = state.Status
-						existing.Nodes[index].ProbeStatus = state.ProbeStatus
-						existing.Nodes[index].ProbeLatencyMS = state.ProbeLatencyMS
-						existing.Nodes[index].ProbeExitIP = state.ProbeExitIP
-						existing.Nodes[index].ProbeError = state.ProbeError
-						existing.Nodes[index].ProbeCheckedAt = state.ProbeCheckedAt
-						existing.Nodes[index].TrafficBytes = state.TrafficBytes
-						existing.Nodes[index].TotalTrafficBytes = state.TotalTrafficBytes
-					}
-				}
-				heartbeat.Snapshot = existing
+			}
+			heartbeat.Snapshot = existing
+		}
+
+		if existingNetwork != nil {
+			if heartbeat.Snapshot.Overview.Network == nil {
+				heartbeat.Snapshot.Overview.Network = existingNetwork
+			} else {
+				mergeNetworkHealthHistory(existingNetwork, heartbeat.Snapshot.Overview.Network, time.Now().UTC())
 			}
 		}
 	}
+
 	snapshot, err := json.Marshal(heartbeat.Snapshot)
 	if err != nil {
 		return err

@@ -403,3 +403,186 @@ func TestFleetProbeUpdateCapabilityRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetProbeNetworkHistoryPreservedAcrossRestarts(t *testing.T) {
+	database := openFleetTestStore(t)
+	if err := database.CreateFleetEnrollmentToken("probe-token", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	host := model.FleetHost{
+		ID:              "probe-hinet",
+		Name:            "TW-HiNet",
+		ProtocolVersion: model.FleetProtocolVersion,
+		Capabilities:    []string{"overview", "probe", "probe.update"},
+	}
+	if err := database.ConsumeFleetEnrollmentToken("probe-token", host, "agent-secret"); err != nil {
+		t.Fatal(err)
+	}
+
+	baseTime := time.Now().UTC().Truncate(time.Minute)
+
+	// Build 20 historical samples (from -20m to -1m)
+	historyIntl := make([]model.NetworkSample, 20)
+	historyDom := make([]model.NetworkSample, 20)
+	for i := 0; i < 20; i++ {
+		tMinus := baseTime.Add(time.Duration(i-20) * time.Minute)
+		historyIntl[i] = model.NetworkSample{
+			Status:          "ok",
+			LatencyMS:       6.4 + float64(i)*0.1,
+			PacketLossPct:   0,
+			PacketsSent:     10,
+			PacketsReceived: 10,
+			CheckedAt:       tMinus,
+		}
+		historyDom[i] = model.NetworkSample{
+			Status:          "ok",
+			LatencyMS:       55.4 + float64(i)*0.2,
+			PacketLossPct:   0,
+			PacketsSent:     10,
+			PacketsReceived: 10,
+			CheckedAt:       tMinus,
+		}
+	}
+
+	// 1. Initial heartbeat from probe before updating (20 samples)
+	hb1 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "2.4.1",
+		Capabilities:    []string{"overview", "probe", "probe.update"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: baseTime.Unix()},
+				Network: &model.NetworkHealth{
+					Status:          "ok",
+					LatencyMS:       8.4,
+					PacketLossPct:   0,
+					PacketsSent:     10,
+					PacketsReceived: 10,
+					CheckedAt:       baseTime.Add(-time.Minute),
+					History:         historyIntl,
+					International: &model.NetworkGroupHealth{
+						Status:    "ok",
+						LatencyMS: 8.4,
+						History:   historyIntl,
+						CheckedAt: baseTime.Add(-time.Minute),
+					},
+					Domestic: &model.NetworkGroupHealth{
+						Status:    "ok",
+						LatencyMS: 59.4,
+						History:   historyDom,
+						CheckedAt: baseTime.Add(-time.Minute),
+					},
+				},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb1); err != nil {
+		t.Fatal(err)
+	}
+
+	stored1, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored1.Snapshot.Overview.Network.History) != 20 {
+		t.Fatalf("expected 20 intl samples, got %d", len(stored1.Snapshot.Overview.Network.History))
+	}
+
+	// 2. Simulate probe update/restart:
+	// A new probe process restarts with 2.4.2 and sends a fresh heartbeat with ONLY 1 sample (at baseTime)!
+	newSampleIntl := model.NetworkSample{
+		Status:          "ok",
+		LatencyMS:       6.2,
+		PacketLossPct:   0,
+		PacketsSent:     10,
+		PacketsReceived: 10,
+		CheckedAt:       baseTime,
+	}
+	newSampleDom := model.NetworkSample{
+		Status:          "ok",
+		LatencyMS:       54.8,
+		PacketLossPct:   0,
+		PacketsSent:     10,
+		PacketsReceived: 10,
+		CheckedAt:       baseTime,
+	}
+
+	hb2 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "2.4.2",
+		Capabilities:    []string{"overview", "probe", "probe.update"},
+		Snapshot: model.FleetSnapshot{
+			Full: true,
+			Overview: model.Overview{
+				Now: model.Metric{Timestamp: baseTime.Unix() + 10},
+				Network: &model.NetworkHealth{
+					Status:          "ok",
+					LatencyMS:       6.2,
+					PacketLossPct:   0,
+					PacketsSent:     10,
+					PacketsReceived: 10,
+					CheckedAt:       baseTime,
+					History:         []model.NetworkSample{newSampleIntl},
+					International: &model.NetworkGroupHealth{
+						Status:    "ok",
+						LatencyMS: 6.2,
+						History:   []model.NetworkSample{newSampleIntl},
+						CheckedAt: baseTime,
+					},
+					Domestic: &model.NetworkGroupHealth{
+						Status:    "ok",
+						LatencyMS: 54.8,
+						History:   []model.NetworkSample{newSampleDom},
+						CheckedAt: baseTime,
+					},
+				},
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb2); err != nil {
+		t.Fatal(err)
+	}
+
+	stored2, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify that the previous 20 samples were preserved and the 1 new sample was appended: total 21!
+	intlHistory := stored2.Snapshot.Overview.Network.History
+	if len(intlHistory) != 21 {
+		t.Fatalf("expected 21 merged intl samples, got %d", len(intlHistory))
+	}
+	if intlHistory[20].CheckedAt != newSampleIntl.CheckedAt {
+		t.Fatalf("expected newest sample to be last, got %v vs %v", intlHistory[20].CheckedAt, newSampleIntl.CheckedAt)
+	}
+	domHistory := stored2.Snapshot.Overview.Network.Domestic.History
+	if len(domHistory) != 21 {
+		t.Fatalf("expected 21 merged domestic samples, got %d", len(domHistory))
+	}
+
+	// 3. Test that a fast heartbeat with Network == nil retains existing network health
+	hb3 := model.FleetHeartbeat{
+		ProtocolVersion: model.FleetProtocolVersion,
+		PanelVersion:    "2.4.2",
+		Capabilities:    []string{"overview", "probe", "probe.update"},
+		Snapshot: model.FleetSnapshot{
+			Full: false,
+			Overview: model.Overview{
+				Now:     model.Metric{Timestamp: baseTime.Unix() + 20},
+				Network: nil,
+			},
+		},
+	}
+	if err := database.SaveFleetHeartbeat(context.Background(), host.ID, hb3); err != nil {
+		t.Fatal(err)
+	}
+	stored3, err := database.FleetHost(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored3.Snapshot.Overview.Network == nil || len(stored3.Snapshot.Overview.Network.History) != 21 {
+		t.Fatalf("expected network health and 21 samples preserved when heartbeat has nil network, got %+v", stored3.Snapshot.Overview.Network)
+	}
+}
