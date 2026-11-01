@@ -5782,11 +5782,11 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <!-- Cloudflare Worker Relay Recommendation Banner -->
         <div class="cf-worker-guide-tip">
           <div class="cf-worker-tip-main">
-            <span class="cf-worker-tip-badge">防 403 阻断推荐</span>
-            <span>机场开启 Cloudflare 盾并拦截 VPS 机房 IP？推荐使用免费 Worker 中继，100% 官方放行且全自动更新。</span>
+            <span class="cf-worker-tip-badge">防 403 推荐</span>
+            <span class="cf-worker-tip-text">遇到机场拦截 VPS 机房 IP？推荐使用免费 Worker 中继直连放行</span>
           </div>
           <button type="button" class="btn-subtle cf-worker-open-btn" @click="openCfWorkerGuideModal">
-            ☁️ 查看 1 分钟配置教程与一键代码
+            ☁️ 查看教程与代码 →
           </button>
         </div>
 

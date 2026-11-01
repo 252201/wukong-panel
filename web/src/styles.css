@@ -5104,44 +5104,74 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   background: rgba(82, 156, 253, 0.06);
   border: 1px dashed rgba(82, 156, 253, 0.35);
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   margin: 10px 0 14px 0;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .cf-worker-tip-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--muted);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cf-worker-tip-text {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .cf-worker-tip-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   background: rgba(82, 156, 253, 0.18);
   color: #70b3ff;
   border: 1px solid rgba(82, 156, 253, 0.4);
   font-size: 11px;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
   font-weight: 600;
-  margin-right: 6px;
+  white-space: nowrap;
 }
 .cf-worker-open-btn {
-  align-self: flex-start;
+  flex-shrink: 0;
   background: rgba(82, 156, 253, 0.12);
   color: #70b3ff;
   border: 1px solid rgba(82, 156, 253, 0.3);
   cursor: pointer;
-  padding: 5px 12px;
+  padding: 6px 12px;
   font-size: 12px;
   border-radius: 6px;
   font-weight: 600;
+  white-space: nowrap;
   transition: all 0.2s ease;
 }
 .cf-worker-open-btn:hover {
   background: rgba(82, 156, 253, 0.22);
   color: #ffffff;
   border-color: rgba(82, 156, 253, 0.5);
+}
+@media (max-width: 540px) {
+  .cf-worker-guide-tip {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .cf-worker-tip-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .cf-worker-open-btn {
+    align-self: stretch;
+    text-align: center;
+  }
 }
 
 .cf-worker-card-action {
