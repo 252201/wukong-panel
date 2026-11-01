@@ -149,8 +149,22 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 		if !strings.Contains(out, "rules:\n  - MATCH,Wukong Fleet") {
 			t.Errorf("missing MATCH rule for minimal: %s", out)
 		}
-		if strings.Contains(out, "dns:") {
-			t.Errorf("minimal template must not include dns block:\n%s", out)
+		for _, want := range []string{
+			"dns:",
+			"enable: true",
+			"ipv6: true",
+			"default-nameserver:",
+			"proxy-server-nameserver:",
+			"nameserver:",
+			"223.5.5.5",
+			"119.29.29.29",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("minimal template missing DNS setting %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "fake-ip") || strings.Contains(out, "enhanced-mode") {
+			t.Errorf("minimal template must remain bare without fake-ip:\n%s", out)
 		}
 		if strings.Contains(out, "🚀 节点选择") || strings.Contains(out, "🤖 AI 服务") {
 			t.Errorf("minimal template must not include standard/smart groups")
@@ -199,6 +213,8 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 			"enable: true",
 			"enhanced-mode: fake-ip",
 			"fake-ip-range: 198.18.0.1/16",
+			"+.us01.example.com",
+			"+.hk01.example.com",
 			"223.5.5.5",
 			"119.29.29.29",
 			"default-nameserver:",
@@ -209,6 +225,9 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 			if !strings.Contains(out, want) {
 				t.Fatalf("standard template missing DNS setting %q:\n%s", want, out)
 			}
+		}
+		if strings.Contains(out, "877774.xyz") || strings.Contains(out, "252202.xyz") {
+			t.Fatalf("standard template must not contain hardcoded personal domains:\n%s", out)
 		}
 		if strings.Contains(out, "🤖 AI 服务") || strings.Contains(out, "nameserver-policy:") {
 			t.Errorf("standard template should not contain smart-only elements")
@@ -274,6 +293,29 @@ func TestSubscriptionRenderTemplates(t *testing.T) {
 				t.Fatalf("smart template missing DNS policy %q:\n%s", want, out)
 			}
 		}
+
+		// Fake-IP filter and bootstrap DNS in smart template
+		for _, want := range []string{
+			"dns:",
+			"enable: true",
+			"enhanced-mode: fake-ip",
+			"fake-ip-range: 198.18.0.1/16",
+			"+.us01.example.com",
+			"+.hk01.example.com",
+			"223.5.5.5",
+			"119.29.29.29",
+			"default-nameserver:",
+			"proxy-server-nameserver:",
+			"ipv6: true",
+			"use-hosts: true",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("smart template missing DNS setting %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "877774.xyz") || strings.Contains(out, "252202.xyz") {
+			t.Fatalf("smart template must not contain hardcoded personal domains:\n%s", out)
+		}
 	})
 }
 
@@ -312,6 +354,45 @@ func TestSubscriptionRenderDuplicateNodeNames(t *testing.T) {
 	}
 	if !strings.Contains(out, `name: "Tokyo"`) || !strings.Contains(out, `name: "Tokyo (2)"`) {
 		t.Fatalf("expected Tokyo and Tokyo (2) in output:\n%s", out)
+	}
+}
+
+func TestExtractSubscriptionFilterDomains(t *testing.T) {
+	items := []SubscriptionNode{
+		{
+			Node:     model.Node{Server: "cf.domain-a.com:443", Domain: "tunnel.domain-b.org"},
+			ShareURI: "vless://uuid@cf.domain-a.com:443?sni=sni.domain-c.net&host=host.domain-d.com",
+		},
+		{
+			// IP literal server must be skipped, but SNI domain extracted
+			Node:     model.Node{Server: "1.2.3.4", Domain: ""},
+			ShareURI: "hysteria2://pass@1.2.3.4:443/?sni=hy2.example.com",
+		},
+		{
+			// IPv6 literal must be skipped
+			Node:     model.Node{Server: "2602:faa8:502:5a::a", Domain: ""},
+			ShareURI: "hysteria2://pass@[2602:faa8:502:5a::a]:49707/?sni=v6.example.com",
+		},
+	}
+
+	got := extractSubscriptionFilterDomains(items, "panel.example.io:8443", "127.0.0.1", "localhost")
+	want := []string{
+		"+.cf.domain-a.com",
+		"+.host.domain-d.com",
+		"+.hy2.example.com",
+		"+.panel.example.io",
+		"+.sni.domain-c.net",
+		"+.tunnel.domain-b.org",
+		"+.v6.example.com",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("len mismatch: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("at index %d: got %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -385,8 +466,23 @@ func TestSubscriptionSingleEndpointAndTemplateParam(t *testing.T) {
 		t.Fatalf("code=%d", recMin.Code)
 	}
 	bodyMin := recMin.Body.String()
-	if strings.Contains(bodyMin, "dns:") || !strings.Contains(bodyMin, "MATCH,Wukong") {
-		t.Fatalf("expected minimal template without dns block:\n%s", bodyMin)
+	for _, want := range []string{
+		"dns:",
+		"enable: true",
+		"ipv6: true",
+		"default-nameserver:",
+		"proxy-server-nameserver:",
+		"nameserver:",
+		"223.5.5.5",
+		"119.29.29.29",
+		"MATCH,Wukong",
+	} {
+		if !strings.Contains(bodyMin, want) {
+			t.Fatalf("expected minimal template with %q:\n%s", want, bodyMin)
+		}
+	}
+	if strings.Contains(bodyMin, "enhanced-mode: fake-ip") || strings.Contains(bodyMin, "🚀 节点选择") {
+		t.Fatalf("expected bare minimal template:\n%s", bodyMin)
 	}
 
 	// 4. Update database setting subscription_template to minimal
@@ -398,8 +494,23 @@ func TestSubscriptionSingleEndpointAndTemplateParam(t *testing.T) {
 	reqDefMin := httptest.NewRequest(http.MethodGet, "/sub/test-token-xyz/clash.yaml", nil)
 	recDefMin := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recDefMin, reqDefMin)
-	if strings.Contains(recDefMin.Body.String(), "dns:") {
-		t.Fatalf("expected minimal from DB setting:\n%s", recDefMin.Body.String())
+	for _, want := range []string{
+		"dns:",
+		"enable: true",
+		"ipv6: true",
+		"default-nameserver:",
+		"proxy-server-nameserver:",
+		"nameserver:",
+		"223.5.5.5",
+		"119.29.29.29",
+		"MATCH,Wukong",
+	} {
+		if !strings.Contains(recDefMin.Body.String(), want) {
+			t.Fatalf("expected minimal from DB setting with %q:\n%s", want, recDefMin.Body.String())
+		}
+	}
+	if strings.Contains(recDefMin.Body.String(), "enhanced-mode: fake-ip") || strings.Contains(recDefMin.Body.String(), "🚀 节点选择") {
+		t.Fatalf("expected bare minimal template from DB setting:\n%s", recDefMin.Body.String())
 	}
 
 	// But query param ?template=smart still overrides to smart

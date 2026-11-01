@@ -1456,11 +1456,12 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content, err := RenderClashSubscription(RenderSubscriptionOptions{
-		Title:     "Wukong Fleet",
-		GroupName: "Wukong Fleet",
-		Template:  tpl,
-		Items:     subItems,
-		Comments:  comments,
+		Title:              "Wukong Fleet",
+		GroupName:          "Wukong Fleet",
+		Template:           tpl,
+		Items:              subItems,
+		Comments:           comments,
+		ExtraFilterDomains: []string{r.Host},
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

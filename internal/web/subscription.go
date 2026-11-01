@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -240,11 +242,72 @@ type SubscriptionNode struct {
 }
 
 type RenderSubscriptionOptions struct {
-	Title     string
-	GroupName string // Used for minimal template, defaults to "Wukong" if empty
-	Template  SubscriptionTemplate
-	Items     []SubscriptionNode
-	Comments  []string
+	Title              string
+	GroupName          string // Used for minimal template, defaults to "Wukong" if empty
+	Template           SubscriptionTemplate
+	Items              []SubscriptionNode
+	Comments           []string
+	ExtraFilterDomains []string
+}
+
+// extractSubscriptionFilterDomains dynamically collects all distinct domain names
+// (Server, Domain, SNI, Host) from the subscription items and extra domains,
+// formatting them for Clash/Mihomo fake-ip-filter (e.g. "+.example.com").
+// Any IP literals (IPv4 and IPv6) are automatically filtered out.
+func extractSubscriptionFilterDomains(items []SubscriptionNode, extraDomains ...string) []string {
+	domainSet := make(map[string]struct{})
+
+	addDomain := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		host, _, err := net.SplitHostPort(raw)
+		if err != nil {
+			host = raw
+		}
+		host = strings.Trim(host, "[]\"' \t\r\n")
+		if host == "" {
+			return
+		}
+		if net.ParseIP(host) != nil {
+			return
+		}
+		if !strings.Contains(host, ".") {
+			return
+		}
+		host = strings.ToLower(host)
+		host = strings.TrimPrefix(host, "+.")
+		host = strings.TrimPrefix(host, "*.")
+		if host == "" {
+			return
+		}
+		domainSet["+."+host] = struct{}{}
+	}
+
+	for _, item := range items {
+		addDomain(item.Node.Server)
+		addDomain(item.Node.Domain)
+		if item.ShareURI != "" {
+			if parsed, err := url.Parse(item.ShareURI); err == nil {
+				addDomain(parsed.Hostname())
+				q := parsed.Query()
+				addDomain(q.Get("sni"))
+				addDomain(q.Get("host"))
+			}
+		}
+	}
+
+	for _, extra := range extraDomains {
+		addDomain(extra)
+	}
+
+	results := make([]string, 0, len(domainSet))
+	for d := range domainSet {
+		results = append(results, d)
+	}
+	sort.Strings(results)
+	return results
 }
 
 func RenderClashSubscription(opts RenderSubscriptionOptions) (string, error) {
@@ -295,20 +358,38 @@ func RenderClashSubscription(opts RenderSubscriptionOptions) (string, error) {
 		groupName = "Wukong"
 	}
 
+	dynamicDomains := extractSubscriptionFilterDomains(items, opts.ExtraFilterDomains...)
+
 	switch tpl {
 	case TemplateMinimal:
 		renderMinimalGroupsAndRules(&sb, groupName, proxyNames)
+		renderMinimalDNS(&sb)
 	case TemplateSmart:
 		renderSmartGroupsAndRules(&sb, proxyNames)
-		renderSmartDNS(&sb)
+		renderSmartDNS(&sb, dynamicDomains)
 	case TemplateStandard:
 		fallthrough
 	default:
 		renderStandardGroupsAndRules(&sb, proxyNames)
-		renderStandardDNS(&sb)
+		renderStandardDNS(&sb, dynamicDomains)
 	}
 
 	return sb.String(), nil
+}
+
+func renderMinimalDNS(sb *strings.Builder) {
+	sb.WriteString("dns:\n")
+	sb.WriteString("  enable: true\n")
+	sb.WriteString("  ipv6: true\n")
+	sb.WriteString("  default-nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
+	sb.WriteString("  proxy-server-nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
+	sb.WriteString("  nameserver:\n")
+	sb.WriteString("    - 223.5.5.5\n")
+	sb.WriteString("    - 119.29.29.29\n")
 }
 
 func renderMinimalGroupsAndRules(sb *strings.Builder, groupName string, proxyNames []string) {
@@ -436,7 +517,7 @@ func renderSmartGroupsAndRules(sb *strings.Builder, proxyNames []string) {
 	sb.WriteString("  - MATCH,🐟 漏网之鱼\n")
 }
 
-func renderStandardDNS(sb *strings.Builder) {
+func renderStandardDNS(sb *strings.Builder, dynamicDomains []string) {
 	sb.WriteString("dns:\n")
 	sb.WriteString("  enable: true\n")
 	sb.WriteString("  ipv6: true\n")
@@ -452,6 +533,9 @@ func renderStandardDNS(sb *strings.Builder) {
 	sb.WriteString("    - \"*.msftconnecttest.com\"\n")
 	sb.WriteString("    - \"dns.alidns.com\"\n")
 	sb.WriteString("    - \"doh.pub\"\n")
+	for _, domain := range dynamicDomains {
+		fmt.Fprintf(sb, "    - %q\n", domain)
+	}
 	sb.WriteString("  default-nameserver:\n")
 	sb.WriteString("    - 223.5.5.5\n")
 	sb.WriteString("    - 119.29.29.29\n")
@@ -463,8 +547,8 @@ func renderStandardDNS(sb *strings.Builder) {
 	sb.WriteString("    - 119.29.29.29\n")
 }
 
-func renderSmartDNS(sb *strings.Builder) {
-	renderStandardDNS(sb)
+func renderSmartDNS(sb *strings.Builder, dynamicDomains []string) {
+	renderStandardDNS(sb, dynamicDomains)
 	sb.WriteString("  nameserver-policy:\n")
 	sb.WriteString("    \"geosite:youtube,netflix,disney,spotify\": \"https://1.1.1.1/dns-query#🎬 国际流媒体\"\n")
 	sb.WriteString("    \"geosite:openai,anthropic\": \"https://1.1.1.1/dns-query#🤖 AI 服务\"\n")
