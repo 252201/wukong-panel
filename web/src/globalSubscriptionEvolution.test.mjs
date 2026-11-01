@@ -91,6 +91,8 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-sub-card'), 'styles.css must style .external-sub-card')
   assert.ok(cssSource.includes('.external-sub-badge'), 'styles.css must style .external-sub-badge')
   assert.ok(cssSource.includes('.sub-mode-tabs'), 'styles.css must style .sub-mode-tabs')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .sub-mode-tabs'), 'styles.css must have light theme rule for .sub-mode-tabs')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .sub-mode-tab-btn.active'), 'styles.css must have light theme rule for .sub-mode-tab-btn.active')
   assert.ok(cssSource.includes('.external-raw-textarea'), 'styles.css must style .external-raw-textarea')
   assert.ok(cssSource.includes('.external-quota-bar'), 'styles.css must style .external-quota-bar')
   assert.ok(cssSource.includes('.external-node-chip'), 'styles.css must style .external-node-chip')
