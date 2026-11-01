@@ -1005,8 +1005,24 @@ async function toggleExternalSubEnabled(sub: ExternalSubscription, enabled: bool
   }
 }
 
+function externalSubNodes(sub?: ExternalSubscription | null): NodeItem[] {
+  return Array.isArray(sub?.nodes) ? sub.nodes : []
+}
+
+function externalSubSelectedIds(sub?: ExternalSubscription | null): string[] {
+  if (Array.isArray(sub?.selectedNodeIds)) return sub.selectedNodeIds
+  return externalSubNodes(sub).map(n => n.id)
+}
+
+function formatExternalExpiry(expiresAt?: string) {
+  if (!expiresAt || expiresAt === '0' || expiresAt === 'null' || expiresAt === 'undefined') return ''
+  const num = Number(expiresAt)
+  const date = !Number.isNaN(num) && num > 0 ? new Date(num > 1e11 ? num : num * 1000) : new Date(expiresAt)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(language.value)
+}
+
 async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
-  let selected = sub.selectedNodeIds ? [...sub.selectedNodeIds] : sub.nodes.map(n => n.id)
+  let selected = sub.selectedNodeIds ? [...sub.selectedNodeIds] : externalSubNodes(sub).map(n => n.id)
   if (checked) {
     if (!selected.includes(nodeId)) selected.push(nodeId)
   } else {
@@ -1021,7 +1037,7 @@ async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: str
 }
 
 async function toggleAllExternalNodes(sub: ExternalSubscription, selectAll: boolean) {
-  const selected = selectAll ? sub.nodes.map(n => n.id) : []
+  const selected = selectAll ? externalSubNodes(sub).map(n => n.id) : []
   try {
     await api.updateExternalSubscription(sub.id, { selectedNodeIds: selected })
     sub.selectedNodeIds = selected
@@ -3388,10 +3404,10 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               </div>
 
               <!-- Traffic Quota Bar if available -->
-              <div v-if="sub.totalBytes > 0 || sub.uploadBytes > 0 || sub.downloadBytes > 0 || sub.expiresAt" class="external-sub-quota">
+              <div v-if="sub.totalBytes > 0 || sub.uploadBytes > 0 || sub.downloadBytes > 0 || formatExternalExpiry(sub.expiresAt)" class="external-sub-quota">
                 <div class="external-quota-meta">
                   <span>流量已用: <b>{{ bytes(sub.uploadBytes + sub.downloadBytes) }}</b> / {{ sub.totalBytes > 0 ? bytes(sub.totalBytes) : '不限量' }}</span>
-                  <span v-if="sub.expiresAt">到期: <b>{{ new Date(sub.expiresAt).toLocaleDateString(language) }}</b></span>
+                  <span v-if="formatExternalExpiry(sub.expiresAt)">到期: <b>{{ formatExternalExpiry(sub.expiresAt) }}</b></span>
                 </div>
                 <div v-if="sub.totalBytes > 0" class="external-quota-bar">
                   <div
@@ -3404,17 +3420,17 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <!-- Synced Nodes Selection -->
               <div class="external-sub-nodes">
                 <div class="external-nodes-header">
-                  <span>节点选择 ({{ (sub.selectedNodeIds || sub.nodes.map(n => n.id)).length }}/{{ sub.nodes.length }}) · 同步于 {{ sub.lastSyncAt ? new Date(sub.lastSyncAt).toLocaleString(language) : '从未同步' }}</span>
+                  <span>节点选择 ({{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}) · 同步于 {{ sub.lastSyncAt ? new Date(sub.lastSyncAt).toLocaleString(language) : '从未同步' }}</span>
                   <div class="external-nodes-actions">
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">全选</button>
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">全不选</button>
                   </div>
                 </div>
-                <div v-if="sub.nodes && sub.nodes.length" class="external-nodes-grid">
-                  <label v-for="node in sub.nodes" :key="node.id" class="external-node-chip">
+                <div v-if="externalSubNodes(sub).length > 0" class="external-nodes-grid">
+                  <label v-for="node in externalSubNodes(sub)" :key="node.id" class="external-node-chip">
                     <input
                       type="checkbox"
-                      :checked="(sub.selectedNodeIds || sub.nodes.map(n => n.id)).includes(node.id)"
+                      :checked="externalSubSelectedIds(sub).includes(node.id)"
                       @change="toggleExternalNodeSelected(sub, node.id, ($event.target as HTMLInputElement).checked)"
                     >
                     <span class="external-node-tag">{{ node.protocol }}</span>

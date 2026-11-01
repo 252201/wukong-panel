@@ -21,7 +21,7 @@ func TestFailureSourcesAggregateOnlyRecognizedJailRecords(t *testing.T) {
 		{message: foundLine("wukong-sshd", "2001:4860:4860::8888", now.Add(-30*time.Second))},
 		{message: foundLine("other-sshd", "9.9.9.9", now)},
 		{message: foundLine("wukong-sshd", "9.9.9.9", now.Add(-25*time.Hour))},
-		{message: foundLine("wukong-sshd", "1.1.1.1", now.Add(time.Hour))},
+		{message: foundLine("wukong-sshd", "1.1.1.1", now.Add(24*time.Hour))},
 		{message: foundLine("wukong-sshd", "8.8.8.8;touch", now)},
 		{message: strings.Replace(first, "Found", "Ignore", 1)},
 		{message: "sshd[123]: username injected " + first},

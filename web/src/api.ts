@@ -253,6 +253,15 @@ export interface ExternalSubscription {
 }
 export interface FleetSubscriptionProbe { ok: boolean; status: number; nodeCount: number; latencyMs: number }
 
+export function normalizeExternalSubscription(sub: ExternalSubscription): ExternalSubscription {
+  if (!sub) return sub
+  return {
+    ...sub,
+    nodes: Array.isArray(sub.nodes) ? sub.nodes : [],
+    selectedNodeIds: Array.isArray(sub.selectedNodeIds) ? sub.selectedNodeIds : [],
+  }
+}
+
 function normalizeMigrationPlan(plan: SingBoxMigrationPlan): SingBoxMigrationPlan {
   return {
     ...plan,
@@ -335,11 +344,23 @@ export const api = {
   removeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   purgeFleetHost: (hostId: string, confirmName: string) => request<{ok: boolean}>(`fleet/hosts/${encodeURIComponent(hostId)}/purge`, { method: 'DELETE', body: JSON.stringify({ confirmName }) }, false),
   ipReputation: (ip: string) => getIPReputation(ip),
-  externalSubscriptions: () => request<ExternalSubscription[]>('external-subscriptions', {}, false),
-  createExternalSubscription: (data: Partial<ExternalSubscription>) => request<ExternalSubscription>('external-subscriptions', { method: 'POST', body: JSON.stringify(data) }, false),
-  updateExternalSubscription: (id: string, data: Partial<ExternalSubscription>) => request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }, false),
+  externalSubscriptions: async () => {
+    const list = await request<ExternalSubscription[]>('external-subscriptions', {}, false)
+    return Array.isArray(list) ? list.map(normalizeExternalSubscription) : []
+  },
+  createExternalSubscription: async (data: Partial<ExternalSubscription>) => {
+    const res = await request<ExternalSubscription>('external-subscriptions', { method: 'POST', body: JSON.stringify(data) }, false)
+    return normalizeExternalSubscription(res)
+  },
+  updateExternalSubscription: async (id: string, data: Partial<ExternalSubscription>) => {
+    const res = await request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }, false)
+    return normalizeExternalSubscription(res)
+  },
   deleteExternalSubscription: (id: string) => request<{ok: boolean}>(`external-subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }, false),
-  syncExternalSubscription: (id: string) => request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' }, false),
+  syncExternalSubscription: async (id: string) => {
+    const res = await request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' }, false)
+    return normalizeExternalSubscription(res)
+  },
 }
 
 export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'|'tcp+udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }

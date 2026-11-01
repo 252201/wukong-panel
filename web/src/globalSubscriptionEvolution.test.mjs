@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 test('api.ts includes ExternalSubscription interface and API methods', () => {
   const apiSource = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
   assert.ok(apiSource.includes('export interface ExternalSubscription'), 'api.ts must export ExternalSubscription interface')
+  assert.ok(apiSource.includes('normalizeExternalSubscription'), 'api.ts must define normalizeExternalSubscription helper')
   assert.ok(apiSource.includes('externalSubscriptions:'), 'api.ts must define externalSubscriptions method')
   assert.ok(apiSource.includes('createExternalSubscription:'), 'api.ts must define createExternalSubscription method')
   assert.ok(apiSource.includes('updateExternalSubscription:'), 'api.ts must define updateExternalSubscription method')
@@ -43,6 +44,13 @@ test('App.vue renders external subscriptions card, sync actions, and node select
   assert.ok(vueSource.includes('toggleExternalSubEnabled'), 'App.vue must declare toggleExternalSubEnabled')
   assert.ok(vueSource.includes('toggleExternalNodeSelected'), 'App.vue must declare toggleExternalNodeSelected')
   assert.ok(vueSource.includes('toggleAllExternalNodes'), 'App.vue must declare toggleAllExternalNodes')
+  assert.ok(vueSource.includes('externalSubNodes'), 'App.vue must declare externalSubNodes defensive helper')
+  assert.ok(vueSource.includes('externalSubSelectedIds'), 'App.vue must declare externalSubSelectedIds defensive helper')
+  assert.ok(vueSource.includes('formatExternalExpiry'), 'App.vue must declare formatExternalExpiry defensive helper')
+
+  // Guard against null nodes crashes in template
+  assert.ok(!vueSource.includes('sub.nodes.map'), 'App.vue must not directly call sub.nodes.map without null guard')
+  assert.ok(!vueSource.includes('sub.nodes.length'), 'App.vue must not directly call sub.nodes.length without null guard')
 
   // Template section
   assert.ok(vueSource.includes('class="panel-card external-subscriptions-section"'), 'App.vue must render external-subscriptions-section')
