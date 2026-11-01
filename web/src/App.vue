@@ -888,21 +888,35 @@ async function openSubscriptionQR(format?: string) {
 const externalSubs = ref<ExternalSubscription[]>([])
 const loadingExternalSubs = ref(false)
 const externalSubsLoaded = ref(false)
+const externalSubImportMode = ref<'url' | 'raw'>('url')
 const externalSubDraft = ref<{
   id?: string
   name: string
   url: string
+  proxyUrl: string
+  rawContent: string
   userAgent: string
   autoSync: boolean
   syncIntervalHours: number
 }>({
   name: '',
   url: '',
+  proxyUrl: '',
+  rawContent: '',
   userAgent: '',
   autoSync: true,
   syncIntervalHours: 12,
 })
 const syncingExternalSubId = ref<string | null>(null)
+
+function formatExternalSyncTime(isoStr?: string | null): string {
+  if (!isoStr) return '从未同步'
+  const d = new Date(isoStr)
+  if (isNaN(d.getTime()) || d.getFullYear() < 2000) {
+    return '从未同步'
+  }
+  return d.toLocaleString(language.value)
+}
 
 async function loadExternalSubscriptions(silent = false) {
   if (!silent && !externalSubsLoaded.value) {
@@ -919,9 +933,12 @@ async function loadExternalSubscriptions(silent = false) {
 }
 
 function openCreateExternalSubModal() {
+  externalSubImportMode.value = 'url'
   externalSubDraft.value = {
     name: '',
     url: '',
+    proxyUrl: '',
+    rawContent: '',
     userAgent: '',
     autoSync: true,
     syncIntervalHours: 12,
@@ -930,10 +947,13 @@ function openCreateExternalSubModal() {
 }
 
 function openEditExternalSubModal(sub: ExternalSubscription) {
+  externalSubImportMode.value = (sub.url === 'manual' || (!sub.url && !!sub.rawContent)) ? 'raw' : 'url'
   externalSubDraft.value = {
     id: sub.id,
     name: sub.name,
-    url: sub.url,
+    url: sub.url === 'manual' ? '' : sub.url,
+    proxyUrl: sub.proxyUrl || '',
+    rawContent: sub.rawContent || '',
     userAgent: sub.userAgent || '',
     autoSync: sub.autoSync,
     syncIntervalHours: sub.syncIntervalHours || 12,
@@ -942,17 +962,45 @@ function openEditExternalSubModal(sub: ExternalSubscription) {
 }
 
 async function submitExternalSubModal() {
-  if (!externalSubDraft.value.name.trim() || !externalSubDraft.value.url.trim()) {
-    notify('请填写订阅名称和链接')
+  const name = externalSubDraft.value.name.trim()
+  if (!name) {
+    notify('请填写订阅名称')
     return
   }
+
+  const payload: Partial<ExternalSubscription> = {
+    name,
+    proxyUrl: externalSubDraft.value.proxyUrl.trim(),
+    userAgent: externalSubDraft.value.userAgent.trim(),
+    autoSync: externalSubDraft.value.autoSync,
+    syncIntervalHours: externalSubDraft.value.syncIntervalHours || 12,
+  }
+
+  if (externalSubImportMode.value === 'raw') {
+    const raw = externalSubDraft.value.rawContent.trim()
+    if (!raw) {
+      notify('请粘贴节点链接或配置内容')
+      return
+    }
+    payload.url = 'manual'
+    payload.rawContent = raw
+  } else {
+    const url = externalSubDraft.value.url.trim()
+    if (!url) {
+      notify('请填写订阅链接 URL')
+      return
+    }
+    payload.url = url
+    payload.rawContent = externalSubDraft.value.rawContent.trim()
+  }
+
   busy.value = true
   try {
     if (!externalSubDraft.value.id) {
-      await api.createExternalSubscription(externalSubDraft.value)
+      await api.createExternalSubscription(payload)
       notify('外部订阅已添加并开始同步')
     } else {
-      await api.updateExternalSubscription(externalSubDraft.value.id, externalSubDraft.value)
+      await api.updateExternalSubscription(externalSubDraft.value.id, payload)
       notify('外部订阅已更新')
     }
     modal.value = null
@@ -3382,12 +3430,18 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     <span class="external-sub-badge" :class="sub.enabled ? 'active' : 'inactive'">
                       {{ sub.enabled ? '混流已启用' : '已暂停混流' }}
                     </span>
+                    <span v-if="sub.url === 'manual'" class="external-sub-badge manual">直接粘贴</span>
+                    <span v-if="sub.proxyUrl" class="external-sub-badge proxy" :title="'通过代理拉取: ' + sub.proxyUrl">已配代理</span>
                     <span v-if="syncingExternalSubId === sub.id" class="external-sub-badge syncing">同步中…</span>
                     <span v-else-if="sub.lastError" class="external-sub-badge error" :title="sub.lastError">同步失败</span>
-                    <span v-else-if="sub.lastSyncAt" class="external-sub-badge success">同步正常</span>
+                    <span v-else-if="formatExternalSyncTime(sub.lastSyncAt) !== '从未同步'" class="external-sub-badge success">同步正常</span>
                   </div>
                   <div class="external-sub-url-row">
-                    <code>{{ sub.url }}</code>
+                    <span v-if="sub.url === 'manual'" class="external-manual-tag">📋 直接粘贴配置 ({{ externalSubNodes(sub).length }} 个节点)</span>
+                    <template v-else>
+                      <code>{{ sub.url }}</code>
+                      <span v-if="sub.proxyUrl" class="external-proxy-tag" :title="'通过代理拉取: ' + sub.proxyUrl">⚡ 代理: {{ sub.proxyUrl }}</span>
+                    </template>
                   </div>
                 </div>
 
@@ -3420,7 +3474,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <!-- Synced Nodes Selection -->
               <div class="external-sub-nodes">
                 <div class="external-nodes-header">
-                  <span>节点选择 ({{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}) · 同步于 {{ sub.lastSyncAt ? new Date(sub.lastSyncAt).toLocaleString(language) : '从未同步' }}</span>
+                  <span>节点选择 ({{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}) · 同步于 {{ formatExternalSyncTime(sub.lastSyncAt) }}</span>
                   <div class="external-nodes-actions">
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">全选</button>
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">全不选</button>
@@ -5486,29 +5540,76 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
       <span class="modal-seal amber">源</span>
       <p class="eyebrow">EXTERNAL SUBSCRIPTION</p>
       <h2>{{ externalSubDraft.id ? '编辑外部机场订阅' : '导入外部机场订阅' }}</h2>
-      <p>导入外部 Clash / Base64 订阅链接。系统将自动解析节点并提取流量账期，与自建节点混流分发。</p>
-      
+      <p>导入外部 Clash / Base64 订阅源或直接粘贴节点，与自建节点无缝融合并统一管理。</p>
+
+      <div class="sub-mode-tabs">
+        <button
+          type="button"
+          class="sub-mode-tab-btn"
+          :class="{ active: externalSubImportMode === 'url' }"
+          @click="externalSubImportMode = 'url'"
+        >
+          🌐 订阅链接 URL
+        </button>
+        <button
+          type="button"
+          class="sub-mode-tab-btn"
+          :class="{ active: externalSubImportMode === 'raw' }"
+          @click="externalSubImportMode = 'raw'"
+        >
+          📋 直接粘贴配置 / 节点
+        </button>
+      </div>
+
       <div class="form-grid">
         <label>
           订阅名称
-          <input v-model="externalSubDraft.name" type="text" placeholder="例如：FastCloud 香港专线" required autofocus>
+          <input v-model="externalSubDraft.name" type="text" placeholder="例如：WestData 备用专线" required autofocus>
         </label>
-        <label>
+        <label v-if="externalSubImportMode === 'url'">
           自定义 User-Agent（可选）
-          <input v-model="externalSubDraft.userAgent" type="text" placeholder="留空默认使用 clash.meta / v2rayN">
+          <input v-model="externalSubDraft.userAgent" type="text" placeholder="留空默认使用 ClashMeta/v1.18.0">
+        </label>
+        <label v-else>
+          导入模式说明
+          <input type="text" value="本地直接解析入库，免去 VPS 联网请求" disabled class="readonly-hint">
         </label>
       </div>
 
-      <label>
-        订阅链接 URL
-        <input v-model="externalSubDraft.url" type="url" placeholder="https://airport.example.com/api/v1/client/subscribe?token=..." required>
-        <small>支持标准 HTTP/HTTPS Clash YAML 或 Base64 格式订阅源（已启用内网 IP 与私有地址 SSRF 防护）</small>
-      </label>
+      <!-- URL Mode Fields -->
+      <template v-if="externalSubImportMode === 'url'">
+        <label>
+          订阅链接 URL
+          <input v-model="externalSubDraft.url" type="url" placeholder="https://airport.example.com/api/v1/client/subscribe?token=..." :required="externalSubImportMode === 'url'">
+          <small>支持标准 HTTP/HTTPS Clash YAML 或 Base64 格式订阅源（已启用内网 IP 与私有地址 SSRF 防护）</small>
+        </label>
+
+        <label>
+          拉取代理 Proxy URL（可选，绕过 Cloudflare 盾 / 机房 IP 拦截）
+          <input v-model="externalSubDraft.proxyUrl" type="text" placeholder="例如: http://127.0.0.1:2080 或 socks5://127.0.0.1:1080">
+          <small>当机场开启 Cloudflare WAF 质询并阻断 VPS 机房 IP（报 403 Forbidden）时，可指定本地或外部出站代理拉取</small>
+        </label>
+      </template>
+
+      <!-- Raw Content Mode Fields -->
+      <template v-else>
+        <label>
+          节点分享链接 / Clash 配置文件内容
+          <textarea
+            v-model="externalSubDraft.rawContent"
+            rows="8"
+            class="external-raw-textarea"
+            placeholder="支持：&#10;1. Clash proxies: YAML 配置段&#10;2. 节点分享链接（每行一个 trojan://, vless://, vmess://, ss://, hysteria2://）&#10;3. Base64 编码的节点列表"
+            :required="externalSubImportMode === 'raw'"
+          ></textarea>
+          <small>在本地浏览器或客户端复制配置后直接粘贴，无需 VPS 联网连接机场服务器即可瞬间完成解析导入</small>
+        </label>
+      </template>
 
       <div class="toggle-row inline external-sub-toggle-row">
         <div>
           <b>启用后台定时自动更新</b>
-          <small>定时拉取外部机场最新节点与同步流量用量</small>
+          <small>{{ externalSubImportMode === 'url' ? '定时拉取外部机场最新节点与同步流量用量' : '定时重新解析静态配置' }}</small>
         </div>
         <label class="switch">
           <input v-model="externalSubDraft.autoSync" type="checkbox">

@@ -236,6 +236,8 @@ export interface ExternalSubscription {
   id: string
   name: string
   url: string
+  proxyUrl?: string
+  rawContent?: string
   userAgent?: string
   enabled: boolean
   autoSync: boolean

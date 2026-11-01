@@ -32,6 +32,8 @@ func TestExternalSubscriptionCRUD(t *testing.T) {
 		ID:                "sub-1",
 		Name:              "My Airport",
 		URL:               "https://airport.example.com/sub",
+		ProxyURL:          "http://127.0.0.1:2080",
+		RawContent:        "proxies:\n  - name: test\n    type: trojan\n    server: hk.test\n    port: 443",
 		UserAgent:         "ClashMeta",
 		Enabled:           true,
 		AutoSync:          true,
@@ -59,7 +61,7 @@ func TestExternalSubscriptionCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExternalSubscription failed: %v", err)
 	}
-	if got.Name != "My Airport" || got.URL != "https://airport.example.com/sub" || !got.Enabled || !got.AutoSync {
+	if got.Name != "My Airport" || got.URL != "https://airport.example.com/sub" || got.ProxyURL != "http://127.0.0.1:2080" || got.RawContent != sub1.RawContent || !got.Enabled || !got.AutoSync {
 		t.Fatalf("unexpected subscription content: %+v", got)
 	}
 	if len(got.Nodes) != 1 || got.Nodes[0].Name != "HK Node 1" || got.Nodes[0].ShareURI != sub1.Nodes[0].ShareURI {

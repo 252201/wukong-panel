@@ -15,7 +15,7 @@ func foundLine(jail, ip string, at time.Time) string {
 	return fmt.Sprintf("%s,123 fail2ban.filter [123]: INFO [%s] Found %s - %s", at.Format("2006-01-02 15:04:05"), jail, ip, at.Format("2006-01-02 15:04:05"))
 }
 func TestFailureSourcesAggregateOnlyRecognizedJailRecords(t *testing.T) {
-	now := time.Now().In(time.Local).Truncate(time.Second)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.Local)
 	first := foundLine("wukong-sshd", "8.8.8.8", now.Add(-time.Minute))
 	entries := []failureEntry{{message: first}, {message: first}, {message: foundLine("wukong-sshd", "::ffff:8.8.8.8", now)},
 		{message: foundLine("wukong-sshd", "2001:4860:4860::8888", now.Add(-30*time.Second))},
@@ -33,7 +33,7 @@ func TestFailureSourcesAggregateOnlyRecognizedJailRecords(t *testing.T) {
 	}
 }
 func TestFailureSourcesBoundsAndJailIsolation(t *testing.T) {
-	now := time.Now().In(time.Local).Truncate(time.Second)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.Local)
 	entries := []failureEntry{}
 	for i := 1; i <= 75; i++ {
 		entries = append(entries, failureEntry{message: foundLine("sshd", fmt.Sprintf("8.8.8.%d", i), now.Add(time.Duration(-i)*time.Second))})
@@ -49,7 +49,7 @@ func TestFailureSourcesBoundsAndJailIsolation(t *testing.T) {
 }
 func TestFailureSourcesFileRotationAndUnsupportedTarget(t *testing.T) {
 	c := testController(t)
-	now := time.Now().In(time.Local).Truncate(time.Second)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.Local)
 	c.Now = func() time.Time { return now }
 	c.Run = func(_ context.Context, name string, args []string, _ string) (string, error) {
 		return "Current logging target is:\n`- /var/log/fail2ban.log", nil
