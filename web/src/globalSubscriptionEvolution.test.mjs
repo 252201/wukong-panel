@@ -97,6 +97,9 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-sub-delete-modal'), 'styles.css must style .external-sub-delete-modal')
   assert.ok(cssSource.includes('.external-sub-delete-target'), 'styles.css must style .external-sub-delete-target')
   assert.ok(cssSource.includes('.external-nodes-filter-input'), 'styles.css must style .external-nodes-filter-input')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .external-nodes-filter-input'), 'styles.css must have light theme rule for .external-nodes-filter-input')
+  assert.ok(!cssSource.includes(':root[data-effective-theme="light"] .external-nodes-filter-input {\n  background: #ffffff !important;\n  border-color: rgba(24, 32, 45, 0.15) !important;\n  color: var(--ink) !important;'), 'light theme .external-nodes-filter-input must not use var(--ink) as text color')
+  assert.ok(cssSource.includes('color: var(--paper) !important;'), 'styles.css .external-nodes-filter-input must use var(--paper) for legible text')
   assert.ok(cssSource.includes('.subscription-qr-modal'), 'styles.css must style .subscription-qr-modal')
 
   // Checkbox dimension and overflow-x protections to avoid squashing node names

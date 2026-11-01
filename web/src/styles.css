@@ -4705,6 +4705,9 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
   border: 1px solid rgba(211, 169, 77, 0.2) !important;
   color: var(--paper) !important;
 }
+.external-nodes-filter-input::placeholder {
+  color: var(--muted) !important;
+}
 .external-nodes-filter-input:focus {
   border-color: var(--gold) !important;
   outline: none;
@@ -4991,7 +4994,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .external-nodes-filter-input {
   background: #ffffff !important;
   border-color: rgba(24, 32, 45, 0.15) !important;
-  color: var(--ink) !important;
+  color: var(--paper) !important;
+}
+:root[data-effective-theme="light"] .external-nodes-filter-input::placeholder {
+  color: var(--muted) !important;
 }
 :root[data-effective-theme="light"] .external-sub-delete-target {
   background: rgba(196, 70, 53, 0.04);
@@ -5383,7 +5389,10 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 :root[data-effective-theme="light"] .cf-builder-box input {
   background: #f8faf9;
   border-color: rgba(24, 32, 45, 0.15);
-  color: var(--ink);
+  color: var(--paper);
+}
+:root[data-effective-theme="light"] .cf-builder-box input::placeholder {
+  color: var(--muted);
 }
 :root[data-effective-theme="light"] .cf-builder-result {
   background: #f0f4fa;
