@@ -212,3 +212,21 @@ test('fleet-order-modal layout is wide and flags are constrained to prevent dist
   assert.match(stylesCss, /\.fleet-drag-handle\s*\{[^}]*position:\s*absolute;[^}]*top:\s*7px;[^}]*left:\s*8px;/)
   assert.match(appVue, /<article[^>]*class="[^"]*fleet-host-card[^"]*"[^>]*>\s*<span v-if="host\.id !== 'local'" class="fleet-drag-handle"/)
 })
+
+test('createFleetEnrollment avoids navigateTo to prevent jarring scroll-to-top behavior', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const appVuePath = path.resolve(process.cwd(), 'src/App.vue')
+  const appVue = fs.readFileSync(appVuePath, 'utf8')
+
+  // Extract createFleetEnrollment function body
+  const match = appVue.match(/async function createFleetEnrollment[\s\S]*?finally \{ busy\.value = false \}/)
+  assert.ok(match, 'createFleetEnrollment function found')
+  const fnBody = match[0]
+
+  // Verify navigateTo('fleet') is NOT used inside createFleetEnrollment
+  assert.doesNotMatch(fnBody, /navigateTo\('fleet'\)/, 'createFleetEnrollment must not call navigateTo which scrolls to top')
+  // Verify clean page assignment when not on fleet
+  assert.match(fnBody, /if\s*\(page\.value !== 'fleet'\)\s*\{\s*page\.value = 'fleet'\s*\}/)
+  assert.match(fnBody, /document\.getElementById\('fleet-enrollment'\)\?\.scrollIntoView/)
+})
