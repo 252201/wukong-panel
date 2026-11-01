@@ -1053,8 +1053,22 @@ async function toggleExternalSubEnabled(sub: ExternalSubscription, enabled: bool
   }
 }
 
+const externalNodeFilter = ref<Record<string, string>>({})
+
 function externalSubNodes(sub?: ExternalSubscription | null): NodeItem[] {
   return Array.isArray(sub?.nodes) ? sub.nodes : []
+}
+
+function filteredExternalNodes(sub?: ExternalSubscription | null): NodeItem[] {
+  const all = externalSubNodes(sub)
+  if (!sub) return all
+  const q = (externalNodeFilter.value[sub.id] || '').trim().toLowerCase()
+  if (!q) return all
+  return all.filter(n =>
+    n.name.toLowerCase().includes(q) ||
+    n.protocol.toLowerCase().includes(q) ||
+    n.server.toLowerCase().includes(q)
+  )
 }
 
 function externalSubSelectedIds(sub?: ExternalSubscription | null): string[] {
@@ -3474,22 +3488,47 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
               <!-- Synced Nodes Selection -->
               <div class="external-sub-nodes">
                 <div class="external-nodes-header">
-                  <span>节点选择 ({{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}) · 同步于 {{ formatExternalSyncTime(sub.lastSyncAt) }}</span>
+                  <div class="external-nodes-header-title">
+                    <span>节点选择 ({{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}) · 同步于 {{ formatExternalSyncTime(sub.lastSyncAt) }}</span>
+                  </div>
                   <div class="external-nodes-actions">
+                    <div v-if="externalSubNodes(sub).length > 5" class="external-nodes-filter-box">
+                      <input
+                        v-model="externalNodeFilter[sub.id]"
+                        type="text"
+                        placeholder="🔍 筛选节点 (如 Hong Kong / 01)..."
+                        class="external-nodes-filter-input"
+                      >
+                      <button
+                        v-if="externalNodeFilter[sub.id]"
+                        type="button"
+                        class="filter-clear-btn"
+                        title="清空筛选"
+                        @click="externalNodeFilter[sub.id] = ''"
+                      >×</button>
+                    </div>
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">全选</button>
                     <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">全不选</button>
                   </div>
                 </div>
-                <div v-if="externalSubNodes(sub).length > 0" class="external-nodes-grid">
-                  <label v-for="node in externalSubNodes(sub)" :key="node.id" class="external-node-chip">
+                <div v-if="filteredExternalNodes(sub).length > 0" class="external-nodes-grid">
+                  <label
+                    v-for="node in filteredExternalNodes(sub)"
+                    :key="node.id"
+                    class="external-node-chip"
+                    :title="`${node.name} (${node.protocol.toUpperCase()} · ${node.server}:${node.listenPort || ''})`"
+                  >
                     <input
                       type="checkbox"
                       :checked="externalSubSelectedIds(sub).includes(node.id)"
                       @change="toggleExternalNodeSelected(sub, node.id, ($event.target as HTMLInputElement).checked)"
                     >
                     <span class="external-node-tag">{{ node.protocol }}</span>
-                    <span class="external-node-name" :title="node.name">{{ node.name }}</span>
+                    <span class="external-node-name">{{ node.name }}</span>
                   </label>
+                </div>
+                <div v-else-if="externalSubNodes(sub).length > 0" class="external-nodes-empty">
+                  <small>未匹配到包含「{{ externalNodeFilter[sub.id] }}」的节点。</small>
                 </div>
                 <div v-else class="external-nodes-empty">
                   <small>{{ sub.lastError ? `同步报错: ${sub.lastError}` : '尚无解析到的节点，请点击「立即同步」获取。' }}</small>

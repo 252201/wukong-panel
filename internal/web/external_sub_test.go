@@ -516,3 +516,41 @@ func TestExternalSubscriptionDirectPasteAndProxyMode(t *testing.T) {
 	}
 }
 
+func TestFilterDummyAnnouncementNodesAndExtractUserinfo(t *testing.T) {
+	// Sample Clash proxies YAML containing airport announcement dummy nodes
+	clashWithDummy := `proxies:
+  - {name: "Traffic: 11.72 GB / 200 GB", server: oss-guangzhou.example.com, port: 20004, type: trojan, password: pass}
+  - {name: "Expire: 2027-02-18", server: oss-guangzhou.example.com, port: 20004, type: trojan, password: pass}
+  - {name: "官网地址: https://example.com", server: 127.0.0.1, port: 1080, type: trojan, password: pass}
+  - {name: "🇭🇰 Hong Kong | 01", server: hk1.example.com, port: 20001, type: trojan, password: pass}
+  - {name: "🇭🇰 Hong Kong | 02", server: hk2.example.com, port: 20002, type: trojan, password: pass}
+  - {name: "🇯🇵 Japan | 01", server: jp1.example.com, port: 20003, type: trojan, password: pass}`
+
+	nodes, userinfo, err := ParseExternalSubscription([]byte(clashWithDummy), nil, "sub-dummy-test")
+	if err != nil {
+		t.Fatalf("ParseExternalSubscription failed: %v", err)
+	}
+
+	// 1. Verify dummy nodes were filtered out: only 3 real nodes remain
+	if len(nodes) != 3 {
+		t.Fatalf("expected exactly 3 real nodes, got %d: %+v", len(nodes), nodes)
+	}
+	for _, n := range nodes {
+		if strings.Contains(n.Name, "Traffic") || strings.Contains(n.Name, "Expire") || strings.Contains(n.Name, "官网") {
+			t.Fatalf("dummy node was not filtered: %s", n.Name)
+		}
+	}
+
+	// 2. Verify traffic quota and expiry were extracted from dummy nodes
+	expectedTotal := int64(200) * 1024 * 1024 * 1024
+	if userinfo.TotalBytes != expectedTotal {
+		t.Fatalf("expected total bytes %d, got %d", expectedTotal, userinfo.TotalBytes)
+	}
+	if userinfo.DownloadBytes <= 0 {
+		t.Fatalf("expected positive download bytes, got %d", userinfo.DownloadBytes)
+	}
+	if userinfo.ExpiresAt != "2027-02-18" {
+		t.Fatalf("expected expiresAt 2027-02-18, got %s", userinfo.ExpiresAt)
+	}
+}
+
