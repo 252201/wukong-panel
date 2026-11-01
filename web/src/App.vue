@@ -128,7 +128,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'subscription-qr' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'external-sub-delete' | 'subscription-qr' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -908,6 +908,7 @@ const externalSubDraft = ref<{
   syncIntervalHours: 12,
 })
 const syncingExternalSubId = ref<string | null>(null)
+const externalSubDeleteTarget = ref<ExternalSubscription | null>(null)
 
 function formatExternalSyncTime(isoStr?: string | null): string {
   if (!isoStr) return '从未同步'
@@ -1013,12 +1014,20 @@ async function submitExternalSubModal() {
   }
 }
 
-async function deleteExternalSubscription(sub: ExternalSubscription) {
-  if (!confirm(`确认删除外部订阅「${sub.name}」吗？`)) return
+function openDeleteExternalSubModal(sub: ExternalSubscription) {
+  externalSubDeleteTarget.value = sub
+  modal.value = 'external-sub-delete'
+}
+
+async function confirmDeleteExternalSub() {
+  if (!externalSubDeleteTarget.value) return
+  const sub = externalSubDeleteTarget.value
   busy.value = true
   try {
     await api.deleteExternalSubscription(sub.id)
     notify('外部订阅已删除')
+    modal.value = null
+    externalSubDeleteTarget.value = null
     await loadExternalSubscriptions()
     await refreshFleetStatus()
   } catch (err) {
@@ -3492,7 +3501,7 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                     {{ sub.enabled ? '暂停混流' : '启用混流' }}
                   </button>
                   <button type="button" class="secondary mini-action" @click="openEditExternalSubModal(sub)">编辑</button>
-                  <button type="button" class="danger-mini-btn" @click="deleteExternalSubscription(sub)">删除</button>
+                  <button type="button" class="danger-mini-btn" @click="openDeleteExternalSubModal(sub)">删除</button>
                 </div>
               </div>
 
@@ -5717,6 +5726,47 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <button type="button" class="primary wide" @click="modal = null">完成</button>
       </div>
     </section>
+    <!-- External Subscription Delete Confirmation Modal -->
+    <div
+      v-else-if="modal === 'external-sub-delete' && externalSubDeleteTarget"
+      class="modal-card compact danger-modal external-sub-delete-modal"
+      role="dialog"
+      aria-modal="true"
+      @keydown.esc.prevent="modal = null"
+    >
+      <button type="button" class="modal-close" :disabled="busy" @click="modal = null">×</button>
+      <span class="modal-seal red">删</span>
+      <p class="eyebrow">REMOVE EXTERNAL SUBSCRIPTION</p>
+      <h2>删除外部订阅？</h2>
+      <p>将彻底移除外部订阅「<b>{{ externalSubDeleteTarget.name }}</b>」及其所有节点数据。混流订阅将不再包含来自此订阅的节点。</p>
+
+      <div class="external-sub-delete-target">
+        <div class="delete-target-row">
+          <small>订阅名称</small>
+          <b>{{ externalSubDeleteTarget.name }}</b>
+        </div>
+        <div class="delete-target-row">
+          <small>解析节点</small>
+          <span>{{ externalSubNodes(externalSubDeleteTarget).length }} 个节点</span>
+        </div>
+        <div v-if="externalSubDeleteTarget.url && externalSubDeleteTarget.url !== 'manual'" class="delete-target-row">
+          <small>订阅地址</small>
+          <code>{{ externalSubDeleteTarget.url }}</code>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" :disabled="busy" @click="modal = null">保留订阅</button>
+        <button
+          type="button"
+          class="danger-button"
+          :disabled="busy"
+          @click="confirmDeleteExternalSub"
+        >
+          {{ busy ? '正在删除…' : '确认删除' }}
+        </button>
+      </div>
+    </div>
     <form v-else class="modal-card compact danger-modal" @submit.prevent="deleteNode"><span class="modal-seal red">删</span><p class="eyebrow">DESTRUCTIVE ACTION</p><h2>删除 {{ selectedNode?.name }}？</h2><p>{{ selectedNode?.sharedGroup && selectedNode?.ownership === 'managed' ? '系统将先创建带 SHA-256 的配置快照，只移除此设备的独立入站并重启共享进程；最后一台设备才会删除组服务。' : '系统将先创建带 SHA-256 的配置快照，再停止并删除节点服务。' }}请输入完整节点名称确认。</p><label>节点名称<input v-model="deleteConfirm" autocomplete="off" required></label><div class="modal-actions"><button type="button" class="secondary" @click="modal = null">取消</button><button class="danger-button" :disabled="busy || deleteConfirm !== selectedNode?.name">确认删除</button></div></form>
   </div>
   <transition name="toast">

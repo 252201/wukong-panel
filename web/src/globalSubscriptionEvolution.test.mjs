@@ -72,6 +72,13 @@ test('App.vue renders external subscriptions card, sync actions, and node select
   // External Sub Modal
   assert.ok(vueSource.includes("modal === 'external-sub'"), 'App.vue must render external-sub modal')
   assert.ok(vueSource.includes('submitExternalSubModal'), 'App.vue must define submitExternalSubModal')
+
+  // External Sub Delete Confirmation Modal (no browser native confirm popups)
+  assert.ok(vueSource.includes('externalSubDeleteTarget'), 'App.vue must declare externalSubDeleteTarget')
+  assert.ok(vueSource.includes('openDeleteExternalSubModal'), 'App.vue must declare openDeleteExternalSubModal')
+  assert.ok(vueSource.includes('confirmDeleteExternalSub'), 'App.vue must declare confirmDeleteExternalSub')
+  assert.ok(vueSource.includes("modal === 'external-sub-delete'"), 'App.vue must render external-sub-delete modal')
+  assert.ok(!vueSource.includes("confirm(`确认删除外部订阅"), 'App.vue must not use browser native confirm for deletion')
 })
 
 test('styles.css contains styling for multi-format switcher, external subs, and QR code modal', () => {
@@ -86,6 +93,8 @@ test('styles.css contains styling for multi-format switcher, external subs, and 
   assert.ok(cssSource.includes('.external-raw-textarea'), 'styles.css must style .external-raw-textarea')
   assert.ok(cssSource.includes('.external-quota-bar'), 'styles.css must style .external-quota-bar')
   assert.ok(cssSource.includes('.external-node-chip'), 'styles.css must style .external-node-chip')
+  assert.ok(cssSource.includes('.external-sub-delete-modal'), 'styles.css must style .external-sub-delete-modal')
+  assert.ok(cssSource.includes('.external-sub-delete-target'), 'styles.css must style .external-sub-delete-target')
   assert.ok(cssSource.includes('.external-nodes-filter-input'), 'styles.css must style .external-nodes-filter-input')
   assert.ok(cssSource.includes('.subscription-qr-modal'), 'styles.css must style .subscription-qr-modal')
 
