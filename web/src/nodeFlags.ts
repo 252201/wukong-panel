@@ -1,20 +1,25 @@
 /**
- * Node Flag Emoji Detector and Formatter for External Subscriptions
+ * Node Flag Emoji Detector, Region Grouping, and Formatter for External Subscriptions
  *
  * Automatically inspects node names (such as "Hong Kong | 01", "Tokyo 02", "台湾 03")
- * and prepends corresponding national / regional flag emojis if absent.
+ * and prepends corresponding national / regional flag emojis if absent, groups nodes
+ * by geographical region, and cleans common advertising noise.
  */
 
 // Regex matching any existing regional indicator flag emoji (U+1F1E6 to U+1F1FF pair)
 export const FLAG_EMOJI_REGEX = /[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/
 
-interface RegionRule {
+export interface RegionRule {
+  code: string
+  name: string
   flag: string
   patterns: (string | RegExp)[]
 }
 
-const REGION_RULES: RegionRule[] = [
+export const REGION_RULES: RegionRule[] = [
   {
+    code: 'HK',
+    name: '香港',
     flag: '🇭🇰',
     patterns: [
       /香港/i,
@@ -28,6 +33,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'TW',
+    name: '台湾',
     flag: '🇹🇼',
     patterns: [
       /台湾/i,
@@ -43,6 +50,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'JP',
+    name: '日本',
     flag: '🇯🇵',
     patterns: [
       /日本/i,
@@ -60,6 +69,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'SG',
+    name: '新加坡',
     flag: '🇸🇬',
     patterns: [
       /新加坡/i,
@@ -70,6 +81,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'US',
+    name: '美国',
     flag: '🇺🇸',
     patterns: [
       /美国/i,
@@ -102,6 +115,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'KR',
+    name: '韩国',
     flag: '🇰🇷',
     patterns: [
       /韩国/i,
@@ -115,6 +130,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'GB',
+    name: '英国',
     flag: '🇬🇧',
     patterns: [
       /英国/i,
@@ -129,6 +146,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'DE',
+    name: '德国',
     flag: '🇩🇪',
     patterns: [
       /德国/i,
@@ -145,6 +164,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'FR',
+    name: '法国',
     flag: '🇫🇷',
     patterns: [
       /法国/i,
@@ -157,6 +178,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'CA',
+    name: '加拿大',
     flag: '🇨🇦',
     patterns: [
       /加拿大/i,
@@ -171,6 +194,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'AU',
+    name: '澳大利亚',
     flag: '🇦🇺',
     patterns: [
       /澳大利亚/i,
@@ -186,6 +211,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'RU',
+    name: '俄罗斯',
     flag: '🇷🇺',
     patterns: [
       /俄罗斯/i,
@@ -200,6 +227,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'NL',
+    name: '荷兰',
     flag: '🇳🇱',
     patterns: [
       /荷兰/i,
@@ -212,6 +241,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'TR',
+    name: '土耳其',
     flag: '🇹🇷',
     patterns: [
       /土耳其/i,
@@ -223,6 +254,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'IN',
+    name: '印度',
     flag: '🇮🇳',
     patterns: [
       /印度/i,
@@ -235,6 +268,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'MY',
+    name: '马来西亚',
     flag: '🇲🇾',
     patterns: [
       /马来西亚/i,
@@ -247,6 +282,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'TH',
+    name: '泰国',
     flag: '🇹🇭',
     patterns: [
       /泰国/i,
@@ -258,6 +295,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'PH',
+    name: '菲律宾',
     flag: '🇵🇭',
     patterns: [
       /菲律宾/i,
@@ -269,6 +308,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'VN',
+    name: '越南',
     flag: '🇻🇳',
     patterns: [
       /越南/i,
@@ -281,6 +322,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'ID',
+    name: '印尼',
     flag: '🇮🇩',
     patterns: [
       /印尼/i,
@@ -292,6 +335,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'AE',
+    name: '阿联酋',
     flag: '🇦🇪',
     patterns: [
       /阿联酋/i,
@@ -302,6 +347,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'CH',
+    name: '瑞士',
     flag: '🇨🇭',
     patterns: [
       /瑞士/i,
@@ -314,6 +361,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'SE',
+    name: '瑞典',
     flag: '🇸🇪',
     patterns: [
       /瑞典/i,
@@ -324,6 +373,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'NO',
+    name: '挪威',
     flag: '🇳🇴',
     patterns: [
       /挪威/i,
@@ -334,6 +385,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'FI',
+    name: '芬兰',
     flag: '🇫🇮',
     patterns: [
       /芬兰/i,
@@ -344,6 +397,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'ES',
+    name: '西班牙',
     flag: '🇪🇸',
     patterns: [
       /西班牙/i,
@@ -356,6 +411,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'IT',
+    name: '意大利',
     flag: '🇮🇹',
     patterns: [
       /意大利/i,
@@ -368,6 +425,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'BR',
+    name: '巴西',
     flag: '🇧🇷',
     patterns: [
       /巴西/i,
@@ -378,6 +437,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'AR',
+    name: '阿根廷',
     flag: '🇦🇷',
     patterns: [
       /阿根廷/i,
@@ -388,6 +449,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'ZA',
+    name: '南非',
     flag: '🇿🇦',
     patterns: [
       /南非/i,
@@ -398,6 +461,8 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
   {
+    code: 'CN',
+    name: '中国',
     flag: '🇨🇳',
     patterns: [
       /中国/i,
@@ -416,6 +481,63 @@ const REGION_RULES: RegionRule[] = [
     ],
   },
 ]
+
+export interface RegionInfo {
+  code: string
+  name: string
+  flag: string
+}
+
+export interface RegionSummary {
+  code: string
+  name: string
+  flag: string
+  totalCount: number
+  nodeIds: string[]
+}
+
+/**
+ * Strips advertisements, promotion links, speed test restrictions, and remaining traffic noise
+ * commonly embedded in commercial airport node names.
+ */
+export function sanitizeNodeName(raw: string): string {
+  if (!raw) return ''
+  let s = raw.trim()
+
+  // 1. Remove bracketed rates like [1.5x], (2.0倍率), [1.0]
+  s = s.replace(/\[\s*[0-9.]+\s*(?:x|倍率?)\s*\]/gi, '')
+       .replace(/\(\s*[0-9.]+\s*(?:x|倍率?)\s*\)/gi, '')
+
+  const adKeywords = /剩余流量|到期时间|官网|防失联|发布页|最新地址|最新网址|客服|TG群|交流群|TG频道|禁止BT|请勿测速|打卡返利|永久域名|http:\/\/|https:\/\/|www\.|t\.me/i
+
+  // 2. Split into segments by pipe
+  if (/[|｜]/.test(s)) {
+    const parts = s.split(/[|｜]/).map(p => p.trim()).filter(Boolean)
+    const cleanParts = parts.filter(p => !adKeywords.test(p))
+    if (cleanParts.length > 0) {
+      s = cleanParts.join(' | ')
+    }
+  }
+
+  // 3. Clean ' - ' separated trailing ad parts
+  if (s.includes(' - ')) {
+    const parts = s.split(' - ').map(p => p.trim()).filter(Boolean)
+    const cleanParts = parts.filter(p => !adKeywords.test(p))
+    if (cleanParts.length > 0) {
+      s = cleanParts.join(' - ')
+    }
+  }
+
+  // 4. Fallback cleanup for remaining inline keywords
+  s = s.replace(/https?:\/\/[^\s|｜)\]]+/gi, '')
+       .replace(/\bwww\.[a-z0-9-]+\.[a-z]+(?::[0-9]+)?(?:\/[^\s|｜)\]]*)?/gi, '')
+       .replace(/(?:剩余流量|到期时间|官网|防失联|发布页|最新地址|最新网址|客服|TG群|交流群|TG频道|禁止BT|请勿测速|打卡返利|永久域名)[^|｜\n]*/gi, '')
+       .replace(/^[|｜\s\-_/]+/, '')
+       .replace(/[|｜\s\-_/]+$/, '')
+       .trim()
+
+  return s || raw.trim()
+}
 
 /**
  * Matches a regional flag emoji based on keywords inside the node name.
@@ -438,12 +560,97 @@ export function matchCountryFlag(name: string): string {
 }
 
 /**
- * Returns formatted node name with prepended country flag emoji if matched.
+ * Detects the geographical region info of a node by checking existing emoji flags or keyword patterns.
+ */
+export function detectNodeRegion(name: string): RegionInfo {
+  if (!name) {
+    return { code: 'OTHER', name: '其他', flag: '🌐' }
+  }
+
+  // 1. If name contains a known region flag
+  for (const rule of REGION_RULES) {
+    if (name.includes(rule.flag)) {
+      return { code: rule.code, name: rule.name, flag: rule.flag }
+    }
+  }
+
+  // 2. Check patterns against sanitized name
+  const clean = sanitizeNodeName(name)
+  for (const rule of REGION_RULES) {
+    for (const pattern of rule.patterns) {
+      if (typeof pattern === 'string') {
+        if (clean.includes(pattern) || name.includes(pattern)) {
+          return { code: rule.code, name: rule.name, flag: rule.flag }
+        }
+      } else if (pattern.test(clean) || pattern.test(name)) {
+        return { code: rule.code, name: rule.name, flag: rule.flag }
+      }
+    }
+  }
+
+  return { code: 'OTHER', name: '其他', flag: '🌐' }
+}
+
+/**
+ * Extracts and aggregates regions from a list of external nodes.
+ */
+export function extractSubscriptionRegions(nodes: Array<{ id: string; name?: string }>): RegionSummary[] {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return []
+  }
+
+  const regionMap = new Map<string, { code: string; name: string; flag: string; nodeIds: string[] }>()
+
+  for (const node of nodes) {
+    const region = detectNodeRegion(node.name || '')
+    let group = regionMap.get(region.code)
+    if (!group) {
+      group = { code: region.code, name: region.name, flag: region.flag, nodeIds: [] }
+      regionMap.set(region.code, group)
+    }
+    group.nodeIds.push(node.id)
+  }
+
+  const result: RegionSummary[] = []
+  // Keep order defined in REGION_RULES
+  for (const rule of REGION_RULES) {
+    const group = regionMap.get(rule.code)
+    if (group && group.nodeIds.length > 0) {
+      result.push({
+        code: group.code,
+        name: group.name,
+        flag: group.flag,
+        totalCount: group.nodeIds.length,
+        nodeIds: group.nodeIds,
+      })
+      regionMap.delete(rule.code)
+    }
+  }
+
+  // Any remaining regions (like OTHER)
+  for (const group of regionMap.values()) {
+    if (group.nodeIds.length > 0) {
+      result.push({
+        code: group.code,
+        name: group.name,
+        flag: group.flag,
+        totalCount: group.nodeIds.length,
+        nodeIds: group.nodeIds,
+      })
+    }
+  }
+
+  return result
+}
+
+/**
+ * Returns formatted node name with sanitized advertisements and prepended country flag emoji if matched.
  */
 export function formatNodeNameWithFlag(name: string): string {
   if (!name) return ''
-  const flag = matchCountryFlag(name)
-  return flag ? `${flag} ${name}` : name
+  const clean = sanitizeNodeName(name)
+  const flag = matchCountryFlag(clean)
+  return flag ? `${flag} ${clean}` : clean
 }
 
 /**
@@ -476,4 +683,3 @@ export function formatExternalProtocolBadge(protocol?: string): string {
   if (p === 'vless-ws-tunnel') return 'VLESS · CF'
   return p.toUpperCase()
 }
-

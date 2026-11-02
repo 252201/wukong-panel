@@ -15,7 +15,14 @@ import { applyLocale, createDocumentLocalizer, readLocalePreference, refreshDocu
 import { sortProcesses, type ProcessSortKey } from './processSort'
 import { historySlotsFor } from './networkHistory'
 import { countryFlagURL } from './countryFlags'
-import { formatNodeNameWithFlag, normalizeProtocolClass, formatExternalProtocolBadge } from './nodeFlags'
+import {
+  formatNodeNameWithFlag,
+  normalizeProtocolClass,
+  formatExternalProtocolBadge,
+  extractSubscriptionRegions,
+  detectNodeRegion,
+  type RegionSummary,
+} from './nodeFlags'
 import {
   fleetHostRateHint,
   networkGroupFrom,
@@ -1067,6 +1074,29 @@ async function toggleExternalSubEnabled(sub: ExternalSubscription, enabled: bool
 }
 
 const externalNodeFilter = ref<Record<string, string>>({})
+const externalNodeRegionFilter = ref<Record<string, string>>({})
+
+function subscriptionRegions(sub?: ExternalSubscription | null): RegionSummary[] {
+  return extractSubscriptionRegions(externalSubNodes(sub))
+}
+
+function regionSelectedCount(sub: ExternalSubscription, region: RegionSummary): number {
+  const selectedSet = new Set(externalSubSelectedIds(sub))
+  return region.nodeIds.filter(id => selectedSet.has(id)).length
+}
+
+function isExternalFiltered(sub?: ExternalSubscription | null): boolean {
+  if (!sub) return false
+  return Boolean((externalNodeFilter.value[sub.id] || '').trim() || externalNodeRegionFilter.value[sub.id])
+}
+
+function setExternalNodeRegionFilter(subId: string, regionCode: string) {
+  if (externalNodeRegionFilter.value[subId] === regionCode) {
+    externalNodeRegionFilter.value[subId] = ''
+  } else {
+    externalNodeRegionFilter.value[subId] = regionCode
+  }
+}
 
 function externalSubNodes(sub?: ExternalSubscription | null): NodeItem[] {
   return Array.isArray(sub?.nodes) ? sub.nodes : []
@@ -1076,13 +1106,22 @@ function filteredExternalNodes(sub?: ExternalSubscription | null): NodeItem[] {
   const all = externalSubNodes(sub)
   if (!sub) return all
   const q = (externalNodeFilter.value[sub.id] || '').trim().toLowerCase()
-  if (!q) return all
+  const r = externalNodeRegionFilter.value[sub.id] || ''
+
   return all.filter(n => {
-    const formatted = formatExternalNodeName(n.name).toLowerCase()
-    return n.name.toLowerCase().includes(q) ||
-      formatted.includes(q) ||
-      n.protocol.toLowerCase().includes(q) ||
-      n.server.toLowerCase().includes(q)
+    if (r) {
+      const reg = detectNodeRegion(n.name || '')
+      if (reg.code !== r) return false
+    }
+    if (q) {
+      const formatted = formatExternalNodeName(n.name).toLowerCase()
+      const matches = n.name.toLowerCase().includes(q) ||
+        formatted.includes(q) ||
+        n.protocol.toLowerCase().includes(q) ||
+        n.server.toLowerCase().includes(q)
+      if (!matches) return false
+    }
+    return true
   })
 }
 
@@ -1231,13 +1270,7 @@ function formatExternalExpiry(expiresAt?: string) {
   return Number.isNaN(date.getTime()) ? trimmed : date.toLocaleDateString(language.value)
 }
 
-async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
-  let selected = [...externalSubSelectedIds(sub)]
-  if (checked) {
-    if (!selected.includes(nodeId)) selected.push(nodeId)
-  } else {
-    selected = selected.filter(id => id !== nodeId)
-  }
+async function saveExternalSubSelectedNodeIds(sub: ExternalSubscription, selected: string[]) {
   try {
     await api.updateExternalSubscription(sub.id, { selectedNodeIds: selected })
     sub.selectedNodeIds = selected
@@ -1246,14 +1279,50 @@ async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: str
   }
 }
 
-async function toggleAllExternalNodes(sub: ExternalSubscription, selectAll: boolean) {
-  const selected = selectAll ? externalSubNodes(sub).map(n => n.id) : []
-  try {
-    await api.updateExternalSubscription(sub.id, { selectedNodeIds: selected })
-    sub.selectedNodeIds = selected
-  } catch (err) {
-    notify(err instanceof Error ? err.message : '选择节点失败')
+async function toggleExternalNodeSelected(sub: ExternalSubscription, nodeId: string, checked: boolean) {
+  let selected = [...externalSubSelectedIds(sub)]
+  if (checked) {
+    if (!selected.includes(nodeId)) selected.push(nodeId)
+  } else {
+    selected = selected.filter(id => id !== nodeId)
   }
+  await saveExternalSubSelectedNodeIds(sub, selected)
+}
+
+async function toggleRegionExternalNodes(sub: ExternalSubscription, region: RegionSummary) {
+  const current = new Set(externalSubSelectedIds(sub))
+  const targetIds = region.nodeIds
+  const allSelected = targetIds.length > 0 && targetIds.every(id => current.has(id))
+
+  if (allSelected) {
+    for (const id of targetIds) {
+      current.delete(id)
+    }
+  } else {
+    for (const id of targetIds) {
+      current.add(id)
+    }
+  }
+  await saveExternalSubSelectedNodeIds(sub, Array.from(current))
+}
+
+async function toggleAllExternalNodes(sub: ExternalSubscription, selectAll: boolean) {
+  const filtered = filteredExternalNodes(sub)
+  const isFiltered = Boolean((externalNodeFilter.value[sub.id] || '').trim() || externalNodeRegionFilter.value[sub.id])
+
+  let selected: string[]
+  if (isFiltered) {
+    const current = new Set(externalSubSelectedIds(sub))
+    for (const n of filtered) {
+      if (selectAll) current.add(n.id)
+      else current.delete(n.id)
+    }
+    selected = Array.from(current)
+  } else {
+    selected = selectAll ? externalSubNodes(sub).map(n => n.id) : []
+  }
+
+  await saveExternalSubSelectedNodeIds(sub, selected)
 }
 
 async function probeFleetSubscription() {
@@ -3655,10 +3724,54 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                         @click="externalNodeFilter[sub.id] = ''"
                       >×</button>
                     </div>
-                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">全选</button>
-                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">全不选</button>
+                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, true)">
+                      {{ isExternalFiltered(sub) ? `全选当前 (${filteredExternalNodes(sub).length})` : '全选' }}
+                    </button>
+                    <button type="button" class="text-button" @click="toggleAllExternalNodes(sub, false)">
+                      {{ isExternalFiltered(sub) ? '全不选当前' : '全不选' }}
+                    </button>
                   </div>
                 </div>
+
+                <!-- Region Quick Batch Selection Chips Bar -->
+                <div v-if="subscriptionRegions(sub).length > 1" class="external-region-chips">
+                  <button
+                    type="button"
+                    class="region-filter-chip"
+                    :class="{ active: !externalNodeRegionFilter[sub.id] }"
+                    @click="externalNodeRegionFilter[sub.id] = ''"
+                  >
+                    全部 <span class="region-chip-count">{{ externalSubSelectedIds(sub).length }}/{{ externalSubNodes(sub).length }}</span>
+                  </button>
+                  <div
+                    v-for="region in subscriptionRegions(sub)"
+                    :key="region.code"
+                    class="region-filter-chip"
+                    :class="{
+                      active: externalNodeRegionFilter[sub.id] === region.code,
+                      'all-selected': regionSelectedCount(sub, region) === region.totalCount && region.totalCount > 0,
+                      'has-selected': regionSelectedCount(sub, region) > 0 && regionSelectedCount(sub, region) < region.totalCount
+                    }"
+                  >
+                    <span
+                      class="region-chip-label"
+                      :title="`仅查看 ${region.name} 节点`"
+                      @click="setExternalNodeRegionFilter(sub.id, region.code)"
+                    >
+                      {{ region.flag }} {{ region.name }}
+                      <span class="region-chip-count">{{ regionSelectedCount(sub, region) }}/{{ region.totalCount }}</span>
+                    </span>
+                    <button
+                      type="button"
+                      class="region-chip-quick-toggle"
+                      :title="regionSelectedCount(sub, region) === region.totalCount ? `取消全选 ${region.name}` : `一键全选 ${region.name}`"
+                      @click.stop="toggleRegionExternalNodes(sub, region)"
+                    >
+                      {{ regionSelectedCount(sub, region) === region.totalCount ? '✓' : '+' }}
+                    </button>
+                  </div>
+                </div>
+
                 <div v-if="filteredExternalNodes(sub).length > 0" class="external-nodes-grid">
                   <label
                     v-for="node in filteredExternalNodes(sub)"
@@ -3676,7 +3789,13 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
                   </label>
                 </div>
                 <div v-else-if="externalSubNodes(sub).length > 0" class="external-nodes-empty">
-                  <small>未匹配到包含「{{ externalNodeFilter[sub.id] }}」的节点。</small>
+                  <small>{{ isExternalFiltered(sub) ? '未匹配到符合当前筛选条件的节点。' : `未匹配到包含「${externalNodeFilter[sub.id]}」的节点。` }}</small>
+                  <button
+                    v-if="isExternalFiltered(sub)"
+                    type="button"
+                    class="text-button inline-reset-filter"
+                    @click="externalNodeFilter[sub.id] = ''; externalNodeRegionFilter[sub.id] = ''"
+                  >清空所有筛选条件</button>
                 </div>
                 <div v-else class="external-nodes-empty">
                   <small>{{ sub.lastError ? `同步报错: ${sub.lastError}` : '尚无解析到的节点，请点击「立即同步」获取。' }}</small>

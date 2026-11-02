@@ -226,3 +226,30 @@ test('App.vue integrates automatic country flag formatting and Cloudflare Worker
   assert.ok(vueSource.includes('proxy-warning-text'), 'App.vue must include proxy-warning-text hint')
 })
 
+test('App.vue and styles.css support external subscription region quick filter and batch selection', () => {
+  const vueSource = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
+  const cssSource = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+
+  // App.vue script & reactive state
+  assert.ok(vueSource.includes('externalNodeRegionFilter'), 'App.vue must declare externalNodeRegionFilter state')
+  assert.ok(vueSource.includes('subscriptionRegions'), 'App.vue must declare subscriptionRegions helper')
+  assert.ok(vueSource.includes('regionSelectedCount'), 'App.vue must declare regionSelectedCount helper')
+  assert.ok(vueSource.includes('toggleRegionExternalNodes'), 'App.vue must declare toggleRegionExternalNodes method')
+  assert.ok(vueSource.includes('setExternalNodeRegionFilter'), 'App.vue must declare setExternalNodeRegionFilter method')
+  assert.ok(vueSource.includes('isExternalFiltered'), 'App.vue must declare isExternalFiltered helper')
+
+  // App.vue template
+  assert.ok(vueSource.includes('class="external-region-chips"'), 'App.vue must render external-region-chips container')
+  assert.ok(vueSource.includes('class="region-filter-chip"'), 'App.vue must render region-filter-chip items')
+  assert.ok(vueSource.includes('class="region-chip-quick-toggle"'), 'App.vue must render region-chip-quick-toggle batch button')
+  assert.ok(vueSource.includes('class="region-chip-label"'), 'App.vue must render region-chip-label')
+
+  // styles.css base and light theme
+  assert.ok(cssSource.includes('.external-region-chips'), 'styles.css must style .external-region-chips')
+  assert.ok(cssSource.includes('.region-filter-chip'), 'styles.css must style .region-filter-chip')
+  assert.ok(cssSource.includes('.region-chip-quick-toggle'), 'styles.css must style .region-chip-quick-toggle')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .external-region-chips'), 'styles.css must style light theme .external-region-chips')
+  assert.ok(cssSource.includes(':root[data-effective-theme="light"] .region-filter-chip'), 'styles.css must style light theme .region-filter-chip')
+})
+
+

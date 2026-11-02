@@ -554,3 +554,68 @@ func TestFilterDummyAnnouncementNodesAndExtractUserinfo(t *testing.T) {
 	}
 }
 
+func TestFleetSubscriptionSanitizationAndFlagInjection(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	srv := New(config.Config{DataDir: dir, BasePath: "/", SecureCookie: false}, db, subMockAgent{}, "1.0.0")
+	_ = db.SetSetting("fleet_global_token", "fleet-token-123")
+	_ = db.SetSetting("fleet_controller_enabled", "true")
+
+	extSub := model.ExternalSubscription{
+		ID:      "sub-sanitize-test",
+		Name:    "Test Airport",
+		URL:     "manual",
+		Enabled: true,
+		Nodes: []model.Node{
+			{
+				ID:       "node-hk-noisy",
+				Name:     "Hong Kong 01 | 剩余流量999G | 官网：https://airport.com",
+				Protocol: "trojan",
+				Server:   "hk1.example.com",
+				ShareURI: "trojan://password@hk1.example.com:443#Hong%20Kong%2001%20%7C%20%E5%AE%98%E7%BD%91",
+				Status:   "active",
+			},
+			{
+				ID:       "node-tw-clean",
+				Name:     "台湾 02 [1.5x] - 请勿测速",
+				Protocol: "trojan",
+				Server:   "tw1.example.com",
+				ShareURI: "trojan://password@tw1.example.com:443#Taiwan",
+				Status:   "active",
+			},
+		},
+	}
+	if err := db.SaveExternalSubscription(extSub); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/fleet-sub/fleet-token-123/clash.yaml", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fleet-sub failed with code %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	// Should have flag injected and ads removed
+	if !strings.Contains(body, "🇭🇰 Hong Kong 01") {
+		t.Errorf("expected '🇭🇰 Hong Kong 01' in Clash output, got:\n%s", body)
+	}
+	if strings.Contains(body, "剩余流量") || strings.Contains(body, "官网") {
+		t.Errorf("expected ads to be stripped, got:\n%s", body)
+	}
+	if !strings.Contains(body, "🇹🇼 台湾 02") {
+		t.Errorf("expected '🇹🇼 台湾 02' in Clash output, got:\n%s", body)
+	}
+	if strings.Contains(body, "请勿测速") || strings.Contains(body, "1.5x") {
+		t.Errorf("expected rate/test warning to be stripped, got:\n%s", body)
+	}
+}
+
+

@@ -1470,9 +1470,12 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 			if node.Status != "" && node.Status != "active" {
 				continue
 			}
+			cleanNode := node
+			cleanNode.Name = SanitizeAndFlagNodeName(node.Name)
+			cleanShareURI := UpdateShareURIName(node.ShareURI, cleanNode.Name)
 			entries = append(entries, fleetSubscriptionEntry{
-				Node: node,
-				Share: model.Share{URI: node.ShareURI},
+				Node:  cleanNode,
+				Share: model.Share{URI: cleanShareURI},
 			})
 		}
 	}

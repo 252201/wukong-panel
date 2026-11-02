@@ -4726,6 +4726,103 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 .filter-clear-btn:hover {
   color: var(--paper);
 }
+
+/* Region Quick Filter & Batch Select Chips */
+.external-region-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 10px 0;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.region-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+.region-filter-chip:hover {
+  border-color: rgba(229, 160, 48, 0.4);
+  color: var(--paper);
+}
+.region-filter-chip.active {
+  background: rgba(229, 160, 48, 0.12);
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+.region-filter-chip.has-selected:not(.active) {
+  border-color: rgba(229, 160, 48, 0.35);
+  color: var(--paper);
+}
+.region-filter-chip.all-selected:not(.active) {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+.region-filter-chip.all-selected.active {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: #22c55e;
+  color: #86efac;
+}
+.region-chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.region-chip-count {
+  font-size: 10px;
+  opacity: 0.8;
+  font-family: var(--font-mono, monospace);
+}
+.region-chip-quick-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: bold;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+.region-chip-quick-toggle:hover {
+  background: var(--gold);
+  color: #000000;
+}
+.region-filter-chip.all-selected .region-chip-quick-toggle {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+.region-filter-chip.all-selected .region-chip-quick-toggle:hover {
+  background: rgba(239, 68, 68, 0.8);
+  color: #ffffff;
+}
+.inline-reset-filter {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--gold);
+  cursor: pointer;
+}
+
 .external-nodes-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -4998,6 +5095,54 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .external-nodes-filter-input::placeholder {
   color: var(--muted) !important;
+}
+:root[data-effective-theme="light"] .external-region-chips {
+  background: #f7f9f8;
+  border-color: rgba(24, 32, 45, 0.06);
+}
+:root[data-effective-theme="light"] .region-filter-chip {
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.12);
+  color: var(--muted);
+}
+:root[data-effective-theme="light"] .region-filter-chip:hover {
+  border-color: #d97706;
+  color: var(--paper);
+}
+:root[data-effective-theme="light"] .region-filter-chip.active {
+  background: rgba(217, 119, 6, 0.1);
+  border-color: #d97706;
+  color: #b45309;
+}
+:root[data-effective-theme="light"] .region-filter-chip.has-selected:not(.active) {
+  border-color: rgba(217, 119, 6, 0.35);
+  color: var(--paper);
+}
+:root[data-effective-theme="light"] .region-filter-chip.all-selected:not(.active) {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.3);
+  color: #15803d;
+}
+:root[data-effective-theme="light"] .region-filter-chip.all-selected.active {
+  background: rgba(22, 163, 74, 0.15);
+  border-color: #16a34a;
+  color: #15803d;
+}
+:root[data-effective-theme="light"] .region-chip-quick-toggle {
+  background: rgba(24, 32, 45, 0.08);
+  color: var(--muted);
+}
+:root[data-effective-theme="light"] .region-chip-quick-toggle:hover {
+  background: #d97706;
+  color: #ffffff;
+}
+:root[data-effective-theme="light"] .region-filter-chip.all-selected .region-chip-quick-toggle {
+  background: rgba(22, 163, 74, 0.15);
+  color: #15803d;
+}
+:root[data-effective-theme="light"] .region-filter-chip.all-selected .region-chip-quick-toggle:hover {
+  background: #dc2626;
+  color: #ffffff;
 }
 :root[data-effective-theme="light"] .sub-mode-tabs {
   background: #f4f6f5;
