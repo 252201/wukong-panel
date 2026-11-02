@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
-import { api, componentUpdateAPI, getIPReputation, hostSecurityAPI, setCSRF, setFleetHost, type Candidate, type ComponentUpdateState, type EndpointStat, type ExternalSubscription, type FirewallState, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
+import { api, componentUpdateAPI, getIPReputation, hostSecurityAPI, setCSRF, setFleetHost, type Candidate, type ChainedProxy, type ComponentUpdateState, type EndpointStat, type ExternalSubscription, type FirewallState, type FleetHost, type FleetProbeNode, type FleetStatus, type FleetSubscriptionProbe, type IPReputationReport, type Job, type NetworkGroupHealth, type NodeDeploymentDefaults, type NodeItem, type NodeStatus, type Overview, type ResidentialExit, type Settings, type SingBoxMigrationPlan, type SOCKSExit, type TrafficBucket, type TrafficTimeline } from './api'
 import { startComponentUpdateJob, refreshComponentUpdateJob, pendingComponentUpdateJob } from './componentUpdateJobs'
 import { formatRelativeTime, formatFullDateTime } from './timeFormat'
 import { securityRuleMatchesProtocol } from './securityRules'
@@ -136,7 +136,7 @@ const topbarThemeTitle = computed(() => {
   }
   return isDark ? '切换为亮色主题（明净橙白）' : '切换为暗色主题（墨夜金阙）'
 })
-const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'external-sub-delete' | 'subscription-qr' | 'cf-worker-guide' | null>(null)
+const modal = ref<'create' | 'device-create' | 'edit' | 'import' | 'share' | 'delete' | 'residential-remove' | 'socks-remove' | 'fleet-host-action' | 'fleet-host-settings' | 'probe-nodes' | 'ip-reputation' | 'host-update' | 'singbox-update' | 'fleet-order' | 'diagnostic' | 'external-sub' | 'external-sub-delete' | 'subscription-qr' | 'cf-worker-guide' | 'chained-proxy' | 'delete-chained-proxy' | null>(null)
 const hostUpdateTarget = ref<FleetHost | null>(null)
 const hostUpdating = ref(false)
 const hostUpdateJob = ref<Job | null>(null)
@@ -732,6 +732,7 @@ async function refreshFleetStatus() {
     setFleetHost('local')
   }
   void loadExternalSubscriptions(true)
+  void loadChainedProxies(true)
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
@@ -1323,6 +1324,210 @@ async function toggleAllExternalNodes(sub: ExternalSubscription, selectAll: bool
   }
 
   await saveExternalSubSelectedNodeIds(sub, selected)
+}
+
+// Chained Proxies State & Methods
+interface ChainedCandidateNode {
+  id: string
+  name: string
+  group: string
+  protocol: string
+}
+
+const chainedProxies = ref<ChainedProxy[]>([])
+const loadingChainedProxies = ref(false)
+const isEditingChainedProxy = ref(false)
+const savingChainedProxy = ref(false)
+const chainedProxyDeleteTarget = ref<ChainedProxy | null>(null)
+const chainedProxyForm = ref<{
+  id?: string
+  name: string
+  entryNodeName: string
+  exitNodeName: string
+  enabled: boolean
+}>({
+  name: '',
+  entryNodeName: '',
+  exitNodeName: '',
+  enabled: true,
+})
+
+const availableChainedCandidates = computed<ChainedCandidateNode[]>(() => {
+  const list: ChainedCandidateNode[] = []
+  const seen = new Set<string>()
+
+  // 1. Local nodes
+  for (const n of (nodes.value || [])) {
+    if (n.status === 'active' && !seen.has(n.name)) {
+      seen.add(n.name)
+      list.push({
+        id: n.id,
+        name: n.name,
+        group: '自建本机节点',
+        protocol: n.protocol || 'node',
+      })
+    }
+  }
+
+  // 2. Fleet nodes
+  for (const host of (fleetHosts.value || [])) {
+    for (const n of (host.snapshot?.nodes || [])) {
+      if (n.status === 'active' && !seen.has(n.name)) {
+        seen.add(n.name)
+        list.push({
+          id: n.id,
+          name: n.name,
+          group: `${host.name} 节点`,
+          protocol: n.protocol || 'node',
+        })
+      }
+    }
+  }
+
+  // 3. External subscription nodes
+  for (const sub of (externalSubs.value || [])) {
+    if (!sub.enabled) continue
+    for (const n of (sub.nodes || [])) {
+      if ((!n.status || n.status === 'active') && !seen.has(n.name)) {
+        seen.add(n.name)
+        list.push({
+          id: n.id,
+          name: n.name,
+          group: sub.name,
+          protocol: n.protocol || 'node',
+        })
+      }
+    }
+  }
+
+  return list
+})
+
+const groupedChainedCandidates = computed(() => {
+  const localNodes: ChainedCandidateNode[] = []
+  const fleetMap = new Map<string, ChainedCandidateNode[]>()
+  const extMap = new Map<string, ChainedCandidateNode[]>()
+
+  for (const c of availableChainedCandidates.value) {
+    if (c.group === '自建本机节点') {
+      localNodes.push(c)
+    } else if (c.group.endsWith('节点')) {
+      const arr = fleetMap.get(c.group) || []
+      arr.push(c)
+      fleetMap.set(c.group, arr)
+    } else {
+      const arr = extMap.get(c.group) || []
+      arr.push(c)
+      extMap.set(c.group, arr)
+    }
+  }
+
+  const groups: { label: string; nodes: ChainedCandidateNode[] }[] = []
+  if (localNodes.length > 0) {
+    groups.push({ label: '自建本机节点', nodes: localNodes })
+  }
+  for (const [label, gNodes] of fleetMap.entries()) {
+    groups.push({ label, nodes: gNodes })
+  }
+  for (const [label, gNodes] of extMap.entries()) {
+    groups.push({ label: `外部订阅: ${label}`, nodes: gNodes })
+  }
+  return groups
+})
+
+async function loadChainedProxies(silent = false) {
+  if (!silent) loadingChainedProxies.value = true
+  try {
+    chainedProxies.value = await api.chainedProxies()
+  } catch {
+    // ignore
+  } finally {
+    loadingChainedProxies.value = false
+  }
+}
+
+function openCreateChainedProxyModal() {
+  isEditingChainedProxy.value = false
+  chainedProxyForm.value = {
+    name: '',
+    entryNodeName: '',
+    exitNodeName: '',
+    enabled: true,
+  }
+  modal.value = 'chained-proxy'
+}
+
+function openEditChainedProxyModal(cp: ChainedProxy) {
+  isEditingChainedProxy.value = true
+  chainedProxyForm.value = {
+    id: cp.id,
+    name: cp.name,
+    entryNodeName: cp.entryNodeName,
+    exitNodeName: cp.exitNodeName,
+    enabled: cp.enabled,
+  }
+  modal.value = 'chained-proxy'
+}
+
+function openDeleteChainedProxyModal(cp: ChainedProxy) {
+  chainedProxyDeleteTarget.value = cp
+  modal.value = 'delete-chained-proxy'
+}
+
+function onChainedNodeSelect() {
+  const entry = chainedProxyForm.value.entryNodeName
+  const exit = chainedProxyForm.value.exitNodeName
+  if (!entry || !exit) return
+  if (!chainedProxyForm.value.name || chainedProxyForm.value.name.startsWith('🔗 ')) {
+    chainedProxyForm.value.name = `🔗 ${entry} ➔ ${exit}`
+  }
+}
+
+async function submitChainedProxy() {
+  if (!chainedProxyForm.value.entryNodeName || !chainedProxyForm.value.exitNodeName) {
+    notify('请选择前置入口节点与落地出口节点')
+    return
+  }
+  if (chainedProxyForm.value.entryNodeName === chainedProxyForm.value.exitNodeName) {
+    notify('前置入口与落地出口不能为同一节点')
+    return
+  }
+  savingChainedProxy.value = true
+  try {
+    await api.saveChainedProxy(chainedProxyForm.value)
+    notify(isEditingChainedProxy.value ? '链式代理组合已更新' : '链式代理组合已创建')
+    modal.value = null
+    await loadChainedProxies(true)
+  } catch (err: any) {
+    notify(`保存失败: ${err?.message || err}`)
+  } finally {
+    savingChainedProxy.value = false
+  }
+}
+
+async function toggleChainedProxy(cp: ChainedProxy) {
+  const next = !cp.enabled
+  try {
+    await api.toggleChainedProxy(cp.id, next)
+    cp.enabled = next
+    notify(next ? '链式组合已启用' : '链式组合已暂停')
+  } catch (err: any) {
+    notify(`操作失败: ${err?.message || err}`)
+  }
+}
+
+async function confirmDeleteChainedProxy() {
+  const target = chainedProxyDeleteTarget.value
+  if (!target) return
+  try {
+    await api.deleteChainedProxy(target.id)
+    notify('链式代理组合已删除')
+    chainedProxyDeleteTarget.value = null
+    modal.value = null
+    await loadChainedProxies(true)
+  } catch (err: any) {
+    notify(`删除失败: ${err?.message || err}`)
+  }
 }
 
 async function probeFleetSubscription() {
@@ -3812,6 +4017,66 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
             </article>
           </div>
         </section>
+
+        <section class="panel-card chained-proxies-section">
+          <header>
+            <div>
+              <span class="section-mark purple">链</span>
+              <div>
+                <h3>按需链式代理组合</h3>
+                <p>将前置入口中转与落地出口节点串联。导出的 Clash / sing-box 订阅将自动写入 <code>dialer-proxy</code> / <code>detour</code>，实现入口加速、保护自建落地机与流媒体解锁。</p>
+              </div>
+            </div>
+            <div class="chained-proxy-header-actions">
+              <button type="button" class="primary" @click="openCreateChainedProxyModal">新建链式组合</button>
+            </div>
+          </header>
+
+          <div v-if="loadingChainedProxies && !chainedProxies.length" class="chained-proxy-loading">
+            <span>正在加载链式组合…</span>
+          </div>
+
+          <div v-else-if="!chainedProxies.length" class="chained-proxy-empty">
+            <p>暂无链式代理组合。点击上方「新建链式组合」将前置入口中转与落地出口节点串联（例如：香港 CN2 ➔ 土耳其解锁），一键解锁流媒体并隐藏落地机真实 IP。</p>
+          </div>
+
+          <div v-else class="chained-proxies-list">
+            <article v-for="cp in chainedProxies" :key="cp.id" class="chained-proxy-card">
+              <div class="chained-proxy-card-main">
+                <div class="chained-proxy-title-row">
+                  <h4>{{ cp.name }}</h4>
+                  <span class="chained-proxy-badge" :class="cp.enabled ? 'active' : 'inactive'">
+                    {{ cp.enabled ? '已启用' : '已暂停' }}
+                  </span>
+                  <span class="chained-proxy-badge tech" title="在 Clash Meta 订阅中生成 dialer-proxy">Clash: dialer-proxy</span>
+                  <span class="chained-proxy-badge tech" title="在 sing-box 订阅中生成 detour">sing-box: detour</span>
+                </div>
+                <div class="chained-proxy-route-row">
+                  <div class="route-node-pill entry" title="前置入口节点 (流量第一跳)">
+                    <span class="route-role-tag">前置入口</span>
+                    <span class="route-node-name">{{ cp.entryNodeName }}</span>
+                  </div>
+                  <span class="route-arrow">➔</span>
+                  <div class="route-node-pill exit" title="落地出口节点 (访问目标网站的最终出口)">
+                    <span class="route-role-tag">落地出口</span>
+                    <span class="route-node-name">{{ cp.exitNodeName }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="chained-proxy-card-actions">
+                <button type="button" class="secondary mini-action" @click="toggleChainedProxy(cp)">
+                  {{ cp.enabled ? '暂停' : '启用' }}
+                </button>
+                <button type="button" class="secondary mini-action" @click="openEditChainedProxyModal(cp)">
+                  编辑
+                </button>
+                <button type="button" class="danger-button mini-action" @click="openDeleteChainedProxyModal(cp)">
+                  删除
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
         <section v-if="enrollmentCommand" id="fleet-enrollment" class="panel-card enrollment-card"><div class="enrollment-col enrollment-join"><div class="enrollment-col-head"><div class="enrollment-col-title"><span class="section-mark">令</span><div><h3>{{ enrollmentMode === 'probe' ? '轻量探针一次性接入命令' : '完整面板一次性接入命令' }}</h3><p>{{ new Date(enrollmentExpiresAt).toLocaleString(language) }} 过期 · 仅能成功使用一次</p></div></div><button type="button" @click="copy(enrollmentCommand)">复制命令</button></div><code>{{ enrollmentCommand }}</code><small>{{ enrollmentMode === 'probe' ? '在远端 VPS 以 root 执行；仅安装探针，不安装面板、Nginx 或 sing-box。探针只主动连接可信 HTTPS 主控。' : '在远端 VPS 以 root 执行；将安装完整面板、Nginx 与 sing-box，Agent 主动连接可信 HTTPS 主控。' }}</small></div><div class="enrollment-col enrollment-leave"><div class="enrollment-leave-head enrollment-col-head"><div class="enrollment-leave-title enrollment-col-title"><span class="section-mark red">撤</span><div><h4>{{ enrollmentMode === 'probe' ? '卸载轻量探针' : '取消中央接入' }}</h4><p>{{ enrollmentMode === 'probe' ? '停止服务并删除探针文件；中央记录需在舰队卡片中另行移除。' : '仅移除远端与中央主控的连接，不会卸载本机面板、数据库或节点。' }}</p></div></div><button type="button" class="secondary" @click="copy(fleetLeaveCommand)">复制卸载命令</button></div><code>{{ fleetLeaveCommand }}</code><small>在远端 VPS 以 root 执行；完成后 Agent 将停止向中央汇报。</small></div></section>
       </div>
 
@@ -5973,6 +6238,74 @@ onBeforeUnmount(() => { stopLocalizing(); stopObservingTheme(); window.clearInte
         <button type="submit" class="primary" :disabled="busy">{{ busy ? '保存中…' : (externalSubDraft.id ? '保存修改' : '立即导入并同步') }}</button>
       </div>
     </form>
+
+    <form v-else-if="modal === 'chained-proxy'" class="modal-card chained-proxy-modal" role="dialog" aria-modal="true" @submit.prevent="submitChainedProxy">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal purple">链</span>
+      <p class="eyebrow">{{ isEditingChainedProxy ? 'EDIT CHAINED PROXY' : 'CREATE CHAINED PROXY' }}</p>
+      <h2>{{ isEditingChainedProxy ? '编辑链式代理组合' : '新建链式代理组合' }}</h2>
+      <p class="lead">
+        让流量经由前置入口中转转发至落地出口，在导出的 Clash / sing-box 配置中自动写入 <code>dialer-proxy</code> / <code>detour</code>。
+      </p>
+
+      <label>
+        前置入口节点 (Entry Node)
+        <select v-model="chainedProxyForm.entryNodeName" required @change="onChainedNodeSelect">
+          <option value="" disabled>-- 请选择前置入口节点 --</option>
+          <optgroup v-for="grp in groupedChainedCandidates" :key="`entry-${grp.label}`" :label="grp.label">
+            <option v-for="node in grp.nodes" :key="`entry-${node.name}`" :value="node.name">
+              {{ node.name }} ({{ node.protocol }})
+            </option>
+          </optgroup>
+        </select>
+        <small>流量第一跳访问的节点（推荐选择延迟低、国内直连速度优异的自建 VPS 或香港/新加坡优质节点）</small>
+      </label>
+
+      <label>
+        落地出口节点 (Exit Node)
+        <select v-model="chainedProxyForm.exitNodeName" required @change="onChainedNodeSelect">
+          <option value="" disabled>-- 请选择落地出口节点 --</option>
+          <optgroup v-for="grp in groupedChainedCandidates" :key="`exit-${grp.label}`" :label="grp.label">
+            <option v-for="node in grp.nodes.filter(n => n.name !== chainedProxyForm.entryNodeName)" :key="`exit-${node.name}`" :value="node.name">
+              {{ node.name }} ({{ node.protocol }})
+            </option>
+          </optgroup>
+        </select>
+        <small>最终连接目标网站的出口（如土耳其/阿根廷冷门节点、流媒体原生解锁机等）</small>
+      </label>
+
+      <label>
+        链式组合显示名称
+        <input v-model="chainedProxyForm.name" type="text" placeholder="例如：🔗 香港直连 ➔ 土耳其解锁" required />
+        <small>在 Clash / sing-box 客户端节点列表中展示的组合节点名称</small>
+      </label>
+
+      <div class="chained-proxy-preview-tip">
+        <b>💡 链式调用机制说明</b>
+        <p>1. 客户端连接该组合节点时，数据包将全程经由前置入口隧道加密转发至落地节点，目标网站仅能看到落地节点 IP。</p>
+        <p>2. 前置入口与落地出口节点在面板和订阅中仍保持独立可用，互不影响。</p>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="secondary" :disabled="savingChainedProxy" @click="modal = null">取消</button>
+        <button type="submit" class="primary" :disabled="savingChainedProxy || !chainedProxyForm.entryNodeName || !chainedProxyForm.exitNodeName">
+          {{ savingChainedProxy ? '保存中…' : (isEditingChainedProxy ? '保存修改' : '创建组合') }}
+        </button>
+      </div>
+    </form>
+
+    <div v-else-if="modal === 'delete-chained-proxy'" class="modal-card chained-proxy-delete-modal" role="dialog" aria-modal="true">
+      <button type="button" class="modal-close" @click="modal = null">×</button>
+      <span class="modal-seal red">删</span>
+      <p class="eyebrow">DELETE CHAINED PROXY</p>
+      <h2>删除链式代理组合</h2>
+      <p class="lead">确认删除链式代理组合 <b>{{ chainedProxyDeleteTarget?.name }}</b> 吗？</p>
+      <p>删除后订阅将不再生成该链式中转节点，原始的前置节点与落地节点不受任何影响。</p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" @click="modal = null">取消</button>
+        <button type="button" class="danger-button" @click="confirmDeleteChainedProxy">确认删除</button>
+      </div>
+    </div>
     <section v-else-if="modal === 'subscription-qr'" class="modal-card subscription-qr-modal" role="dialog" aria-modal="true">
       <button type="button" class="modal-close" @click="modal = null">×</button>
       <span class="modal-seal jade">码</span>

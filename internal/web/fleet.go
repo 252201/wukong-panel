@@ -1494,6 +1494,38 @@ func (s *Server) fleetSubscription(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Append active chained proxies (Entry ➔ Exit combinations)
+	chainedProxies, _ := s.store.ChainedProxies()
+	for _, cp := range chainedProxies {
+		if !cp.Enabled {
+			continue
+		}
+		var entryFound, exitFound *fleetSubscriptionEntry
+		for i := range entries {
+			if entries[i].Node.Name == cp.EntryNodeName {
+				entryFound = &entries[i]
+			}
+			if entries[i].Node.Name == cp.ExitNodeName {
+				exitFound = &entries[i]
+			}
+		}
+		if entryFound != nil && exitFound != nil {
+			chainName := strings.TrimSpace(cp.Name)
+			if chainName == "" {
+				chainName = fmt.Sprintf("🔗 %s ➔ %s", entryFound.Node.Name, exitFound.Node.Name)
+			}
+			chainedNode := exitFound.Node
+			chainedNode.ID = "chain-" + cp.ID
+			chainedNode.Name = chainName
+			cleanShareURI := UpdateShareURIName(exitFound.Share.URI, chainName)
+			subItems = append(subItems, SubscriptionNode{
+				Node:        chainedNode,
+				ShareURI:    cleanShareURI,
+				DialerProxy: entryFound.Node.Name,
+			})
+		}
+	}
+
 	format := DetectClientFormat(r)
 	content, contentType, err := RenderSubscription(format, RenderSubscriptionOptions{
 		Title:              "Wukong Fleet",

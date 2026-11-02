@@ -459,7 +459,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 
 .trend-card { margin-top: 18px; padding: 22px 24px 17px; }
 .card-head > div { display: flex; align-items: center; gap: 12px; }.card-head h3, .card-head p { margin: 0; }.card-head h3 { font-size: 15px; }.card-head p { margin-top: 3px; color: var(--muted-2); font-size: 10px; letter-spacing: .05em; }
-.section-mark { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--gold-dark); color: var(--gold); font-family: "STKaiti", serif; transform: rotate(-2deg); }.section-mark.red { color: var(--cinnabar); border-color: rgba(196,70,53,.5); }.section-mark.jade { color: var(--jade); border-color: rgba(82,182,144,.4); }
+.section-mark { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--gold-dark); color: var(--gold); font-family: "STKaiti", serif; transform: rotate(-2deg); }.section-mark.red { color: var(--cinnabar); border-color: rgba(196,70,53,.5); }.section-mark.jade { color: var(--jade); border-color: rgba(82,182,144,.4); }.section-mark.purple { color: #c084fc; border-color: rgba(168,85,247,.45); }
 .legend { display: flex; align-items: center; gap: 17px; }.legend span { color: var(--muted); font-size: 10px; }.legend i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; }.legend i.jade { background: var(--jade); }.legend strong { font: 600 15px "IBM Plex Mono", monospace; }
 .flow-head { align-items: flex-start; }.device-rack { display: flex; justify-content: flex-end; gap: 7px; min-width: 0; }.device-chip, .device-overflow, .device-silent { min-height: 29px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(82,182,144,.13); background: rgba(82,182,144,.07); color: var(--text-detail); font: 500 10px "IBM Plex Mono", monospace; }.device-chip { max-width: 190px; padding: 0 9px; }.device-chip i, .device-silent i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--jade); box-shadow: 0 0 0 4px rgba(82,182,144,.08); }.device-chip b { overflow: hidden; color: var(--paper); font: 650 11px "Noto Sans SC Variable", "PingFang SC", sans-serif; text-overflow: ellipsis; white-space: nowrap; }.device-chip em { color: var(--jade); font-style: normal; white-space: nowrap; }.device-overflow { padding: 0 10px; border-color: var(--line); background: rgba(var(--wash-rgb),.025); color: var(--muted); }.device-silent { padding: 0 10px; border-color: var(--line); background: rgba(var(--wash-rgb),.018); color: var(--muted); }.device-silent i { background: var(--muted-2); box-shadow: none; }
 .flow-metrics { display: flex; align-items: center; gap: 24px; margin: 16px 0 -2px; overflow-anchor: none; }.flow-metrics > span { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }.flow-metrics small { color: var(--muted); font-size: 10px; }.flow-metrics b { font: 600 15px "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }.flow-rx b { color: var(--jade); }.flow-tx b { color: var(--danger-text); }.flow-metrics > em { margin-left: auto; color: var(--muted-2); font-size: 9px; font-style: normal; }
@@ -5668,6 +5668,223 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: inset 3px 0 v
 }
 :root[data-effective-theme="light"] .proxy-warning-text {
   color: #d97706;
+}
+
+/* Chained Proxies Section & Card Styles */
+.modal-seal.purple {
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.45);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.chained-proxies-section {
+  margin-top: 18px;
+}
+.chained-proxy-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.chained-proxy-loading,
+.chained-proxy-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  background: rgba(var(--wash-rgb), 0.015);
+  border: 1px dashed rgba(168, 85, 247, 0.2);
+  border-radius: 6px;
+}
+.chained-proxies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chained-proxy-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 6px;
+  background: rgba(var(--wash-rgb), 0.02);
+  transition: all 0.2s ease;
+}
+.chained-proxy-card:hover {
+  border-color: rgba(168, 85, 247, 0.45);
+  background: rgba(168, 85, 247, 0.025);
+}
+.chained-proxy-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.chained-proxy-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chained-proxy-title-row h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--paper);
+}
+.chained-proxy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.chained-proxy-badge.active {
+  background: rgba(74, 172, 130, 0.15);
+  border: 1px solid rgba(74, 172, 130, 0.4);
+  color: var(--jade-text);
+}
+.chained-proxy-badge.inactive {
+  background: rgba(140, 140, 140, 0.15);
+  border: 1px solid rgba(140, 140, 140, 0.3);
+  color: var(--muted);
+}
+.chained-proxy-badge.tech {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+}
+.chained-proxy-route-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.route-node-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.route-node-pill.entry {
+  background: rgba(211, 169, 77, 0.08);
+  border: 1px solid rgba(211, 169, 77, 0.3);
+}
+.route-node-pill.exit {
+  background: rgba(82, 156, 253, 0.08);
+  border: 1px solid rgba(82, 156, 253, 0.3);
+}
+.route-role-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  opacity: 0.85;
+}
+.route-node-pill.entry .route-role-tag {
+  color: var(--gold);
+}
+.route-node-pill.exit .route-role-tag {
+  color: #70b3ff;
+}
+.route-node-name {
+  color: var(--paper);
+  font-weight: 500;
+}
+.route-arrow {
+  color: #a855f7;
+  font-size: 14px;
+  font-weight: bold;
+}
+.chained-proxy-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.chained-proxy-preview-tip {
+  margin: 14px 0 6px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: rgba(168, 85, 247, 0.06);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chained-proxy-preview-tip b {
+  font-size: 12px;
+  color: #c084fc;
+}
+.chained-proxy-preview-tip p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Light Theme Overrides */
+:root[data-effective-theme="light"] .modal-seal.purple {
+  color: #7e22ce;
+  border-color: rgba(126, 34, 206, 0.4);
+  background: rgba(126, 34, 206, 0.08);
+}
+:root[data-effective-theme="light"] .section-mark.purple {
+  color: #7e22ce;
+  border-color: rgba(126, 34, 206, 0.4);
+}
+:root[data-effective-theme="light"] .chained-proxy-loading,
+:root[data-effective-theme="light"] .chained-proxy-empty {
+  background: #fdfcf9;
+  border-color: rgba(126, 34, 206, 0.25);
+}
+:root[data-effective-theme="light"] .chained-proxy-card {
+  background: #ffffff;
+  border-color: rgba(126, 34, 206, 0.25);
+}
+:root[data-effective-theme="light"] .chained-proxy-card:hover {
+  border-color: rgba(126, 34, 206, 0.45);
+  background: rgba(126, 34, 206, 0.02);
+}
+:root[data-effective-theme="light"] .chained-proxy-badge.tech {
+  background: rgba(126, 34, 206, 0.08);
+  border-color: rgba(126, 34, 206, 0.3);
+  color: #7e22ce;
+}
+:root[data-effective-theme="light"] .route-node-pill.entry {
+  background: #fdfcf9;
+  border-color: rgba(211, 169, 77, 0.35);
+}
+:root[data-effective-theme="light"] .route-node-pill.exit {
+  background: #f8fafc;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+:root[data-effective-theme="light"] .route-node-pill.exit .route-role-tag {
+  color: #1d4ed8;
+}
+:root[data-effective-theme="light"] .route-node-name {
+  color: var(--paper);
+}
+:root[data-effective-theme="light"] .route-arrow {
+  color: #7e22ce;
+}
+:root[data-effective-theme="light"] .chained-proxy-preview-tip {
+  background: #faf5ff;
+  border-color: rgba(126, 34, 206, 0.25);
+}
+:root[data-effective-theme="light"] .chained-proxy-preview-tip b {
+  color: #7e22ce;
+}
+:root[data-effective-theme="light"] .chained-proxy-modal select {
+  color: var(--paper);
+  background: #ffffff;
+  border-color: rgba(24, 32, 45, 0.2);
 }
 
 

@@ -205,6 +205,154 @@ var regionRules = []regionPattern{
 	},
 }
 
+var regionMetaMap = map[string]struct {
+	Code string
+	Name string
+}{
+	"🇭🇰": {Code: "HK", Name: "香港"},
+	"🇹🇼": {Code: "TW", Name: "台湾"},
+	"🇯🇵": {Code: "JP", Name: "日本"},
+	"🇸🇬": {Code: "SG", Name: "新加坡"},
+	"🇺🇸": {Code: "US", Name: "美国"},
+	"🇰🇷": {Code: "KR", Name: "韩国"},
+	"🇬🇧": {Code: "GB", Name: "英国"},
+	"🇩🇪": {Code: "DE", Name: "德国"},
+	"🇫🇷": {Code: "FR", Name: "法国"},
+	"🇳🇱": {Code: "NL", Name: "荷兰"},
+	"🇷🇺": {Code: "RU", Name: "俄罗斯"},
+	"🇮🇳": {Code: "IN", Name: "印度"},
+	"🇦🇺": {Code: "AU", Name: "澳大利亚"},
+	"🇨🇦": {Code: "CA", Name: "加拿大"},
+	"🇹🇷": {Code: "TR", Name: "土耳其"},
+	"🇲🇾": {Code: "MY", Name: "马来西亚"},
+	"🇹🇭": {Code: "TH", Name: "泰国"},
+	"🇵🇭": {Code: "PH", Name: "菲律宾"},
+	"🇻🇳": {Code: "VN", Name: "越南"},
+	"🇮🇩": {Code: "ID", Name: "印尼"},
+	"🇦🇪": {Code: "AE", Name: "阿联酋"},
+	"🇨🇭": {Code: "CH", Name: "瑞士"},
+	"🇸🇪": {Code: "SE", Name: "瑞典"},
+	"🇳🇴": {Code: "NO", Name: "挪威"},
+	"🇫🇮": {Code: "FI", Name: "芬兰"},
+	"🇪🇸": {Code: "ES", Name: "西班牙"},
+	"🇮🇹": {Code: "IT", Name: "意大利"},
+	"🇧🇷": {Code: "BR", Name: "巴西"},
+	"🇦🇷": {Code: "AR", Name: "阿根廷"},
+	"🇿🇦": {Code: "ZA", Name: "南非"},
+	"🇨🇳": {Code: "CN", Name: "中国"},
+}
+
+var canonicalRegionOrder = []string{
+	"🇭🇰", "🇹🇼", "🇯🇵", "🇸🇬", "🇺🇸", "🇰🇷", "🇬🇧", "🇩🇪", "🇫🇷", "🇳🇱",
+	"🇷🇺", "🇮🇳", "🇦🇺", "🇨🇦", "🇹🇷", "🇲🇾", "🇹🇭", "🇵🇭", "🇻🇳", "🇮🇩",
+	"🇦🇪", "🇨🇭", "🇸🇪", "🇳🇴", "🇫🇮", "🇪🇸", "🇮🇹", "🇧🇷", "🇦🇷", "🇿🇦",
+	"🇨🇳",
+}
+
+// RegionMeta describes detected country / regional identity for node grouping.
+type RegionMeta struct {
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Flag      string `json:"flag"`
+	GroupName string `json:"groupName"`
+	AutoName  string `json:"autoName"`
+}
+
+// RegionalProxyGroup represents a grouped set of proxies belonging to a country / region.
+type RegionalProxyGroup struct {
+	Flag      string   `json:"flag"`
+	Name      string   `json:"name"`
+	GroupName string   `json:"groupName"`
+	AutoName  string   `json:"autoName"`
+	Proxies   []string `json:"proxies"`
+}
+
+// DetectNodeRegion determines the regional identity of a node name.
+// For chained nodes ("前置 ➔ 落地"), the region of the exit node is prioritized.
+func DetectNodeRegion(name string) RegionMeta {
+	target := name
+	if idx := strings.LastIndex(target, "➔"); idx >= 0 {
+		target = strings.TrimSpace(target[idx+len("➔"):])
+	} else if idx := strings.LastIndex(target, "->"); idx >= 0 {
+		target = strings.TrimSpace(target[idx+len("->"):])
+	}
+
+	// 1. Check if target contains flag emoji
+	if flags := flagEmojiRegex.FindAllString(target, -1); len(flags) > 0 {
+		flag := flags[len(flags)-1]
+		if meta, ok := regionMetaMap[flag]; ok {
+			return RegionMeta{
+				Code:      meta.Code,
+				Name:      meta.Name,
+				Flag:      flag,
+				GroupName: flag + " " + meta.Name + "节点",
+				AutoName:  "♻️ " + meta.Name + "自动",
+			}
+		}
+	}
+
+	// 2. Check regionRules patterns
+	for _, rule := range regionRules {
+		for _, pattern := range rule.Patterns {
+			if pattern.MatchString(target) {
+				if meta, ok := regionMetaMap[rule.Flag]; ok {
+					return RegionMeta{
+						Code:      meta.Code,
+						Name:      meta.Name,
+						Flag:      rule.Flag,
+						GroupName: rule.Flag + " " + meta.Name + "节点",
+						AutoName:  "♻️ " + meta.Name + "自动",
+					}
+				}
+			}
+		}
+	}
+
+	return RegionMeta{
+		Code:      "OTHER",
+		Name:      "其他地区",
+		Flag:      "🌐",
+		GroupName: "🌐 其他节点",
+		AutoName:  "♻️ 其他自动",
+	}
+}
+
+// GroupProxiesByRegion partitions proxy names into ordered regional groups.
+func GroupProxiesByRegion(proxyNames []string) []RegionalProxyGroup {
+	proxiesByFlag := make(map[string][]string)
+	for _, name := range proxyNames {
+		region := DetectNodeRegion(name)
+		proxiesByFlag[region.Flag] = append(proxiesByFlag[region.Flag], name)
+	}
+
+	var groups []RegionalProxyGroup
+	for _, flag := range canonicalRegionOrder {
+		proxies, ok := proxiesByFlag[flag]
+		if ok && len(proxies) > 0 {
+			meta := regionMetaMap[flag]
+			groups = append(groups, RegionalProxyGroup{
+				Flag:      flag,
+				Name:      meta.Name,
+				GroupName: flag + " " + meta.Name + "节点",
+				AutoName:  "♻️ " + meta.Name + "自动",
+				Proxies:   proxies,
+			})
+		}
+	}
+
+	if otherProxies, ok := proxiesByFlag["🌐"]; ok && len(otherProxies) > 0 {
+		groups = append(groups, RegionalProxyGroup{
+			Flag:      "🌐",
+			Name:      "其他地区",
+			GroupName: "🌐 其他节点",
+			AutoName:  "♻️ 其他自动",
+			Proxies:   otherProxies,
+		})
+	}
+
+	return groups
+}
+
 var (
 	rateBracketRegex = regexp.MustCompile(`(?i)\[\s*[0-9.]+\s*(?:x|倍率?)\s*\]|\(\s*[0-9.]+\s*(?:x|倍率?)\s*\)`)
 	adKeywordRegex   = regexp.MustCompile(`(?i)剩余流量|到期时间|官网|防失联|发布页|最新地址|最新网址|客服|TG群|交流群|TG频道|禁止BT|请勿测速|打卡返利|永久域名|http://|https://|www\.|t\.me`)

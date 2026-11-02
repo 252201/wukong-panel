@@ -197,6 +197,15 @@ CREATE TABLE IF NOT EXISTS external_subscriptions (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chained_proxies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  entry_node_name TEXT NOT NULL,
+  exit_node_name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `
 	if _, err := s.DB.Exec(schema); err != nil {
 		return err
