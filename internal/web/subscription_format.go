@@ -93,7 +93,7 @@ func RenderBase64Subscription(opts RenderSubscriptionOptions) (string, error) {
 	return base64.StdEncoding.EncodeToString([]byte(raw)), nil
 }
 
-func singboxOutbound(node model.Node, shareURI string) (map[string]any, error) {
+func singboxOutbound(node model.Node, shareURI string, dialerProxy ...string) (map[string]any, error) {
 	if strings.EqualFold(node.Protocol, "vmess") || strings.HasPrefix(strings.ToLower(shareURI), "vmess://") {
 		encoded := strings.TrimPrefix(shareURI, "vmess://")
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -151,6 +151,9 @@ func singboxOutbound(node model.Node, shareURI string) (map[string]any, error) {
 					"Host": hostHdr,
 				},
 			}
+		}
+		if len(dialerProxy) > 0 && dialerProxy[0] != "" {
+			outbound["detour"] = dialerProxy[0]
 		}
 		return outbound, nil
 	}
@@ -379,6 +382,10 @@ func singboxOutbound(node model.Node, shareURI string) (map[string]any, error) {
 		return nil, fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}
 
+	if len(dialerProxy) > 0 && dialerProxy[0] != "" {
+		outbound["detour"] = dialerProxy[0]
+	}
+
 	return outbound, nil
 }
 
@@ -406,7 +413,7 @@ func RenderSingboxSubscription(opts RenderSubscriptionOptions) (string, error) {
 	nodeTags := make([]string, 0, len(items))
 
 	for _, item := range items {
-		ob, err := singboxOutbound(item.Node, item.ShareURI)
+		ob, err := singboxOutbound(item.Node, item.ShareURI, item.DialerProxy)
 		if err != nil {
 			continue
 		}
@@ -414,7 +421,12 @@ func RenderSingboxSubscription(opts RenderSubscriptionOptions) (string, error) {
 		nodeTags = append(nodeTags, item.Node.Name)
 	}
 
+	regionalGroups := GroupProxiesByRegion(nodeTags)
+
 	selectorOutbounds := []string{"auto"}
+	for _, rg := range regionalGroups {
+		selectorOutbounds = append(selectorOutbounds, rg.GroupName)
+	}
 	selectorOutbounds = append(selectorOutbounds, nodeTags...)
 	selectorOutbounds = append(selectorOutbounds, "direct")
 
@@ -439,6 +451,26 @@ func RenderSingboxSubscription(opts RenderSubscriptionOptions) (string, error) {
 			"tolerance": 50,
 		},
 	}
+
+	for _, rg := range regionalGroups {
+		allOutbounds = append(allOutbounds,
+			map[string]any{
+				"type":      "selector",
+				"tag":       rg.GroupName,
+				"outbounds": append([]string{rg.AutoName}, rg.Proxies...),
+				"default":   rg.AutoName,
+			},
+			map[string]any{
+				"type":      "urltest",
+				"tag":       rg.AutoName,
+				"outbounds": rg.Proxies,
+				"url":       "http://cp.cloudflare.com/generate_204",
+				"interval":  "5m",
+				"tolerance": 50,
+			},
+		)
+	}
+
 	allOutbounds = append(allOutbounds, outbounds...)
 	allOutbounds = append(allOutbounds,
 		map[string]any{"type": "direct", "tag": "direct"},

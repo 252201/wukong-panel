@@ -520,6 +520,16 @@ type ExternalSubscription struct {
 	UpdatedAt         time.Time    `json:"updatedAt"`
 }
 
+type ChainedProxy struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	EntryNodeName string    `json:"entryNodeName"`
+	ExitNodeName  string    `json:"exitNodeName"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
 type progressReporterKey struct{}
 
 type ProgressReporter func(progress int, message string)

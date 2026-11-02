@@ -15,7 +15,7 @@ import (
 	"github.com/252201/wukong-panel/internal/model"
 )
 
-func clashProxyYAML(node model.Node, shareURI string) (string, error) {
+func clashProxyYAML(node model.Node, shareURI string, dialerProxy ...string) (string, error) {
 	if strings.EqualFold(node.Protocol, "vmess") || strings.HasPrefix(strings.ToLower(shareURI), "vmess://") {
 		encoded := strings.TrimPrefix(shareURI, "vmess://")
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -55,6 +55,9 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 			fmt.Fprintf(&builder, "    type: vmess\n    uuid: %q\n    alterId: 0\n    cipher: auto\n    network: ws\n    tls: %t\n    udp: true\n    servername: %q\n    ws-opts:\n      path: %q\n      headers:\n        Host: %q\n", uuid, tls, server, path, hostHdr)
 		} else {
 			fmt.Fprintf(&builder, "    type: vmess\n    uuid: %q\n    alterId: 0\n    cipher: auto\n    network: tcp\n    tls: %t\n    udp: true\n    servername: %q\n", uuid, tls, server)
+		}
+		if len(dialerProxy) > 0 && dialerProxy[0] != "" {
+			fmt.Fprintf(&builder, "    dialer-proxy: %q\n", dialerProxy[0])
 		}
 		return builder.String(), nil
 	}
@@ -177,6 +180,9 @@ func clashProxyYAML(node model.Node, shareURI string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported protocol %q", node.Protocol)
 	}
+	if len(dialerProxy) > 0 && dialerProxy[0] != "" {
+		fmt.Fprintf(&builder, "    dialer-proxy: %q\n", dialerProxy[0])
+	}
 	return builder.String(), nil
 }
 
@@ -237,8 +243,9 @@ func NormalizeSubscriptionTemplate(tpl string) SubscriptionTemplate {
 }
 
 type SubscriptionNode struct {
-	Node     model.Node
-	ShareURI string
+	Node        model.Node
+	ShareURI    string
+	DialerProxy string
 }
 
 type RenderSubscriptionOptions struct {
@@ -345,7 +352,7 @@ func RenderClashSubscription(opts RenderSubscriptionOptions) (string, error) {
 	sb.WriteString("proxies:\n")
 	proxyNames := make([]string, 0, len(items))
 	for _, item := range items {
-		entry, err := clashProxyYAML(item.Node, item.ShareURI)
+		entry, err := clashProxyYAML(item.Node, item.ShareURI, item.DialerProxy)
 		if err != nil {
 			continue
 		}
@@ -405,9 +412,14 @@ func renderMinimalGroupsAndRules(sb *strings.Builder, groupName string, proxyNam
 }
 
 func renderStandardGroupsAndRules(sb *strings.Builder, proxyNames []string) {
+	regionalGroups := GroupProxiesByRegion(proxyNames)
 	sb.WriteString("proxy-groups:\n")
 
-	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
 	}
@@ -421,11 +433,26 @@ func renderStandardGroupsAndRules(sb *strings.Builder, proxyNames []string) {
 		}
 	}
 
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "  - name: %s\n    type: select\n    proxies:\n      - %q\n", rg.GroupName, rg.AutoName)
+		for _, p := range rg.Proxies {
+			fmt.Fprintf(sb, "      - %q\n", p)
+		}
+		fmt.Fprintf(sb, "  - name: %s\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    tolerance: 50\n    proxies:\n", rg.AutoName)
+		for _, p := range rg.Proxies {
+			fmt.Fprintf(sb, "      - %q\n", p)
+		}
+	}
+
 	sb.WriteString("  - name: 🎯 全球直连\n    type: select\n    proxies:\n      - DIRECT\n")
 
 	sb.WriteString("  - name: 🛑 广告拦截\n    type: select\n    proxies:\n      - REJECT\n      - DIRECT\n")
 
-	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
 	}
@@ -439,9 +466,14 @@ func renderStandardGroupsAndRules(sb *strings.Builder, proxyNames []string) {
 }
 
 func renderSmartGroupsAndRules(sb *strings.Builder, proxyNames []string) {
+	regionalGroups := GroupProxiesByRegion(proxyNames)
 	sb.WriteString("proxy-groups:\n")
 
-	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🚀 节点选择\n    type: select\n    proxies:\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
 	}
@@ -455,21 +487,70 @@ func renderSmartGroupsAndRules(sb *strings.Builder, proxyNames []string) {
 		}
 	}
 
-	sb.WriteString("  - name: 🤖 AI 服务\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🤖 AI 服务\n    type: select\n    proxies:\n")
+	aiPrioFlags := []string{"🇺🇸", "🇯🇵", "🇸🇬", "🇹🇼"}
+	aiAdded := make(map[string]bool)
+	for _, prioFlag := range aiPrioFlags {
+		for _, rg := range regionalGroups {
+			if rg.Flag == prioFlag {
+				fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+				aiAdded[rg.GroupName] = true
+			}
+		}
+	}
+	sb.WriteString("      - 🚀 节点选择\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		if !aiAdded[rg.GroupName] {
+			fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+		}
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
 	}
 
-	sb.WriteString("  - name: 🎬 国际流媒体\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🎬 国际流媒体\n    type: select\n    proxies:\n")
+	mediaPrioFlags := []string{"🇭🇰", "🇹🇼", "🇯🇵", "🇸🇬", "🇺🇸"}
+	mediaAdded := make(map[string]bool)
+	for _, prioFlag := range mediaPrioFlags {
+		for _, rg := range regionalGroups {
+			if rg.Flag == prioFlag {
+				fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+				mediaAdded[rg.GroupName] = true
+			}
+		}
+	}
+	sb.WriteString("      - 🚀 节点选择\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		if !mediaAdded[rg.GroupName] {
+			fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+		}
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
+	}
+
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "  - name: %s\n    type: select\n    proxies:\n      - %q\n", rg.GroupName, rg.AutoName)
+		for _, p := range rg.Proxies {
+			fmt.Fprintf(sb, "      - %q\n", p)
+		}
+		fmt.Fprintf(sb, "  - name: %s\n    type: url-test\n    url: http://cp.cloudflare.com/generate_204\n    interval: 300\n    tolerance: 50\n    proxies:\n", rg.AutoName)
+		for _, p := range rg.Proxies {
+			fmt.Fprintf(sb, "      - %q\n", p)
+		}
 	}
 
 	sb.WriteString("  - name: 🎯 全球直连\n    type: select\n    proxies:\n      - DIRECT\n")
 
 	sb.WriteString("  - name: 🛑 广告拦截\n    type: select\n    proxies:\n      - REJECT\n      - DIRECT\n")
 
-	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n      - 🎯 全球直连\n")
+	sb.WriteString("  - name: 🐟 漏网之鱼\n    type: select\n    proxies:\n      - 🚀 节点选择\n      - ♻️ 自动选择\n")
+	for _, rg := range regionalGroups {
+		fmt.Fprintf(sb, "      - %q\n", rg.GroupName)
+	}
+	sb.WriteString("      - 🎯 全球直连\n")
 	for _, name := range proxyNames {
 		fmt.Fprintf(sb, "      - %q\n", name)
 	}

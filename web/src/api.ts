@@ -255,6 +255,16 @@ export interface ExternalSubscription {
 }
 export interface FleetSubscriptionProbe { ok: boolean; status: number; nodeCount: number; latencyMs: number }
 
+export interface ChainedProxy {
+  id: string
+  name: string
+  entryNodeName: string
+  exitNodeName: string
+  enabled: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
 export function normalizeExternalSubscription(sub: ExternalSubscription): ExternalSubscription {
   if (!sub) return sub
   return {
@@ -363,6 +373,10 @@ export const api = {
     const res = await request<ExternalSubscription>(`external-subscriptions/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' }, false)
     return normalizeExternalSubscription(res)
   },
+  chainedProxies: () => request<ChainedProxy[]>('fleet/chained-proxies', {}, false),
+  saveChainedProxy: (data: Partial<ChainedProxy>) => request<ChainedProxy>('fleet/chained-proxies', { method: 'POST', body: JSON.stringify(data) }, false),
+  deleteChainedProxy: (id: string) => request<{success: boolean}>(`fleet/chained-proxies/${encodeURIComponent(id)}`, { method: 'DELETE' }, false),
+  toggleChainedProxy: (id: string, enabled: boolean) => request<{success: boolean}>(`fleet/chained-proxies/${encodeURIComponent(id)}/toggle`, { method: 'POST', body: JSON.stringify({ enabled }) }, false),
 }
 
 export interface SecurityRule { addressFamilies?: string[]; id: string; action: 'allow'|'deny'; protocol: 'tcp'|'udp'|'tcp/udp'|'tcp+udp'; portFrom: number; portTo: number; source: string; zone?: string; managed: boolean; protected: boolean; adoptable: boolean; description?: string }
